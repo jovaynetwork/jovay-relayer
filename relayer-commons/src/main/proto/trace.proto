@@ -1,0 +1,490 @@
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "com.alipay.antchain.l2.trace";
+package l2.trace;
+
+/// Basic Type
+
+message Address { bytes value = 1; }
+message Hash { bytes value = 1; }
+message U256 { bytes value = 1; }
+
+/// BasicBlockTrace
+
+message BasicBlockTrace {
+  uint64 chain_id = 1;
+  BlockHeader header = 2;
+  repeated Transaction transactions = 3;
+  repeated TxGroup groups = 4;
+  StorageTrace storage_trace = 5;
+  uint64 start_l1_queue_index = 6;
+  uint64 zk_cycles = 7;
+  U256 l2_msg_root = 8;
+  L2Msgs l2_msgs = 9;
+  uint32 spec_version = 10;
+  uint32 base_gas_deduction = 11;
+  Hash l1_msg_rolling_hash = 12;
+}
+
+message L2Msgs { repeated L2Msg l2_msgs = 2; }
+
+message L2Msg {
+  Hash origin_tx_hash = 1;
+  Log l2_msg_log = 2;
+}
+
+message Log {
+  bytes address = 1;
+  repeated Hash topics = 2;
+  bytes data = 3;
+}
+
+message BlockHeader {
+  bytes parent_hash = 1;
+  bytes ommers_hash = 2;
+  bytes beneficiary = 3;
+  bytes state_root = 4;
+  bytes transactions_root = 5;
+  bytes receipts_root = 6;
+  bytes logs_bloom = 7;
+  uint64 difficulty = 8;
+  uint64 number = 9;
+  uint64 gas_limit = 10;
+  uint64 gas_used = 11;
+  uint64 timestamp = 12;
+  bytes extra_data = 13;
+  bytes mix_hash = 14;
+  uint64 nonce = 15;
+  uint64 base_fee_per_gas = 16;
+}
+
+message Transaction {
+  TransactionType type = 1;
+  oneof tx {
+    L1MsgTransaction l1_msg_tx = 2;
+    LegacyTransaction legacy_tx = 3;
+    EIP2930Transaction eip_2930_tx = 4;
+    EIP1559Transaction eip_1559_tx = 5;
+  }
+}
+
+message LegacyTransaction {
+  Hash tx_hash = 1;
+  uint64 nonce = 2;
+  uint64 gas_price = 3;
+  uint64 gas = 4;
+  bytes from = 5;
+  bytes to = 6;
+  U256 value = 7;
+  bytes data = 8;
+  uint64 v = 9;
+  U256 r = 10;
+  U256 s = 11;
+
+  bool is_create = 12;
+}
+
+message L1MsgTransaction {
+  Hash tx_hash = 1;
+  uint64 nonce = 2;
+  uint64 gas = 3;
+  bytes data = 4;
+}
+
+message AccessListItem {
+  bytes address = 1;
+  repeated U256 storage_keys = 2;
+}
+
+message AccessList {
+  repeated AccessListItem access_list_items = 1;
+}
+
+message EIP2930Transaction {
+  Hash tx_hash = 1;
+  uint64 chain_id = 2;
+  uint64 nonce = 3;
+  uint64 gas_price = 4;
+  uint64 gas = 5;
+  bytes to = 6;
+  U256 value = 7;
+  bytes data = 8;
+  AccessList access_list = 9;
+  uint64 v = 10;
+  U256 r = 11;
+  U256 s = 12;
+
+  bool is_create = 13;
+}
+
+message EIP1559Transaction {
+  Hash tx_hash = 1;
+  uint64 chain_id = 2;
+  uint64 nonce = 3;
+  uint64 gas = 4;
+  uint64 max_fee_per_gas = 5;
+  uint64 max_priority_fee_per_gas = 6;
+  bytes to = 7;
+  U256 value = 8;
+  bytes data = 9;
+  AccessList access_list = 10;
+  uint64 v = 11;
+  U256 r = 12;
+  U256 s = 13;
+
+  bool is_create = 14;
+}
+
+enum TransactionType {
+  TRANSACTION_TYPE_LEGACY = 0;
+  TRANSACTION_TYPE_EIP_2930 = 1;
+  TRANSACTION_TYPE_EIP_1559 = 2;
+  TRANSACTION_TYPE_L1_MESSAGE = 0x7f;
+}
+
+message TxGroup { repeated uint64 tx_index = 1; }
+
+message StorageTrace {
+  Hash root_before = 1;
+  Hash root_after = 2;
+
+  repeated BytecodeHashPair accessed_bytecodes = 3;
+
+  repeated AccountAddressPair accessed_accounts = 4;
+  repeated AddressSPVPair accessed_accounts_spvs = 5;
+  repeated AddressStorageSPVPair accessed_storage_spvs = 6;
+}
+
+message BytecodeHashPair {
+  Hash bytecode_hash = 1;
+  bytes bytecode = 2;
+}
+
+message StorageKeyValuePair {
+  U256 key = 1;
+  U256 value = 2;
+}
+
+message Account {
+  uint64 nonce = 1;
+  U256 balance = 2;
+  Hash code_hash = 3;
+  uint64 code_size = 4;
+
+  repeated StorageKeyValuePair storages = 5;
+}
+
+message SPVProof {
+  repeated bytes proof_part = 1;
+  bool existed = 2;
+}
+
+message AccountAddressPair {
+  Address account_address = 1;
+  Account account = 2;
+}
+
+message AddressSPVPair {
+  Address account_address = 1;
+  SPVProof proof = 2;
+}
+
+message StorageKeySPVPair {
+  U256 storage_key = 1;
+  SPVProof proof = 2;
+}
+
+message AddressStorageSPVPair {
+  Address account_address = 1;
+  repeated StorageKeySPVPair storage_spvs = 2;
+}
+
+/// ExecBlockTrace
+
+message ExecTransactionTrace {
+  uint64 gas_used = 1;
+  bool failed = 2;
+  bytes return_data = 3;
+  Address from = 4;
+  Address to = 5;
+  repeated Account account_afters = 6;
+  repeated Account account_createds = 7;
+  Hash code_hash = 8;
+  repeated HostAPITrace hostapi_traces = 9;
+  map<uint32, CallContextTrace> call_contexts = 10;
+  repeated OpTraceItem opcode_traces = 11;
+}
+
+message HostAPITrace {
+  HostAPIEnum hostapi_enum = 1;
+  repeated uint64 input_arguments = 2;
+  uint64 return_value = 3;
+  repeated StackRW stack_rws = 4;
+  repeated HeapRW heap_rws = 5;
+  repeated StateRW state_rws = 6;
+  repeated CopyEvent copy_events = 7;
+  /*context info */
+  // accumulated state_rw number
+  // the next one is current state_rw_number_before_step + state_rws.len()
+  // the  value should equal to
+  uint32 state_rw_number_before_step = 8;
+  uint32 tx_id = 9;
+  uint32 call_depth = 10;
+  bool is_root_call = 11;
+  uint32 call_idx = 12;
+  uint32 next_call_idx = 13;
+  Address caller = 14;
+  uint32 caller_call_idx = 15;
+  uint32 reversible_write_counter_delta = 16;
+  ContractCallInput call_input = 17;
+  bytes aux_data = 18;
+  bool is_create = 19;
+  uint32 mrw_counter = 20;
+  uint64 gas_left = 21;
+  uint64 gas_cost = 22;
+}
+
+message StackRW {
+  uint32 m_index = 1;
+  bool is_write = 2;
+  uint64 value = 3;
+}
+
+message U64Pair {
+  uint64 first = 1;
+  uint64 second = 2;
+}
+
+message HeapRW {
+  uint32 m_index = 1;
+  uint64 start_raw_address = 2;
+  uint32 bytes_num = 3;
+  bytes bytes = 4;
+  bool is_write = 5;
+  U64Pair values_prev = 6;
+  U64Pair values_actually = 7;
+}
+
+message StateTxRefund {
+  uint64 rw_counter = 1;
+  bool is_write = 2;
+  uint32 tx_id = 3;
+  uint64 value = 4;
+  uint64 value_prev = 5;
+}
+
+enum AccountFieldTag {
+  ACCOUNT_FIELD_TAG_UNSPECIFIED = 0;
+  ACCOUNT_FIELD_TAG_NONCE = 1;
+  ACCOUNT_FIELD_TAG_BALANCE = 2;
+  ACCOUNT_FIELD_TAG_CODE_HASH = 3;
+  ACCOUNT_FIELD_TAG_CODE_SIZE = 4;
+}
+
+message StateAccountRW {
+  uint64 rw_counter = 1;
+  bool is_write = 2;
+  Address account_address = 3;
+  AccountFieldTag field_tag = 4;
+  U256 value = 5;
+  U256 value_prev = 6;
+}
+
+message StateStorageRW {
+  uint64 rw_counter = 1;
+  bool is_write = 2;
+  Address account_address = 3;
+  U256 storage_key = 4;
+  U256 value = 5;
+  bytes value_prev = 6;
+  uint32 tx_id = 7;
+  U256 committed_value = 8;
+}
+
+enum CallContextFieldTag {
+  CALL_CONTEXT_FIELD_TAG_UNSPECIFIED = 0;
+  CALL_CONTEXT_FIELD_TAG_RW_COUNTER_END_OF_REVERSION = 1;
+  CALL_CONTEXT_FIELD_TAG_CALLER_ID = 2;
+  CALL_CONTEXT_FIELD_TAG_TX_ID = 3;
+  CALL_CONTEXT_FIELD_TAG_DEPTH = 4;
+  CALL_CONTEXT_FIELD_TAG_CALLER_ADDRESS = 5;
+  CALL_CONTEXT_FIELD_TAG_CALLEE_ADDRESS = 6;
+  CALL_CONTEXT_FIELD_TAG_CALL_DATA_RLP = 7;
+  CALL_CONTEXT_FIELD_TAG_CALL_DATA_LENGTH = 8;
+  CALL_CONTEXT_FIELD_TAG_VALUE = 9;
+  CALL_CONTEXT_FIELD_TAG_IS_SUCCESS = 10;
+  CALL_CONTEXT_FIELD_TAG_IS_PERSISTENT = 11;
+  CALL_CONTEXT_FIELD_TAG_IS_STATIC = 12;
+
+  CALL_CONTEXT_FIELD_TAG_LAST_CALLEE_ID = 13;
+  CALL_CONTEXT_FIELD_TAG_LAST_CALLEE_RETURN_DATA_RLP = 14;
+  CALL_CONTEXT_FIELD_TAG_LAST_CALLEE_RETURN_DATA_LENGTH = 15;
+  CALL_CONTEXT_FIELD_TAG_IS_ROOT = 16;
+  CALL_CONTEXT_FIELD_TAG_IS_CREATE = 17;
+  CALL_CONTEXT_FIELD_TAG_CODE_HASH = 18;
+  CALL_CONTEXT_FIELD_TAG_GAS_LEFT = 19;
+  CALL_CONTEXT_FIELD_TAG_REVERSIBLE_WRITER_COUNTER = 20;
+  CALL_CONTEXT_FIELD_TAG_L1_FEE = 21;
+}
+
+message StateCallContext {
+  uint64 rw_counter = 1;
+  bool is_write = 2;
+  uint32 call_index = 3;
+  CallContextFieldTag field_tag = 4;
+  U256 value = 5;
+}
+
+enum TxLogFieldTag {
+  TX_LOG_FIELD_TAG_UNSPECIFIED = 0;
+  TX_LOG_FIELD_TAG_ADDRESS = 1;
+  TX_LOG_FIELD_TAG_TOPIC = 2;
+  TX_LOG_FIELD_TAG_DATA = 3;
+}
+
+message StateTxLog {
+  uint64 rw_counter = 1;
+  bool is_write = 2;
+  uint32 tx_id = 3;
+  uint32 log_id = 4;
+  TxLogFieldTag field_tag = 5;
+  uint32 topic_index = 6;
+  U256 value = 7;
+}
+
+enum TxReceiptFieldTag {
+  TX_RECEIPT_FIELD_TAG_UNSPECIFIED = 0;
+  TX_RECEIPT_FIELD_TAG_POST_STATE_OR_STATUS = 1;
+  TX_RECEIPT_FIELD_TAG_CUMULATIVE_GAS_USED = 2;
+  TX_RECEIPT_FIELD_TAG_LOG_LENGTH = 3;
+}
+
+message StateTxReceipt {
+  uint64 rw_counter = 1;
+  bool is_write = 2;
+  uint32 tx_id = 3;
+  TxReceiptFieldTag field_tag = 4;
+  uint64 value = 5;
+}
+
+message StateRW {
+  oneof rw_entry {
+    StateTxRefund state_tx_refund = 1;
+    StateAccountRW state_account_rw = 2;
+    StateStorageRW state_storage_rw = 3;
+    StateCallContext state_call_context = 4;
+    StateTxLog state_tx_log = 5;
+    StateTxReceipt state_tx_receipt = 6;
+  }
+}
+
+enum CopyTag {
+  COPY_TAG_UNSPECIFIED = 0;
+  COPY_TAG_MEMORY = 1;
+  COPY_TAG_TX_CALL_DATA = 2;
+  COPY_TAG_BYTECODES = 3;
+  COPY_TAG_TX_LOG = 4;
+  COPY_TAG_SUB_CALL_DATA = 5;
+  COPY_TAG_CALL_RETURN_DATA = 6;
+  COPY_TAG_RLC_ACC = 7;
+}
+
+message CopyEvent {
+  // Define the fields of CopyEvent
+  uint32 source_call_id = 1;
+  CopyTag source_tag = 2;
+  uint64 source_offset = 3;
+  bytes source_bytes = 4;
+  U64Pair source_first_last_u64s = 5;
+  uint64 bytes_num = 6;
+  uint32 dest_call_id = 7;
+  CopyTag dest_tag = 8;
+  uint64 dest_offset = 9;
+  U64Pair dest_first_last_u64s = 10;
+  U64Pair dest_first_last_u64s_prev = 11;
+
+  uint64 rw_counter_start = 12;
+}
+
+message Call {
+  Address caller = 1;
+  Address contract = 2;
+  U256 value = 3;
+  bytes input = 4;
+  uint64 gas_limit = 5;
+  bool is_static = 6;
+}
+
+message Create {
+  Address caller = 1;
+  U256 value = 2;
+  bytes init_code = 3;
+  uint64 gas_limit = 4;
+  U256 create2_salt = 5;
+  bool is_create2 = 6;
+}
+
+message ContractCallInput {
+  // Define the fields of CallInputData
+  oneof input {
+    Call call_input = 1;
+    Create create_input = 2;
+  }
+}
+
+enum HostAPIEnum {
+  // Define the HostAPIEnum values here
+  HOST_API_ENUM_UNSPECIFIED = 0;
+  HOST_API_ENUM_GET_ADDRESS = 1;
+}
+
+enum CallType {
+  CALL_TYPE_UNSPECIFIED = 0;
+  CALL_TYPE_CALL = 1;
+  CALL_TYPE_DELEGATECALL = 2;
+  CALL_TYPE_CALLCODE = 3;
+  CALL_TYPE_STATICCALL = 4;
+  CALL_TYPE_CREATE = 5;
+  CALL_TYPE_CREATE2 = 6;
+}
+
+message CallContextTrace {
+  // Define fields for CircuitCallContext here
+  uint32 call_id = 1;
+  bool is_root = 2;
+  CallType type = 3;
+  Hash code_hash = 4;
+  uint64 rw_counter_end_of_reversion = 5;
+  uint64 caller_id = 6;
+  uint32 depth = 7;
+  Address caller_address = 8;
+  Address callee_address = 9;
+  Address code_address = 10;
+  bytes call_data = 11;
+  bytes return_data = 12;
+  uint32 last_callee_id = 13;
+  U256 value = 14;
+  bool is_success = 15;
+  bool is_persistent = 16;
+  bool is_static = 17;
+  U256 salt = 18;
+}
+
+message OpTraceItem {
+  uint32 call_id = 1;
+  uint64 fid = 2;
+  uint64 iid = 3;
+  TraceItemOpcodeType opcode_type = 4;
+  TraceItemOpcode opcode = 5;
+  TraceItemStepInfo step_info = 6;
+}
+
+message TraceItemOpcodeType {}
+message TraceItemOpcode {}
+message TraceItemStepInfo {}
+
+message ExecBlockTrace {
+  uint64 block_number = 1;
+  repeated ExecTransactionTrace traces = 2;
+}

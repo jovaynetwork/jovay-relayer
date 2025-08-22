@@ -1,0 +1,2 @@
+ALTER TABLE batches
+    ADD COLUMN l1msg_rolling_hash VARCHAR(66) BINARY NOT NULL;

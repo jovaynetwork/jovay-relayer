@@ -1,0 +1,2 @@
+relayer/src/main/resources/agent/** filter=lfs diff=lfs merge=lfs -text
+jovay-relayer/relayer/src/main/resources/agent/opentelemetry-javaagent-1.28.0.jar filter=lfs diff=lfs merge=lfs -text

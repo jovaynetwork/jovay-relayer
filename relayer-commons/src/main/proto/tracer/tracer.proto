@@ -1,0 +1,118 @@
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "com.alipay.antchain.l2.tracer";
+package l2.tracer;
+
+import "trace.proto";
+import "l2_status.proto";
+
+// grpc define for trace service
+service TraceService {
+  // send input block trace
+  rpc SendBasicTrace (SendBasicTraceRequest) returns (SendBasicTraceResponse) {}
+
+  // notify stable block
+  rpc NotifyStable (NotifyStableRequest) returns (NotifyStableResponse) {}
+
+  // basic traces stream rpc
+  rpc FetchBasicTrace (BlockRange) returns (stream l2.trace.BasicBlockTrace) {}
+
+  // exec traces stream rpc
+  rpc FetchExecTrace (BlockRange) returns (stream l2.trace.ExecBlockTrace) {}
+
+  // get a basic traces
+  rpc GetBasicTrace (GetBasicTraceRequest) returns (GetBasicTraceResponse) {}
+
+  // get a exec traces
+  rpc GetExecTrace (GetExecTraceRequest) returns (GetExecTraceResponse) {}
+
+  // notify proof commited
+  rpc NotifyProofCommitted (NotifyProofCommittedRequest) returns (NotifyProofCommittedResponse) {}
+}
+
+// grpc define for admin service
+service AdminService {
+  rpc GetInputTrace (GetInputTraceRequest) returns (GetInputTraceResponse) {}
+  rpc GetBasicTrace (GetBasicTraceRequest) returns (GetBasicTraceResponse) {}
+  rpc GetExecTrace (GetExecTraceRequest) returns (GetExecTraceResponse) {}
+  rpc GetMeta (GetMetaRequest) returns (GetMetaResponse) {}
+}
+
+message SendBasicTraceRequest {
+  l2.trace.BasicBlockTrace basic_trace = 1;
+  uint64 block_number = 2;
+}
+
+message SendBasicTraceResponse {
+  l2.status.L2Status status = 1;
+}
+
+message NotifyStableRequest {
+  uint64 block_number = 1;
+}
+
+message NotifyStableResponse {
+  l2.status.L2Status status = 1;
+}
+
+message BlockRange {
+  uint64 begin = 1;
+  uint64 end = 2;
+}
+
+message GetInputTraceRequest {
+  uint64 block_number = 1;
+}
+
+message GetInputTraceResponse {
+  l2.status.L2Status status = 1;
+  l2.trace.BasicBlockTrace basic_trace = 2;
+  uint64 last_input_number = 3;
+}
+
+message GetBasicTraceRequest {
+  uint64 block_number = 1;
+  bool without_storage_trace = 2;
+}
+
+message GetBasicTraceResponse {
+  l2.status.L2Status status = 1;
+  l2.trace.BasicBlockTrace basic_trace = 2;
+  uint64 stable_block_number = 3;
+}
+
+message GetExecTraceRequest {
+  uint64 block_number = 1;
+}
+
+message GetExecTraceResponse {
+  l2.status.L2Status status = 1;
+  l2.trace.ExecBlockTrace exec_trace = 2;
+  uint64 stable_block_number = 3;
+}
+
+enum CommitProofType {
+  COMMIT_PROOF_TYPE_TEE = 0;
+  COMMIT_PROOF_TYPE_ZK = 1;
+}
+
+message NotifyProofCommittedRequest {
+  uint64 block_number = 1;
+  CommitProofType commit_proof_type = 2;
+}
+
+message NotifyProofCommittedResponse {
+  l2.status.L2Status status = 1;
+}
+
+message GetMetaRequest {
+}
+
+message GetMetaResponse {
+  l2.status.L2Status status = 1;
+  uint64 input_number = 2;
+  uint64 stable_number = 3;
+  uint64 basic_traced_number = 4;
+  uint64 exec_traced_number = 5;
+}

@@ -1,0 +1,62 @@
+syntax = "proto3";
+
+// this proto is common data struct for prover and prover controller
+
+option java_multiple_files = true;
+option java_package = "com.alipay.antchain.l2.prover.common";
+package l2.prover.common;
+
+
+enum ProverType {
+  ALL = 0;  // do ZK + TEE together
+
+  TEE = 1;
+  ZK = 2;
+
+  UNKNOWN_PROOF_TYPE = 999;
+}
+
+
+message BlockInfo {
+  uint64 batch_id = 1;
+  uint64 chunk_id = 2; // chunk_id in one batch should count from 0
+  uint64 block_index = 3; // block index in the network
+}
+
+// multi block in one chunk
+// block range is [block_start, block_end)
+message ChunkInfo {
+  uint64 batch_id = 1;
+  uint64 chunk_id = 2;
+  uint64 block_start = 3;
+  uint64 block_end = 4;
+}
+
+
+// BasicChunkInfo is used to define a block range, [block_start, block_end)
+message BasicChunkInfo {
+  uint64 block_start = 1;
+  uint64 block_end = 2;
+}
+
+// multi chunk in one batch
+message BatchInfo {
+  uint64 batch_id = 1;
+  repeated BasicChunkInfo chunk_list = 2;
+  bytes parent_batch_hash = 4;
+  int32 max_txs_in_chunk = 5;
+}
+
+
+// chunk proof contains two bytes
+message ChunkProofInfo {
+  bytes proof_data = 1;
+  bytes public_input = 2;
+}
+
+
+// batch proof only contains proof
+message BatchProofInfo {
+  bytes proof_data = 1;
+}
+

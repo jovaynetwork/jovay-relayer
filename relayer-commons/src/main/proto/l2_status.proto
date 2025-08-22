@@ -1,0 +1,126 @@
+syntax = "proto3";
+
+
+option java_multiple_files = true;
+option java_package = "com.alipay.antchain.l2.status";
+package l2.status;
+
+// Define L2Status error code enum, basic error code and subsystem error code
+enum L2ErrorCode {
+  // L2 basic error code
+  // gRPC-like standard error code range (0-16), with some names adjusted
+  // see https://grpc.github.io/grpc/core/md_doc_statuscodes.html
+
+  // Recommended Retry Strategy:
+  // 1. Error codes recommended for retry: L2_TIMEOUT, L2_SERVER_BUSY
+  // 2. Error codes recommended for retry but should avoid high-frequency retries:
+  //  L2_RESOURCE_EXHAUSTED.
+  //  It is advisable to use an exponential backoff strategy and increase retry intervals
+  //  to avoid resource depletion due to high-frequency retries.
+  // 3. Error codes for which retry should be determined based on specific case:
+  //  L2_INTERRUPTED, suggesting retries at a higher level.
+  // 4. Not recommended for retry: L2_FAILED_PRECONDITION,
+  //  e.g. "rmdir" fails because the directory is non-empty, should not retry.
+  // 5.Other error codes are generally not recommended for retry.
+  //  If retry is necessary, prioritize the error codes mentioned above for retry.
+  // 6.All retry are recommended to use an exponential backoff strategy
+  //  to avoid system overload due to errors,
+  //  such as preventing the frequent refreshing of meaningless error logs.
+
+  // 推荐的重试策略：
+  // 1. 建议重试的错误码：L2_TIMEOUT、L2_SERVER_BUSY
+  // 2. 建议重试但应避免高频重试的错误码：L2_RESOURCE_EXHAUSTED。
+  //    建议使用指数退避策略并增加重试间隔，以避免因高频重试导致资源耗尽。
+  // 3. 需要根据具体情况确定是否重试的错误码：L2_INTERRUPTED，建议在更高层级进行重试。
+  // 4. 不建议重试的错误码：L2_FAILED_PRECONDITION，
+  //    例如“rmdir”因目录非空而失败，不应重试。
+  // 5. 其他错误码通常不建议重试。
+  //    如果确实需要重试，应优先考虑上面提到的建议重试的错误码。
+  // 6. 建议所有重试使用指数退避策略，以避免系统因错误而过载，
+  //    如防止频繁刷新无意义的错误日志。
+  L2_OK = 0;
+  L2_CANCELLED = 1;
+  L2_UNKNOWN = 2;
+  L2_INVALID_ARGUMENT = 3;
+  L2_TIMEOUT = 4;             // like gRPC DEADLINE_EXCEEDED
+  L2_NOT_FOUND = 5;
+  L2_ALREADY_EXISTS = 6;
+  L2_PERMISSION_DENIED = 7;
+  L2_RESOURCE_EXHAUSTED = 8;
+  L2_FAILED_PRECONDITION = 9;
+  L2_INTERRUPTED = 10;        // like gRPC ABORTED
+  L2_OUT_OF_RANGE = 11;
+  L2_UNIMPLEMENTED = 12;
+  L2_INTERNAL_ERROR = 13;     // like gRPC INTERNAL
+  L2_SERVER_BUSY = 14;        // like gRPC UNAVAILABLE
+  L2_DATA_LOSS = 15;
+  L2_UNAUTHENTICATED = 16;
+
+  // Recommendation: Prefer using base error codes in the range of 0 to 16.
+  // If 0～16 do not meet the specific requirements of the subsystem,
+  // may define the following subsystem-specific error codes.
+
+  // 建议：优先使用范围为0到16的基本错误代码。如果0到16的范围不能满足子系统的特定需求，可以定义以下子系统特定的错误代码。
+
+  // Sequencer subsystem error code range (1000-1999)
+  L2_SEQUENCER_ERROR_BASE = 1000;
+  L2_SEQUENCER_ERROR_XXX = 1001;
+
+  // Tracer subsystem error code range (2000-2999)
+  L2_TRACER_ERROR_BASE = 2000;
+  L2_TRACER_ERROR_INVALID_BLOCK_NUMBER = 2001;  // invalid block number in request
+  L2_TRACER_ERROR_AMBIGUITY_BLOCK_DATA = 2002;  // send different data with the same number
+
+  // Relayer subsystem error code range (3000-3999)
+  L2_RELAYER_ERROR_BASE = 3000;
+  L2_RELAYER_ERROR_XXX = 3001;
+
+  // Prover subsystem error code range (4000-4999)
+  L2_PROVER_ERROR_BASE = 4000;
+
+  // 4001-4009 task status is not finished
+  L2_PROVER_ERROR_TASK_PENDING = 4001;
+  L2_PROVER_ERROR_TASK_RUNNING = 4002;
+
+  // 4010-4020 external rpc call failed with unrecognized error
+  L2_PROVER_CONTROLLER_EXTERNAL_RPC_CALL_ERROR = 4010;
+  L2_PROVER_CONTROLLER_WORKER_RPC_CALL_FAILED = 4011;
+  L2_PROVER_CONTROLLER_TRACER_RPC_CALL_FAILED = 4012;
+
+  // 4020-
+  L2_PROVER_ERROR_PROOF_LOSING = 4021;
+
+  // 4100- db exception
+  L2_PROVER_ERROR_DB_EXCEPTION = 4100;
+  L2_PROVER_ERROR_DB_DATA_INVALID = 4101;
+
+  // TEE Prover subsystem error code range (4200-4299)
+  L2_PROVER_TEE_ERROR_BASE = 4200;
+  L2_PROVER_TEE_ERROR_XXX = 4201;
+  L2_PROVER_TEE_VALIDATION_FAILED = 4202;
+  // ZK Prover subsystem error code range (4400-4499)
+  L2_PROVER_ZK_ERROR_BASE = 4300;
+  L2_PROVER_ZK_ERROR_XXX = 4301;
+}
+
+enum Retriable {
+  RETRIABLE_UNSPECIFIED = 0;
+  RETRIABLE_NO = 1;
+  RETRIABLE_YES = 2;
+}
+
+message L2Status {
+  L2ErrorCode error_code = 1;
+  string error_message = 2;
+  Retriable need_retry = 3;
+}
+
+// Example request/response
+message ExampleRequest {
+  string example_name = 1;
+}
+
+message ExampleResponse {
+  L2Status status = 1;
+  string example_data = 2;
+}

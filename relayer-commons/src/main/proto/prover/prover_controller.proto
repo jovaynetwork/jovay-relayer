@@ -1,0 +1,80 @@
+syntax = "proto3";
+
+// this proto defines rpc, request and response for prover controller
+
+option java_multiple_files = true;
+option java_package = "com.alipay.antchain.l2.prover.controller";
+package l2.prover.controller;
+
+import "prover/common.proto";
+import "l2_status.proto";
+
+message ProveBatchRequest {
+  common.ProverType type = 1;
+  common.BatchInfo batch_info = 2;
+}
+
+// relayer request to get proof data
+message GetBatchProofRequest {
+  uint64 batch_id = 1;
+  common.ProverType prover_type = 2;
+}
+
+// response for relayer get proof
+message GetProofResponse {
+  // L2_OK = task finished successfully
+  // L2_NOT_FOUND = task not found
+  // L2_PROVER_ERROR_TASK_PENDING = task is pending, wait resource to start
+  // L2_PROVER_ERROR_TASK_RUNNING = task is running, wait to finished
+  // L2_INTERNAL_ERROR = error happen in task
+  status.L2Status status = 1;
+  bytes proof_data = 2;
+}
+
+
+// info for prover reported
+message ProofInfo {
+  string task_id = 1;
+  oneof proof {
+    common.BatchProofInfo batch_proof = 2;
+    common.ChunkProofInfo chunk_proof = 3;
+  }
+}
+
+
+
+message ReProveBatchRequest {
+  uint64 batch_id = 1;
+  common.ProverType type = 2;
+}
+
+message RangeDropProofsRequest {
+  common.ProverType type = 1;
+  uint64 batch_id_start = 2;
+  uint64 batch_id_end = 3;
+}
+
+service ProverControllerServer {
+  // relayer notify that one block generate
+  rpc NotifyBlock(common.BlockInfo) returns (status.L2Status) {}
+
+  // relayer notify that one chunk confirmed
+  rpc NotifyChunk(common.ChunkInfo) returns (status.L2Status) {}
+
+  // relayer notify that one batch confirmed, and should generate proof
+  rpc ProveBatch(common.BatchInfo) returns (status.L2Status) {}
+
+  // relayer try to get proof for one batch
+  rpc GetProof(GetBatchProofRequest) returns (GetProofResponse) {}
+
+  // prover try to report proof info for one batch
+  rpc ReportProof(ProofInfo) returns (status.L2Status) {}
+
+  // ops rpc
+  // reprove batch, batch info already been submitted
+  rpc ReProveBatch(ReProveBatchRequest) returns (status.L2Status) {}
+
+  // range drop proof that generated, only clean task, not clean batch info
+  rpc RangeDropProofs(RangeDropProofsRequest) returns (status.L2Status) {}
+
+}
