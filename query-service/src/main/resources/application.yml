@@ -1,0 +1,11 @@
+spring:
+  application:
+    name: query-service
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://${MYSQL_HOST:localhost:3306}/l2relayer?serverTimezone=Asia/Shanghai&rewriteBatchedStatements=true
+    password: ${MYSQL_USER_PASSWORD:YOUR_PWD}
+    username: ${MYSQL_USER_NAME:root}
+logging:
+  file:
+    path: ./log

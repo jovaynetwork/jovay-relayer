@@ -1,0 +1,39 @@
+spring:
+  application:
+    name: l2-relayer
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://${MYSQL_HOST:localhost:3306}/l2relayer?serverTimezone=Asia/Shanghai&rewriteBatchedStatements=true
+    password: ${MYSQL_USER_PASSWORD:YOUR_PWD}
+    username: ${MYSQL_USER_NAME:root}
+  data:
+    redis:
+      host: ${REDIS_URL:localhost}
+      port: ${REDIS_PORT:6379}
+#     password: ${REDIS_USER_PASSWORD:YOUR_PWD}
+logging:
+  file:
+    path: ./log
+l2-relayer:
+  l1-client:
+    legacy-pool-tx-account:
+      private-key: ${L1_CLIENT_LEGACY_POOL_TX_PRIVATE_KEY}
+    blob-pool-tx-account:
+      private-key: ${L1_CLIENT_BLOB_POOL_TX_PRIVATE_KEY}
+    rpc-url: ${L1_RPC_URL}
+    rollup-contract: ${L1_ROLLUP_CONTRACT}
+    mailbox-contract: ${L1_MAILBOX_CONTRACT}
+    nonce-policy: FAST
+  l2-client:
+    private-key: ${L2_CLIENT_PRIVATE_KEY}
+    rpc-url: ${L2_RPC_URL}
+
+grpc:
+  client:
+    prover-client:
+      address: "static://${TRACER_IP}:${TRACER_PORT:9090}"
+      negotiation-type: plaintext
+    tracer-client:
+      address: "static://${PROVER_CONTROLLER_IP}:${PROVER_CONTROLLER_PORT:5000}"
+      negotiation-type: plaintext
+

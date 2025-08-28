@@ -1,0 +1,101 @@
+spring:
+  application:
+    name: l2-relayer
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DB_NAME:l2relayer}?serverTimezone=Asia/Shanghai&rewriteBatchedStatements=true&createDatabaseIfNotExist=true
+    password: ${MYSQL_USER_PASSWORD:YOUR_PWD}
+    username: ${MYSQL_USER_NAME:root}
+  data:
+    redis:
+      host: ${REDIS_URL:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_USER_PASSWORD:YOUR_PWD}
+      database: ${REDIS_DATABASE:0}
+logging:
+  file:
+    path: ./log
+
+l2-relayer:
+  alarm:
+    zk-cycle:
+      threshold: ${ZK_CYCLE_ALARM_THRESHOLD:1000000000}
+    rollup:
+      batch-delayed-threshold: ${ROLLUP_ALARM_BATCH_DELAYED_THRESHOLD:10800000}
+      chunk-delayed-threshold: ${ROLLUP_ALARM_CHUNK_DELAYED_THRESHOLD:3600000}
+      proof-delayed-threshold: ${ROLLUP_ALARM_PROOF_DELAYED_THRESHOLD:300000}
+      l2-block-delayed-threshold: ${ROLLUP_ALARM_L2_BLOCK_DELAYED_THRESHOLD:300000}
+      tx-over-pending-threshold: ${ROLLUP_ALARM_TX_OVER_PENDING_THRESHOLD:1800000}
+      switch: ${ROLLUP_ALARM_SWITCH:true}
+  metrics:
+    self-report:
+      url: ${SELF_REPORT_URL:}
+      switch: ${SELF_REPORT_SWITCH:false}
+    blockchain:
+      acc-balance-monitor:
+        switch: ${ACC_BALANCE_MONITOR_SWITCH:false}
+        l1-interval: ${ACC_BALANCE_MONITOR_INTERVAL:10000}
+        l1-balance-threshold: ${ACC_BALANCE_MONITOR_BALANCE_THRESHOLD:3.0}
+  l1-client:
+    legacy-pool-tx-account:
+      private-key: ${L1_CLIENT_LEGACY_POOL_TX_PRIVATE_KEY}
+    blob-pool-tx-account:
+      private-key: ${L1_CLIENT_BLOB_POOL_TX_PRIVATE_KEY}
+    gas-price-policy: ${L1_CLIENT_GAS_PRICE_POLICY:FROM_API}
+    static-gas-price: ${L1_CLIENT_STATIC_GAS_PRICE:4100000000}
+    gas-limit-policy: ${L1_CLIENT_GAS_LIMIT_POLICY:STATIC}
+    static-gas-limit: ${L1_CLIENT_STATIC_GAS_LIMIT:7200000}
+    tx-speedup-blob-fee-limit: ${L1_CLIENT_TX_SPEEDUP_BLOB_FEE_LIMIT:1000000000000}
+    tx-speedup-priority-fee-limit: ${L1_CLIENT_TX_SPEEDUP_PRIORITY_FEE_LIMIT:100000000000}
+    tx-speedup-blob-price-bump: ${L1_CLIENT_TX_SPEEDUP_BLOB_PRICE_BUMP:1}
+    force-tx-speedup-time-limit: ${L1_CLIENT_FORCE_TX_SPEEDUP_TIME_LIMIT:900000}
+    extra-gas: ${L1_CLIENT_EXTRA_GAS:0}
+    rpc-url: ${L1_RPC_URL}
+    rollup-contract: ${L1_ROLLUP_CONTRACT}
+    mailbox-contract: ${L1_MAILBOX_CONTRACT}
+    nonce-policy: FAST
+    blob-pool-tx-traffic-limit: ${L1_BLOB_POOL_TX_TRAFFIC_LIMIT:16}
+    legacy-pool-tx-traffic-limit: ${L1_LEGACY_POOL_TX_TRAFFIC_LIMIT:-1}
+    gas-price-provider-conf:
+      extra-gas-price: ${L1_CLIENT_EXTRA_GAS_PRICE:2000000000}
+      gas-price-increased-percentage: ${L1_CLIENT_GAS_PRICE_INCREASED_PERCENTAGE:0.1}
+      priority-fee-per-gas-increased-percentage: ${L1_CLIENT_PRIORITY_FEE_PER_GAS_INCREASED_PERCENTAGE:0.1}
+      base-fee-multiplier: ${L1_CLIENT_BASE_FEE_MULTIPLIER:2}
+      # 1GWei to divide that using larger multiplier or smaller one
+      fee-per-blob-gas-dividing-val: ${L1_CLIENT_FEE_PER_BLOB_GAS_DIVIDING_VAL:10000000}
+      larger-fee-per-blob-gas-multiplier: ${L1_CLIENT_LARGER_FEE_PER_BLOB_GAS_MULTIPLIER:2}
+      smaller-fee-per-blob-gas-multiplier: ${L1_CLIENT_SMALLER_FEE_PER_BLOB_GAS_MULTIPLIER:1000}
+  l2-client:
+    private-key: ${L2_CLIENT_PRIVATE_KEY}
+    rpc-url: ${L2_RPC_URL}
+  tracer-client:
+    req-retry:
+      max-attempts: ${TRACER_CLIENT_REQ_RETRY_MAX_ATTEMPTS:10}
+      backoff-delay: ${TRACER_CLIENT_REQ_RETRY_BACKOFF_DELAY:5}
+      backoff-multiplier: ${TRACER_CLIENT_REQ_RETRY_BACKOFF_MULTIPLIER:10}
+      backoff-max-delay: ${TRACER_CLIENT_REQ_RETRY_BACKOFF_MAX_DELAY:500}
+      max-block-stable-gap: ${TRACER_CLIENT_MAX_BLOCK_STABLE_GAP:10}
+  tasks:
+    batch-commit:
+      batch-commit-windows-length: ${BATCH_COMMIT_WINDOWS_LENGTH:12}
+      proof-commit-windows-length: ${PROOF_COMMIT_WINDOWS_LENGTH:12}
+    block-polling:
+      l2:
+        get-block-timeout: ${L2_BLOCK_POLLING_GET_BLOCK_TIMEOUT:10}
+        policy: ${L2_CONSISTENCY_LEVEL:FINALIZED}
+      l1:
+        policy: ${L1_CONSISTENCY_LEVEL:FINALIZED}
+    batch-prove:
+      req-types: ${BATCH_PROVE_REQ_TYPES:ALL}
+    reliable-tx:
+      process-batch-size: ${RELIABLE_TX_PROCESS_BATCH_SIZE:32}
+      retry-limit: ${RELIABLE_TX_RETRY_LIMIT:0}
+grpc:
+  client:
+    prover-client:
+      address: "static://${PROVER_CONTROLLER_ENDPOINTS}"
+      negotiation-type: plaintext
+    tracer-client:
+      address: "static://${TRACER_IP}:${TRACER_PORT:5000}"
+      negotiation-type: plaintext
+

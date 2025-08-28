@@ -1,0 +1,11 @@
+spring:
+  application:
+    name: l2-relayer
+  datasource:
+    driver-class-name: org.h2.Driver
+    url: jdbc:h2:mem:queryservice;DB_CLOSE_DELAY=-1;MODE=MySQL;IGNORECASE=TRUE
+    password: 123
+    username: root
+logging:
+  file:
+    path: log
