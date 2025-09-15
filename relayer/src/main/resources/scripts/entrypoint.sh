@@ -91,7 +91,9 @@ if [ -n "${JASYPT_PASSWD}" ]; then
 fi
 
 # fix supervisor conf and add java link
-sed -i 's|supervisor/conf.d/\*.conf|supervisord.d/\*.ini|g' /etc/supervisor/supervisord.conf
+sed -i 's|supervisor/conf.d/\*.conf|supervisord.d/\*.ini|g' /etc/supervisord.conf
+# set nodaemon=true
+sed -i 's/nodaemon=false/nodaemon=true/g' /etc/supervisord.conf
 if [ ! -f /usr/bin/java ]; then
   ln -s /opt/java/openjdk/bin/java /usr/bin/java
 fi
@@ -106,4 +108,5 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 
-exec supervisord
+# start supervisord
+supervisord -c /etc/supervisord.conf

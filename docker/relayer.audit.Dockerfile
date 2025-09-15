@@ -6,6 +6,8 @@ RUN ln -fs /usr/share/zoneinfo/${TZ} /etc/localtime \
     && echo ${TZ} > /etc/timezone \
     && mkdir "/l2-relayer"
 
+RUN wget -O /etc/yum.repos.d/epel.repo http://mirrors.aliyun.com/repo/epel-7.repo
+RUN dnf install -y supervisor && supervisord --version
 RUN yum install -y epel-release && \
     yum install -y haveged openssl gettext jq supervisor tini && \
     yum clean all
