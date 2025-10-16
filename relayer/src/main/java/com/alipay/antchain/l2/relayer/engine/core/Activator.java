@@ -1,6 +1,6 @@
 package com.alipay.antchain.l2.relayer.engine.core;
 
-import javax.annotation.Resource;
+import jakarta.annotation.Resource;
 
 import com.alipay.antchain.l2.relayer.dal.repository.IScheduleRepository;
 import org.springframework.stereotype.Component;

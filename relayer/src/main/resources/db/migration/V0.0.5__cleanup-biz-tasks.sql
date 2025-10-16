@@ -1,0 +1,3 @@
+DELETE
+FROM biz_task
+WHERE task_type = 'L1MSG_POLLING_TASK';

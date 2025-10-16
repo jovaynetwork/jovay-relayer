@@ -6,8 +6,6 @@ public interface IMailboxService {
 
     void initService(BigInteger startBlockNumber);
 
-    void pollL1MsgBatch();
-
     void processL1MsgBatch();
 
     void proveL2Msg();

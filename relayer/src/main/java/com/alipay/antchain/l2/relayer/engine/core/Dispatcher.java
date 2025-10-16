@@ -6,7 +6,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.locks.Lock;
 import java.util.stream.Collectors;
-import javax.annotation.Resource;
+import jakarta.annotation.Resource;
 
 import cn.hutool.core.collection.ListUtil;
 import cn.hutool.core.util.ObjectUtil;
@@ -36,9 +36,10 @@ public class Dispatcher {
             new BizDistributedTask(BizTaskTypeEnum.BATCH_COMMIT_TASK),
             new BizDistributedTask(BizTaskTypeEnum.PROOF_COMMIT_TASK),
             new BizDistributedTask(BizTaskTypeEnum.RELIABLE_TX_TASK),
-            new BizDistributedTask(BizTaskTypeEnum.L1MSG_POLLING_TASK),
+            new BizDistributedTask(BizTaskTypeEnum.L1_BLOCK_POLLING_TASK),
             new BizDistributedTask(BizTaskTypeEnum.L1MSG_PROCESS_TASK),
-            new BizDistributedTask(BizTaskTypeEnum.L2MSG_PROVE_TASK)
+            new BizDistributedTask(BizTaskTypeEnum.L2MSG_PROVE_TASK),
+            new BizDistributedTask(BizTaskTypeEnum.ORACLE_GAS_FEED_TASK)
     );
 
     @Resource

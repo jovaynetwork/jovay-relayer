@@ -14,6 +14,7 @@ import com.alipay.antchain.l2.relayer.commons.enums.ProveTypeEnum;
 import com.alipay.antchain.l2.relayer.commons.exceptions.CallRemoteServiceFailedException;
 import com.alipay.antchain.l2.relayer.commons.exceptions.ProofNotReadyException;
 import com.alipay.antchain.l2.relayer.commons.exceptions.RemoteServiceRetryException;
+import com.alipay.antchain.l2.relayer.commons.l2basic.ChunksPayload;
 import com.alipay.antchain.l2.relayer.commons.models.BatchWrapper;
 import com.alipay.antchain.l2.relayer.utils.RemoteServiceUtils;
 import com.alipay.antchain.l2.status.L2ErrorCode;
@@ -90,8 +91,9 @@ public class ProverControllerClient {
     public void proveBatch(BatchWrapper batch) {
         log.info("request the prover controller to prove batch (batch: {}) ", batch.getBatch().getBatchIndex());
         BatchInfo batchInfo = BatchInfo.newBuilder()
+                .setBatchVersion(batch.getBatchHeader().getVersion().getValue())
                 .setBatchId(batch.getBatch().getBatchIndex().longValue())
-                .addAllChunkList(batch.getBatch().getChunks().stream().map(
+                .addAllChunkList(((ChunksPayload) batch.getBatch().getPayload()).chunks().stream().map(
                         chunk -> BasicChunkInfo.newBuilder()
                                 .setBlockStart(chunk.getStartBlockNumber().longValue())
                                 .setBlockEnd(chunk.getEndBlockNumber().longValue() + 1)

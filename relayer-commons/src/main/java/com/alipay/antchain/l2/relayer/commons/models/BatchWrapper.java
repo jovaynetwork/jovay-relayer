@@ -6,9 +6,7 @@ import java.util.stream.Collectors;
 
 import cn.hutool.core.util.ObjectUtil;
 import cn.hutool.core.util.StrUtil;
-import com.alipay.antchain.l2.relayer.commons.l2basic.Batch;
-import com.alipay.antchain.l2.relayer.commons.l2basic.BatchHeader;
-import com.alipay.antchain.l2.relayer.commons.l2basic.BlockContext;
+import com.alipay.antchain.l2.relayer.commons.l2basic.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.NonNull;
@@ -19,25 +17,14 @@ import lombok.Setter;
 @NoArgsConstructor
 public class BatchWrapper {
 
-    public static BatchWrapper createBatchV0(
+    public static BatchWrapper createBatch(
+            BatchVersionEnum batchVersion,
             BigInteger batchIndex,
             BatchWrapper parentBatchWrapper,
             byte[] postStateRoot,
             byte[] l1MsgRollingHash,
             byte[] l2MsgRoot,
             @NonNull List<ChunkWrapper> chunks
-    ) {
-        return createBatchV0(batchIndex, parentBatchWrapper, postStateRoot, l1MsgRollingHash, l2MsgRoot, chunks, null);
-    }
-
-    public static BatchWrapper createBatchV0(
-            BigInteger batchIndex,
-            BatchWrapper parentBatchWrapper,
-            byte[] postStateRoot,
-            byte[] l1MsgRollingHash,
-            byte[] l2MsgRoot,
-            @NonNull List<ChunkWrapper> chunks,
-            EthBlobs blobs
     ) {
         var wrapper = new BatchWrapper();
         for (int i = 0; i < chunks.size(); i++) {
@@ -48,12 +35,13 @@ public class BatchWrapper {
         var l1MessagePopped = chunks.stream()
                 .map(x -> x.getChunk().getBlocks().stream().mapToLong(BlockContext::getNumL1Messages).sum())
                 .mapToLong(value -> value).sum();
-        wrapper.setBatch(Batch.createBatchV0(
+        wrapper.setBatch(Batch.createBatch(
+                batchVersion,
                 batchIndex,
                 parentBatchWrapper.getBatchHeader(),
                 l1MsgRollingHash,
                 chunks.stream().map(ChunkWrapper::getChunk).collect(Collectors.toList()),
-                blobs
+                null
         ));
         wrapper.setPostStateRoot(postStateRoot);
         wrapper.setL2MsgRoot(l2MsgRoot);
@@ -96,5 +84,9 @@ public class BatchWrapper {
 
     public BatchHeader getBatchHeader() {
         return batch.getBatchHeader();
+    }
+
+    public List<Chunk> getChunks() {
+        return ((ChunksPayload) this.getBatch().getPayload()).chunks();
     }
 }

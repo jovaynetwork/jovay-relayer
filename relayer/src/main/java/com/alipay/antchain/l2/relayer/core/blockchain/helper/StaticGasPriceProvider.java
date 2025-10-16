@@ -3,6 +3,8 @@ package com.alipay.antchain.l2.relayer.core.blockchain.helper;
 import java.math.BigInteger;
 
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.model.Eip1559GasPrice;
+import com.alipay.antchain.l2.relayer.core.blockchain.helper.model.Eip4844GasPrice;
+import com.alipay.antchain.l2.relayer.core.blockchain.helper.model.IGasPrice;
 import lombok.AllArgsConstructor;
 
 @AllArgsConstructor
@@ -30,7 +32,7 @@ public class StaticGasPriceProvider implements IGasPriceProvider {
     }
 
     @Override
-    public BigInteger getMaxFeePerBlobGas() {
-        return BigInteger.valueOf(20_000_000_000L);
+    public IGasPrice getEip4844GasPrice() {
+        return new Eip4844GasPrice(maxFeePerGas, maxPriorityFeePerGas, BigInteger.valueOf(20_000_000_000L));
     }
 }

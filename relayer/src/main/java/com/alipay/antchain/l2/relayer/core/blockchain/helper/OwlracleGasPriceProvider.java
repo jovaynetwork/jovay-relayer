@@ -6,7 +6,9 @@ import cn.hutool.core.util.StrUtil;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.TypeReference;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.model.Eip1559GasPrice;
+import com.alipay.antchain.l2.relayer.core.blockchain.helper.model.Eip4844GasPrice;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.model.GasPriceProviderConfig;
+import com.alipay.antchain.l2.relayer.core.blockchain.helper.model.IGasPrice;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.owlracle.OwlracleGetGasPriceResult;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.owlracle.OwlracleResponse;
 import lombok.extern.slf4j.Slf4j;
@@ -58,5 +60,10 @@ public class OwlracleGasPriceProvider extends ApiGasPriceProvider {
     @Override
     public Eip1559GasPrice getEip1559GasPrice() {
         return new Eip1559GasPrice(getMaxFeePerGas(), getMaxPriorityFeePerGas());
+    }
+
+    @Override
+    public IGasPrice getEip4844GasPrice() {
+        return new Eip4844GasPrice(getMaxFeePerGas(), getMaxPriorityFeePerGas(), getMaxFeePerBlobGas());
     }
 }

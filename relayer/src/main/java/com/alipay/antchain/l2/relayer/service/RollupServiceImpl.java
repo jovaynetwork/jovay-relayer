@@ -6,7 +6,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.*;
-import javax.annotation.Resource;
+import jakarta.annotation.Resource;
 
 import cn.hutool.core.util.HexUtil;
 import cn.hutool.core.util.ObjectUtil;
@@ -19,7 +19,6 @@ import com.alipay.antchain.l2.relayer.commons.models.BatchWrapper;
 import com.alipay.antchain.l2.relayer.commons.models.ReliableTransactionDO;
 import com.alipay.antchain.l2.relayer.commons.models.TransactionInfo;
 import com.alipay.antchain.l2.relayer.commons.utils.RollupUtils;
-import com.alipay.antchain.l2.relayer.config.RollupConfig;
 import com.alipay.antchain.l2.relayer.core.blockchain.L1Client;
 import com.alipay.antchain.l2.relayer.core.blockchain.L2Client;
 import com.alipay.antchain.l2.relayer.core.blockchain.RollupThrottle;
@@ -34,11 +33,13 @@ import com.alipay.antchain.l2.trace.BasicBlockTrace;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionCallbackWithoutResult;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.web3j.protocol.core.DefaultBlockParameter;
 import org.web3j.protocol.core.DefaultBlockParameterName;
 
 @Service
@@ -79,9 +80,6 @@ public class RollupServiceImpl implements IRollupService {
     private IL2MerkleTreeRepository l2MerkleTreeRepository;
 
     @Resource
-    private RollupConfig rollupConfig;
-
-    @Resource
     private IOtelMetric otelMetric;
 
     @Value("${l2-relayer.tasks.block-polling.l2.policy:LATEST}")
@@ -92,9 +90,6 @@ public class RollupServiceImpl implements IRollupService {
 
     @Value("${l2-relayer.tasks.batch-commit.batch-commit-windows-length:12}")
     private int batchCommitWindowsLength;
-
-    @Value("${l2-relayer.tasks.batch-commit.proof-commit-windows-length:12}")
-    private int proofCommitWindowsLength;
 
     @Value("${l2-relayer.tasks.batch-prove.prove-req-number-per-batch-limit:10}")
     private int proveReqNumberPerBatchLimit;
@@ -107,6 +102,18 @@ public class RollupServiceImpl implements IRollupService {
      */
     @Value("${l2-relayer.tasks.block-polling.l2.get-block-timeout:10}")
     private int getL2BlockTimeout;
+
+    @Value("${l2-relayer.tasks.proof-commit.rollup-query-level:LATEST}")
+    private DefaultBlockParameterName proofCommitRollupQueryLevel;
+
+    /**
+     * When try to commit proof to rollup contract, relayer gonna to
+     * query the last committed batch index from rollup contract.
+     * The query would be based on number from the {@code proofCommitRollupQueryLevel} height
+     * subtract {@code proofCommitRollupQueryHeightBackoff}.
+     */
+    @Value("${l2-relayer.tasks.proof-commit.rollup-query-height-backoff:0}")
+    private int proofCommitRollupQueryHeightBackoff;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -269,7 +276,7 @@ public class RollupServiceImpl implements IRollupService {
             throw new CommitL2BatchTeeProofException("null result from calling lastTeeVerifiedBatch of rollup contract");
         }
 
-        var lastCommittedBatchIdx = l1Client.lastCommittedBatch();
+        var lastCommittedBatchIdx = queryLastCommittedBatchIndex();
         if (ObjectUtil.isNull(lastCommittedBatchIdx)) {
             throw new CommitL2BatchTeeProofException("null result from calling lastCommittedBatch of rollup contract");
         }
@@ -434,11 +441,7 @@ public class RollupServiceImpl implements IRollupService {
                 .batchIndex(nextBatch.getBatch().getBatchIndex())
                 .transactionType(TransactionTypeEnum.BATCH_COMMIT_TX)
                 .build();
-        if (ObjectUtil.isNull(txCommitted)) {
-            rollupRepository.insertReliableTransaction(reliableTx);
-        } else {
-            rollupRepository.updateReliableTransaction(reliableTx);
-        }
+        saveTx(txCommitted, reliableTx);
 
         otelMetric.recordBatchCommitEvent(nextBatch.getBatch().getBatchIndex());
         log.info("commit batch {} with tx {}", nextBatch.getBatch().getBatchIndex(), transactionInfo.getTxHash());
@@ -498,14 +501,23 @@ public class RollupServiceImpl implements IRollupService {
                 .batchIndex(nextBatchIdxToCommitTeeProof)
                 .transactionType(TransactionTypeEnum.BATCH_TEE_PROOF_COMMIT_TX)
                 .build();
-        if (ObjectUtil.isNull(txCommitted)) {
-            rollupRepository.insertReliableTransaction(reliableTx);
-        } else {
-            rollupRepository.updateReliableTransaction(reliableTx);
-        }
+        saveTx(txCommitted, reliableTx);
 
         otelMetric.recordBatchTeeVerifyEvent(nextBatchIdxToCommitTeeProof);
         log.info("commit tee proof for batch {} with tx {}", nextBatchIdxToCommitTeeProof, transactionInfo.getTxHash());
+    }
+
+    private void saveTx(ReliableTransactionDO txCommitted, ReliableTransactionDO reliableTx) {
+        if (ObjectUtil.isNull(txCommitted)) {
+            try {
+                rollupRepository.insertReliableTransaction(reliableTx);
+            } catch (DuplicateKeyException e) {
+                log.warn("Insert failed: tx for batch#{} already sent, so just update it", reliableTx.getBatchIndex());
+                rollupRepository.updateReliableTransaction(reliableTx);
+            }
+        } else {
+            rollupRepository.updateReliableTransaction(reliableTx);
+        }
     }
 
     private void proveL2Batch(ProveTypeEnum proveType) {
@@ -539,6 +551,16 @@ public class RollupServiceImpl implements IRollupService {
             rollupRepository.saveBatchProofAndUpdateReqState(request.getBatchIndex(), request.getProveType(), proof);
             log.info("⚓️ successful to get proof of batch {} and type {} !", request.getBatchIndex(), request.getProveType());
         }
+    }
+
+    private BigInteger queryLastCommittedBatchIndex() {
+        if (proofCommitRollupQueryHeightBackoff == 0) {
+            return l1Client.lastCommittedBatch(proofCommitRollupQueryLevel);
+        }
+        return l1Client.lastCommittedBatch(DefaultBlockParameter.valueOf(
+                l1Client.queryLatestBlockNumber(proofCommitRollupQueryLevel)
+                        .subtract(BigInteger.valueOf(proofCommitRollupQueryHeightBackoff))
+        ));
     }
 
     private BigInteger getProcessedBlockHeight() {

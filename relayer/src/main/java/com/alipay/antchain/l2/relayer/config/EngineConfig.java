@@ -32,9 +32,10 @@ public class EngineConfig {
             BatchCommitTaskExecutor batchCommitTaskExecutor,
             ProofCommitTaskExecutor proofCommitTaskExecutor,
             ReliableTxTaskExecutor reliableTxTaskExecutor,
-            L1MsgPollingTaskExecutor l1MsgPollingTaskExecutor,
+            L1BlockPollingTaskExecutor l1BlockPollingTaskExecutor,
             L1MsgProcessTaskExecutor l1MsgProcessTaskExecutor,
-            ProveL2MsgTaskExecutor proveL2MsgTaskExecutor
+            ProveL2MsgTaskExecutor proveL2MsgTaskExecutor,
+            OracleGasFeedTaskExecutor oracleGasFeedTaskExecutor
     ) {
         Map<BizTaskTypeEnum, BaseScheduleTaskExecutor> res = new HashMap<>();
         res.put(BizTaskTypeEnum.BLOCK_POLLING_TASK, blockPollingTaskExecutor);
@@ -42,9 +43,10 @@ public class EngineConfig {
         res.put(BizTaskTypeEnum.BATCH_COMMIT_TASK, batchCommitTaskExecutor);
         res.put(BizTaskTypeEnum.PROOF_COMMIT_TASK, proofCommitTaskExecutor);
         res.put(BizTaskTypeEnum.RELIABLE_TX_TASK, reliableTxTaskExecutor);
-        res.put(BizTaskTypeEnum.L1MSG_POLLING_TASK, l1MsgPollingTaskExecutor);
+        res.put(BizTaskTypeEnum.L1_BLOCK_POLLING_TASK, l1BlockPollingTaskExecutor);
         res.put(BizTaskTypeEnum.L1MSG_PROCESS_TASK, l1MsgProcessTaskExecutor);
         res.put(BizTaskTypeEnum.L2MSG_PROVE_TASK, proveL2MsgTaskExecutor);
+        res.put(BizTaskTypeEnum.ORACLE_GAS_FEED_TASK, oracleGasFeedTaskExecutor);
         return res;
     }
 }

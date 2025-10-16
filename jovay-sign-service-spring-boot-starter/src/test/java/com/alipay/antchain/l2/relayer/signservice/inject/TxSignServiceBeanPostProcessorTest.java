@@ -1,0 +1,120 @@
+package com.alipay.antchain.l2.relayer.signservice.inject;
+
+import com.alipay.antchain.l2.relayer.signservice.config.TxSignServiceProperties;
+import com.alipay.antchain.l2.relayer.signservice.config.TxSignServicesProperties;
+import com.alipay.antchain.l2.relayer.signservice.core.TxSignServiceFactory;
+import jakarta.annotation.Resource;
+import lombok.Getter;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
+import org.springframework.stereotype.Component;
+import org.springframework.test.annotation.DirtiesContext;
+import org.springframework.test.context.junit4.SpringRunner;
+import org.web3j.crypto.RawTransaction;
+import org.web3j.service.TxSignService;
+
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.notNull;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
+@SpringBootTest(
+        properties = {
+                "jovay.sign-service.test.type=aliyun_kms",
+                "jovay.sign-service.test.kms.endpoint=localhost",
+                "jovay.sign-service.test1.type=web3j_native",
+                "jovay.sign-service.test1.web3j-native.private-key=0x1234",
+                "jovay.sign-service.test2.type=web3j_native",
+                "jovay.sign-service.test2.web3j-native.private-key=0x1234"
+        },
+        classes = {TxSignServiceBeanPostProcessorTest.TestConfig.class, TxSignServiceBeanPostProcessorTest.TestConfig2.class}
+)
+@DirtiesContext
+@RunWith(SpringRunner.class)
+public class TxSignServiceBeanPostProcessorTest {
+
+    @Component
+    @Getter
+    static class TestConfig {
+
+        private TxSignService test2;
+
+        @JovayTxSignService("test")
+        private TxSignService kmsTxSignService;
+
+        @JovayTxSignService("test1")
+        private TxSignService web3jTxSignService;
+
+        @JovayTxSignService("test2")
+        public void setTest2(TxSignService txSignService) {
+            test2 = txSignService;
+        }
+    }
+
+    @Configuration
+    @EnableConfigurationProperties({TxSignServicesProperties.class})
+    static class TestConfig2 {
+
+        @Bean
+        @Primary
+        public static TxSignServiceBeanPostProcessor txSignServiceBeanPostProcessor(
+                TxSignServicesProperties txSignServicesProperties
+        ) {
+            return new TxSignServiceBeanPostProcessor(txSignServicesProperties, txSignServiceFactory);
+        }
+    }
+
+    static class KmsMockService implements TxSignService {
+        @Override
+        public byte[] sign(RawTransaction rawTransaction, long chainId) {
+            return new byte[0];
+        }
+
+        @Override
+        public String getAddress() {
+            return "";
+        }
+    }
+
+    static class NativeMockService implements TxSignService {
+        @Override
+        public byte[] sign(RawTransaction rawTransaction, long chainId) {
+            return new byte[0];
+        }
+
+        @Override
+        public String getAddress() {
+            return "";
+        }
+    }
+
+    private static TxSignServiceFactory txSignServiceFactory = mock(TxSignServiceFactory.class);
+
+    static {
+        when(txSignServiceFactory.createTxSignService(anyString(), notNull())).then(
+                invocationOnMock -> {
+                    var prop = (TxSignServiceProperties) invocationOnMock.getArguments()[1];
+                    return switch (prop.getType()) {
+                        case ALIYUN_KMS -> new KmsMockService();
+                        case WEB3J_NATIVE -> new NativeMockService();
+                    };
+                }
+        );
+    }
+
+    @Resource
+    private TestConfig testConfig;
+
+    @Test
+    public void test() {
+        assertInstanceOf(KmsMockService.class, testConfig.getKmsTxSignService());
+        assertInstanceOf(NativeMockService.class, testConfig.getWeb3jTxSignService());
+        assertInstanceOf(NativeMockService.class, testConfig.getTest2());
+    }
+}

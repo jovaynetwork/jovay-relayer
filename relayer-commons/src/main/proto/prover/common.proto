@@ -41,6 +41,7 @@ message BasicChunkInfo {
 
 // multi chunk in one batch
 message BatchInfo {
+  uint32 batch_version = 6;
   uint64 batch_id = 1;
   repeated BasicChunkInfo chunk_list = 2;
   bytes parent_batch_hash = 4;

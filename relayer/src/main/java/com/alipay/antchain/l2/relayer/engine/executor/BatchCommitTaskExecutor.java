@@ -1,9 +1,10 @@
 package com.alipay.antchain.l2.relayer.engine.executor;
 
 import java.util.concurrent.ExecutorService;
-import javax.annotation.PreDestroy;
-import javax.annotation.Resource;
+import jakarta.annotation.PreDestroy;
+import jakarta.annotation.Resource;
 
+import com.alipay.antchain.l2.relayer.commons.exceptions.L1GasPriceTooHighException;
 import com.alipay.antchain.l2.relayer.commons.models.IDistributedTask;
 import com.alipay.antchain.l2.relayer.dal.repository.ISystemConfigRepository;
 import com.alipay.antchain.l2.relayer.engine.checker.IDistributedTaskChecker;
@@ -40,6 +41,8 @@ public class BatchCommitTaskExecutor extends BaseScheduleTaskExecutor {
             }
             try {
                 rollupService.commitL2Batch();
+            } catch (L1GasPriceTooHighException e) {
+                log.warn("l1 gas price too high, skip this batch commit: ", e);
             } catch (Exception e) {
                 log.error("batch commit failed: ", e);
             }

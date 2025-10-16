@@ -1,6 +1,6 @@
 package com.alipay.antchain.l2.relayer.config;
 
-import javax.annotation.Resource;
+import jakarta.annotation.Resource;
 
 import com.alipay.antchain.l2.relayer.metrics.selfreport.DummySelfReportMetric;
 import com.alipay.antchain.l2.relayer.metrics.selfreport.ISelfReportMetric;

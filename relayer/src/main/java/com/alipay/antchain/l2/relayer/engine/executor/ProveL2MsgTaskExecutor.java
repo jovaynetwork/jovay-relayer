@@ -1,7 +1,7 @@
 package com.alipay.antchain.l2.relayer.engine.executor;
 
 import java.util.concurrent.ExecutorService;
-import javax.annotation.Resource;
+import jakarta.annotation.Resource;
 
 import com.alipay.antchain.l2.relayer.commons.models.IDistributedTask;
 import com.alipay.antchain.l2.relayer.engine.checker.IDistributedTaskChecker;

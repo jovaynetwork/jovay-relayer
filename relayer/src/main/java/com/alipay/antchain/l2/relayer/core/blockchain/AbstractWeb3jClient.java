@@ -2,6 +2,8 @@ package com.alipay.antchain.l2.relayer.core.blockchain;
 
 import java.io.IOException;
 import java.math.BigInteger;
+import java.net.SocketException;
+import java.net.SocketTimeoutException;
 
 import cn.hutool.core.util.ObjectUtil;
 import cn.hutool.core.util.StrUtil;
@@ -16,13 +18,17 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.retry.annotation.Backoff;
+import org.springframework.retry.annotation.Retryable;
 import org.web3j.abi.FunctionEncoder;
 import org.web3j.abi.datatypes.Function;
 import org.web3j.crypto.transaction.type.Transaction4844;
 import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.DefaultBlockParameter;
 import org.web3j.protocol.core.DefaultBlockParameterName;
+import org.web3j.protocol.core.DefaultBlockParameterNumber;
 import org.web3j.protocol.core.methods.response.*;
+import org.web3j.protocol.exceptions.ClientConnectionException;
 import org.web3j.utils.Numeric;
 
 import static com.alipay.antchain.l2.relayer.commons.exceptions.L2RelayerErrorCodeEnum.ROLLUP_SEND_TX_ERROR;
@@ -39,6 +45,7 @@ public abstract class AbstractWeb3jClient implements BasicBlockchainClient {
     @Getter(AccessLevel.PUBLIC)
     private final BaseRawTransactionManager legacyPoolTxManager;
 
+    @Getter(AccessLevel.PUBLIC)
     private final IGasPriceProvider gasPriceProvider;
 
     private final GasLimitPolicyEnum gasLimitPolicy;
@@ -69,8 +76,21 @@ public abstract class AbstractWeb3jClient implements BasicBlockchainClient {
         this.extraGas = extraGas;
     }
 
+    @SneakyThrows
+    @Retryable(retryFor = {ClientConnectionException.class, SocketException.class, SocketTimeoutException.class}, backoff = @Backoff(delay = 100))
+    @Override
+    public EthBlock queryLatestBlockHeader(DefaultBlockParameterName blockParameterName) {
+        EthBlock ethBlock = getWeb3j().ethGetBlockByNumber(blockParameterName, false).send();
+        if (ObjectUtil.isNull(ethBlock) || ObjectUtil.isNull(ethBlock.getBlock())) {
+            throw new RuntimeException("get null latest block from blockchain");
+        }
+        log.debug("get latest block, block height {}", ethBlock.getBlock().getNumber());
+        return ethBlock;
+    }
+
     @Override
     @SneakyThrows
+    @Retryable(retryFor = {ClientConnectionException.class, SocketException.class, SocketTimeoutException.class}, backoff = @Backoff(delay = 100))
     public BigInteger queryLatestBlockNumber(DefaultBlockParameterName blockParameterName) {
         EthBlock ethBlock = getWeb3j().ethGetBlockByNumber(blockParameterName, false).send();
         if (ObjectUtil.isNull(ethBlock) || ObjectUtil.isNull(ethBlock.getBlock())) {
@@ -80,8 +100,21 @@ public abstract class AbstractWeb3jClient implements BasicBlockchainClient {
         return ethBlock.getBlock().getNumber();
     }
 
+    @Override
+    @SneakyThrows
+    @Retryable(retryFor = {ClientConnectionException.class, SocketException.class, SocketTimeoutException.class}, backoff = @Backoff(delay = 100))
+    public EthBlock queryBlockByNumber(BigInteger height) {
+        EthBlock ethBlock = getWeb3j().ethGetBlockByNumber(new DefaultBlockParameterNumber(height), false).send();
+        if (ObjectUtil.isNull(ethBlock) || ObjectUtil.isNull(ethBlock.getBlock())) {
+            throw new RuntimeException("get null block from blockchain by height: " + height);
+        }
+        log.debug("get block number {}", height);
+        return ethBlock;
+    }
+
     @SneakyThrows
     @Override
+    @Retryable(retryFor = {ClientConnectionException.class, SocketException.class, SocketTimeoutException.class}, backoff = @Backoff(delay = 100))
     public TransactionReceipt queryTxReceipt(String txhash) {
         EthGetTransactionReceipt result = getWeb3j().ethGetTransactionReceipt(txhash).send();
         if (result.hasError()) {
@@ -92,6 +125,7 @@ public abstract class AbstractWeb3jClient implements BasicBlockchainClient {
 
     @Override
     @SneakyThrows
+    @Retryable(retryFor = {ClientConnectionException.class, SocketException.class, SocketTimeoutException.class}, backoff = @Backoff(delay = 100))
     public org.web3j.protocol.core.methods.response.Transaction queryTx(String txhash) {
         EthTransaction result = getWeb3j().ethGetTransactionByHash(txhash).send();
         if (result.hasError()) {
@@ -102,6 +136,7 @@ public abstract class AbstractWeb3jClient implements BasicBlockchainClient {
 
     @Override
     @SneakyThrows
+    @Retryable(retryFor = {ClientConnectionException.class, SocketException.class, SocketTimeoutException.class}, backoff = @Backoff(delay = 100))
     public BigInteger queryTxCount(String address, DefaultBlockParameterName name) {
         EthGetTransactionCount result = getWeb3j().ethGetTransactionCount(address, name).send();
         if (result.hasError()) {
@@ -111,6 +146,7 @@ public abstract class AbstractWeb3jClient implements BasicBlockchainClient {
     }
 
     @Override
+    @Retryable(retryFor = {ClientConnectionException.class, SocketException.class, SocketTimeoutException.class}, backoff = @Backoff(delay = 100))
     public EthSendTransaction sendRawTx(byte[] rawSignedTx) {
         try {
             return web3j.ethSendRawTransaction(Numeric.toHexString(rawSignedTx)).send();
@@ -120,6 +156,7 @@ public abstract class AbstractWeb3jClient implements BasicBlockchainClient {
     }
 
     @Override
+    @Retryable(retryFor = {ClientConnectionException.class, SocketException.class, SocketTimeoutException.class}, backoff = @Backoff(delay = 100))
     public BigInteger queryAccountBalance(String address, DefaultBlockParameter blockParameter) {
         try {
             return getWeb3j().ethGetBalance(address, blockParameter).send().getBalance();
@@ -190,15 +227,13 @@ public abstract class AbstractWeb3jClient implements BasicBlockchainClient {
     @WithSpan
     protected TransactionInfo sendBlobTransaction(String to, String encodedFunc, EthBlobs blobs) throws L2RelayerException {
         try {
-            var eip1559GasPrice = this.gasPriceProvider.getEip1559GasPrice();
             var result = this.getBlobPoolTxManager().sendTx(
                     blobs.blobs(),
-                    eip1559GasPrice,
+                    this.gasPriceProvider.getEip4844GasPrice(),
                     createEthCallGasLimitProvider(to, encodedFunc).getGasLimit(encodedFunc),
                     to,
                     BigInteger.ZERO,
-                    encodedFunc,
-                    this.gasPriceProvider.getMaxFeePerBlobGas()
+                    encodedFunc
             );
             dealWithTxResult(result);
             log.info("🔗 send eip4844 tx call {} success with txhash: {}", StrUtil.sub(encodedFunc, 0, 10), result.getEthSendTransaction().getTransactionHash());

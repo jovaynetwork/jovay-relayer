@@ -1,18 +1,19 @@
 package com.alipay.antchain.l2.relayer.service;
 
 import java.math.BigInteger;
+import java.util.Comparator;
 import java.util.Date;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
-import javax.annotation.Resource;
+import java.util.stream.Collectors;
+import jakarta.annotation.Resource;
 
+import cn.hutool.core.collection.ListUtil;
 import cn.hutool.core.date.DatePattern;
 import cn.hutool.core.date.DateUtil;
 import cn.hutool.core.util.ObjectUtil;
 import cn.hutool.core.util.StrUtil;
-import com.alipay.antchain.l2.relayer.commons.enums.ChainTypeEnum;
-import com.alipay.antchain.l2.relayer.commons.enums.ProveTypeEnum;
-import com.alipay.antchain.l2.relayer.commons.enums.ReliableTransactionStateEnum;
-import com.alipay.antchain.l2.relayer.commons.enums.TransactionTypeEnum;
+import com.alipay.antchain.l2.relayer.commons.enums.*;
 import com.alipay.antchain.l2.relayer.commons.exceptions.*;
 import com.alipay.antchain.l2.relayer.commons.models.BatchWrapper;
 import com.alipay.antchain.l2.relayer.commons.models.ReliableTransactionDO;
@@ -21,6 +22,7 @@ import com.alipay.antchain.l2.relayer.core.blockchain.L1Client;
 import com.alipay.antchain.l2.relayer.core.blockchain.L2Client;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.EthNoncePolicyEnum;
 import com.alipay.antchain.l2.relayer.core.tracer.TraceServiceClient;
+import com.alipay.antchain.l2.relayer.dal.repository.IOracleRepository;
 import com.alipay.antchain.l2.relayer.dal.repository.IRollupRepository;
 import com.alipay.antchain.l2.relayer.metrics.otel.IOtelMetric;
 import com.alipay.antchain.l2.relayer.metrics.selfreport.ISelfReportMetric;
@@ -45,6 +47,9 @@ public class ReliableTxServiceImpl implements IReliableTxService {
 
     @Resource
     private IRollupRepository rollupRepository;
+
+    @Resource
+    private IOracleRepository oracleRepository;
 
     @Resource
     private L1Client l1Client;
@@ -83,10 +88,10 @@ public class ReliableTxServiceImpl implements IReliableTxService {
     private IOtelMetric otelMetric;
 
     @Override
-    public void processNotFinalizedTx() {
-        var reliableTransactions = rollupRepository.getNotFinalizedReliableTransactions(processBatchSize);
+    public void processL1NotFinalizedTx() {
+        var reliableTransactions = rollupRepository.getNotFinalizedReliableTransactions(ChainTypeEnum.LAYER_ONE, processBatchSize);
         if (ObjectUtil.isEmpty(reliableTransactions)) {
-            log.debug("No pending reliable tx found, skip it...");
+            log.debug("No L1 pending reliable tx found, skip it...");
             return;
         }
 
@@ -96,21 +101,40 @@ public class ReliableTxServiceImpl implements IReliableTxService {
                         new TransactionCallbackWithoutResult() {
                             @Override
                             protected void doInTransactionWithoutResult(TransactionStatus status) {
-                                switch (tx.getChainType()) {
-                                    case LAYER_ONE:
-                                        processL1PendingTx(tx);
-                                        break;
-                                    case LAYER_TWO:
-                                        processL2PendingTx(tx);
-                                        break;
-                                    default:
-                                        throw new IllegalArgumentException("unsupported chain type: " + tx.getChainType());
-                                }
+                                processL1PendingTx(tx);
                             }
                         }
                 );
+            } catch (L1GasPriceTooHighException e) {
+                log.warn("l1 gas price too high, skip this tx {}-{}-{}: ", tx.getChainType(), tx.getTransactionType(), tx.getBatchIndex(), e);
             } catch (Exception e) {
-                log.error("process reliable tx for batch {}-{} failed: ", tx.getTransactionType(), tx.getBatchIndex(), e);
+                log.error("process l1 reliable tx for batch {}-{} failed: ", tx.getTransactionType(), tx.getBatchIndex(), e);
+            }
+        }
+    }
+
+    @Override
+    public void processL2NotFinalizedTx() {
+        var reliableTransactions = rollupRepository.getNotFinalizedReliableTransactions(ChainTypeEnum.LAYER_TWO, processBatchSize);
+        if (ObjectUtil.isEmpty(reliableTransactions)) {
+            log.debug("No L2 pending reliable tx found, skip it...");
+            return;
+        }
+
+        for (ReliableTransactionDO tx : reliableTransactions) {
+            try {
+                transactionTemplate.execute(
+                        new TransactionCallbackWithoutResult() {
+                            @Override
+                            protected void doInTransactionWithoutResult(TransactionStatus status) {
+                                processL2PendingTx(tx);
+                            }
+                        }
+                );
+            } catch (L1GasPriceTooHighException e) {
+                log.warn("gas price too high, skip this tx {}-{}-{}: ", tx.getChainType(), tx.getTransactionType(), tx.getBatchIndex(), e);
+            } catch (Exception e) {
+                log.error("process L2 reliable tx for batch {}-{} failed: ", tx.getTransactionType(), tx.getBatchIndex(), e);
             }
         }
     }
@@ -125,6 +149,18 @@ public class ReliableTxServiceImpl implements IReliableTxService {
             log.debug("No failed reliable tx found, skip it...");
             return;
         }
+        var l1TxList = reliableTransactions.stream().filter(x -> x.getChainType() == ChainTypeEnum.LAYER_ONE).collect(Collectors.toList());
+        var l2TxList = reliableTransactions.stream().filter(x -> x.getChainType() == ChainTypeEnum.LAYER_TWO).collect(Collectors.toList());
+
+        processL1FailedTx(l1TxList);
+        processL2FailedTx(l2TxList);
+    }
+
+    private void processL1FailedTx(List<ReliableTransactionDO> reliableTransactions) {
+        if(reliableTransactions.isEmpty()) {
+            return;
+        }
+
         reliableTransactions.sort((o1, o2) -> {
             if (o1.getBatchIndex().compareTo(o2.getBatchIndex()) < 0) {
                 return -1;
@@ -133,7 +169,16 @@ public class ReliableTxServiceImpl implements IReliableTxService {
             }
             return Integer.compare(o1.getTransactionType().ordinal(), o2.getTransactionType().ordinal());
         });
-        reliableTransactions.forEach(this::retryTx);
+        reliableTransactions.forEach(this::retryL1Tx);
+    }
+
+    private void processL2FailedTx(List<ReliableTransactionDO> reliableTransactions) {
+        if(reliableTransactions.isEmpty()) {
+            return;
+        }
+        ListUtil.sort(reliableTransactions, Comparator.comparing(ReliableTransactionDO::getBatchIndex));
+        reliableTransactions.sort(Comparator.comparing(ReliableTransactionDO::getBatchIndex));
+        reliableTransactions.forEach(this::retryL2Tx);
     }
 
     private void processL1PendingTx(ReliableTransactionDO tx) {
@@ -143,7 +188,7 @@ public class ReliableTxServiceImpl implements IReliableTxService {
             log.info("nonce {} missed for {} tx {} of batch {}, resend the raw signed tx...",
                     tx.getNonce(), tx.getTransactionType(), tx.getLatestTxHash(), tx.getBatchIndex());
             if (l1NoncePolicy == EthNoncePolicyEnum.NORMAL) {
-                retryTx(tx, false);
+                retryL1Tx(tx, false);
             } else {
                 // if the finalized nonce of sender account is greater than this one's nonce,
                 // it means that no need to resend it.
@@ -152,6 +197,11 @@ public class ReliableTxServiceImpl implements IReliableTxService {
                             tx.getNonce(), tx.getTransactionType(), tx.getLatestTxHash(), tx.getBatchIndex());
                     tx.setState(ReliableTransactionStateEnum.TX_SUCCESS);
                     rollupRepository.updateReliableTransaction(tx);
+                    // WARN: next generation -> The intermediate transactions of retry cannot be found, and the txHash does not exist during the retry process.
+                    TransactionReceipt originalTxReceipt = l1Client.queryTxReceipt(tx.getOriginalTxHash());
+                    if(ObjectUtil.isNotNull(originalTxReceipt) && originalTxReceipt.isStatusOK()) {
+                        createL2GasFeedRequest(tx, originalTxReceipt);
+                    }
                     return;
                 }
                 EthSendTransaction sendResult = l1Client.sendRawTx(tx.getRawTx());
@@ -222,6 +272,8 @@ public class ReliableTxServiceImpl implements IReliableTxService {
                 doNotify(tx);
                 log.info("🎉 tx {} for batch {}-{} has been finalized and success", tx.getLatestTxHash(), tx.getTransactionType(), tx.getBatchIndex());
                 rollupRepository.updateReliableTransactionState(ChainTypeEnum.LAYER_ONE, tx.getBatchIndex(), tx.getTransactionType(), ReliableTransactionStateEnum.TX_SUCCESS);
+                // create oracle request and insert into `oracle_request` table
+                createL2GasFeedRequest(tx, receipt);
             } else {
                 // tx has been packaged
                 if (tx.getState() != ReliableTransactionStateEnum.TX_PACKAGED) {
@@ -242,7 +294,21 @@ public class ReliableTxServiceImpl implements IReliableTxService {
         }
     }
 
-    public void processL2PendingTx(ReliableTransactionDO tx) {
+    private void processL2PendingTx(ReliableTransactionDO tx) {
+        // only oracle feeding tx need to check
+        // if tx is lost
+        if ((tx.getTransactionType() == TransactionTypeEnum.L2_ORACLE_BASE_FEE_FEED_TX || tx.getTransactionType() == TransactionTypeEnum.L2_ORACLE_BATCH_FEE_FEED_TX)
+                && ObjectUtil.isNull(l2Client.queryTxWithRetry(tx.getSenderAccount(), tx.getLatestTxHash(), BigInteger.valueOf(tx.getNonce())))
+        ) {
+            // tx not found on blockchain
+            log.error("🚨 oracle feeding tx is lost, oracle index: {}, oracle type: {}, txHash: {}, now just mark it's reliable state as TX_SUCCESS...",
+                    tx.getBatchIndex(), tx.getTransactionType(), tx.getLatestTxHash());
+            // WARN: oracle tx lost, just skip it, then send new next oracle tx directly
+            tx.setState(ReliableTransactionStateEnum.TX_SUCCESS);
+            rollupRepository.updateReliableTransaction(tx);
+            return;
+        }
+
         TransactionReceipt receipt = l2Client.queryTxReceipt(tx.getLatestTxHash());
         // tx not packaged
         if (ObjectUtil.isNull(receipt)) {
@@ -253,7 +319,7 @@ public class ReliableTxServiceImpl implements IReliableTxService {
 
         // tx has been confirmed
         if (receipt.getBlockNumber().compareTo(l2Client.queryLatestBlockNumber(l2BlockPollingPolicy)) <= 0
-            && receipt.getBlockNumber().compareTo(BigInteger.ZERO) > 0) {
+                && receipt.getBlockNumber().compareTo(BigInteger.ZERO) > 0) {
             if (receipt.isStatusOK()) {
                 log.info("🎉 tx {}-{} success", tx.getTransactionType(), tx.getLatestTxHash());
                 rollupRepository.updateReliableTransactionState(tx.getOriginalTxHash(), ReliableTransactionStateEnum.TX_SUCCESS);
@@ -305,11 +371,48 @@ public class ReliableTxServiceImpl implements IReliableTxService {
         });
     }
 
-    private void retryTx(ReliableTransactionDO tx) {
+    private void retryL1Tx(ReliableTransactionDO tx) {
         if (!checkIfRetry(tx)) {
             return;
         }
-        retryTx(tx, true);
+        try {
+            retryL1Tx(tx, true);
+        } catch (L1GasPriceTooHighException e) {
+            log.warn("gas price too high when retry tx {}-{}", tx.getTransactionType(), tx.getBatchIndex(), e);
+        }
+    }
+
+    private void retryL2Tx(ReliableTransactionDO tx) {
+        if(tx.getRetryCount() >= retryCountLimit) {
+            log.info("retry {} tx for oracle request Index {} excess retry limit: {}", tx.getTransactionType(), tx.getBatchIndex(), retryCountLimit);
+            return;
+        }
+
+        log.info("retry {} l2 tx for oracle request Index {}", tx.getTransactionType(), tx.getBatchIndex());
+        TransactionInfo transactionInfo = null;
+        if (tx.getTransactionType() != TransactionTypeEnum.L1_MSG_TX) {
+            try {
+                var txObj = TransactionDecoder.decode(Numeric.toHexString(tx.getRawTx()));
+                transactionInfo = l2Client.resendGasFeedTx(txObj.getData());
+            } catch (L2RelayerException e) {
+                log.error("unexpect exception from eth call when resend tx {}-{}:", tx.getTransactionType(), tx.getBatchIndex(), e);
+                tx.setRevertReason("unexpected exception, plz check log");
+            }
+        }
+
+        if (ObjectUtil.isNotNull(transactionInfo)) {
+            log.info("resend l2 tx {} with nonce {} for {}-{}", transactionInfo.getTxHash(), transactionInfo.getNonce(), tx.getTransactionType(), tx.getBatchIndex());
+            tx.setLatestTxHash(transactionInfo.getTxHash());
+            tx.setLatestTxSendTime(transactionInfo.getSendTxTime());
+            tx.setNonce(transactionInfo.getNonce().longValue());
+            tx.setRawTx(transactionInfo.getRawTx());
+            tx.setSenderAccount(transactionInfo.getSenderAccount());
+            tx.setState(ReliableTransactionStateEnum.TX_PENDING);
+        }
+
+        tx.setRetryCount(tx.getRetryCount() + 1);
+
+        rollupRepository.updateReliableTransaction(tx);
     }
 
     private boolean checkIfRetry(ReliableTransactionDO tx) {
@@ -348,7 +451,7 @@ public class ReliableTxServiceImpl implements IReliableTxService {
         return true;
     }
 
-    private void retryTx(ReliableTransactionDO tx, boolean addCountOrNot) {
+    private void retryL1Tx(ReliableTransactionDO tx, boolean addCountOrNot) {
         log.info("retry {} tx for batch {}", tx.getTransactionType(), tx.getBatchIndex());
         TransactionInfo transactionInfo = null;
         try {
@@ -367,6 +470,8 @@ public class ReliableTxServiceImpl implements IReliableTxService {
         } catch (L1ContractFatalException e) {
             log.error("resend for batch {}-{} failed when eth call contract: ", tx.getTransactionType(), tx.getBatchIndex(), e);
             tx.setRevertReason(e.getRevertReason());
+        } catch (L1GasPriceTooHighException e) {
+            throw e;
         } catch (L2RelayerException e) {
             log.error("unexpect exception from eth call when resend tx {}-{}:", tx.getTransactionType(), tx.getBatchIndex(), e);
             tx.setRevertReason("unexpected exception, plz check log");
@@ -387,5 +492,32 @@ public class ReliableTxServiceImpl implements IReliableTxService {
         }
 
         rollupRepository.updateReliableTransaction(tx);
+    }
+
+    private void createL2GasFeedRequest(ReliableTransactionDO tx, TransactionReceipt txReceipt) {
+        try {
+            if (tx.getTransactionType().equals(TransactionTypeEnum.BATCH_COMMIT_TX)) {
+                oracleRepository.saveRollupTxReceipt(
+                        tx.getBatchIndex(),
+                        OracleTypeEnum.L2_GAS_ORACLE,
+                        OracleRequestTypeEnum.L2_BATCH_COMMIT,
+                        txReceipt
+                );
+            } else if (
+                    tx.getTransactionType().equals(TransactionTypeEnum.BATCH_TEE_PROOF_COMMIT_TX)
+                            || tx.getTransactionType().equals(TransactionTypeEnum.BATCH_ZK_PROOF_COMMIT_TX)
+            ) {
+                oracleRepository.saveRollupTxReceipt(
+                        tx.getBatchIndex(),
+                        OracleTypeEnum.L2_GAS_ORACLE,
+                        OracleRequestTypeEnum.L2_BATCH_PROVE,
+                        txReceipt
+                );
+            }
+            log.info("🎉 create L2 gas feed Request success, batchIndex: {}", tx.getBatchIndex());
+        } catch (Exception e) {
+            log.error("🚨 create L2 gas feed Request failed, batchIndex: {}.", tx.getBatchIndex());
+            throw new RuntimeException(e);
+        }
     }
 }

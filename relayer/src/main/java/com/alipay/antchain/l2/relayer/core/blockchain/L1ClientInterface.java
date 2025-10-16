@@ -11,7 +11,7 @@ import com.alipay.antchain.l2.relayer.commons.models.ReliableTransactionDO;
 import com.alipay.antchain.l2.relayer.commons.models.TransactionInfo;
 import io.reactivex.Flowable;
 import org.web3j.crypto.transaction.type.Transaction4844;
-import org.web3j.protocol.core.DefaultBlockParameterName;
+import org.web3j.protocol.core.DefaultBlockParameter;
 
 public interface L1ClientInterface {
 
@@ -23,7 +23,7 @@ public interface L1ClientInterface {
 
     BigInteger lastCommittedBatch();
 
-    BigInteger lastCommittedBatch(DefaultBlockParameterName blockLevel);
+    BigInteger lastCommittedBatch(DefaultBlockParameter blockParam);
 
     BigInteger lastZkVerifiedBatch();
 
@@ -46,6 +46,8 @@ public interface L1ClientInterface {
     TransactionInfo resendRollupTx(String encodedFunc);
 
     TransactionInfo speedUpRollupTx(ReliableTransactionDO tx);
+
+    TransactionInfo speedUpRollupTx(ReliableTransactionDO tx, BigInteger maxFeePerGas, BigInteger maxPriorityFeePerGas, BigInteger maxFeePerBlobGas);
 
     Flowable<L1MsgTransactionBatch> flowableL1MsgFromMailbox(BigInteger start, BigInteger end);
 }

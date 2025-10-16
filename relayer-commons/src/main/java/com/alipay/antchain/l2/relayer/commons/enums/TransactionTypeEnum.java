@@ -8,5 +8,9 @@ public enum TransactionTypeEnum {
 
     BATCH_ZK_PROOF_COMMIT_TX,
 
-    L1_MSG_TX
+    L1_MSG_TX,
+
+    L2_ORACLE_BASE_FEE_FEED_TX,
+
+    L2_ORACLE_BATCH_FEE_FEED_TX,
 }

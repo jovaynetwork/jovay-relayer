@@ -6,7 +6,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
-import javax.annotation.Resource;
+import jakarta.annotation.Resource;
 
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.collection.ListUtil;
@@ -459,12 +459,19 @@ public class RollupRepository implements IRollupRepository {
     }
 
     @Override
-    public List<ReliableTransactionDO> getNotFinalizedReliableTransactions(int batchSize) {
+    public List<ReliableTransactionDO> getNotFinalizedReliableTransactions(ChainTypeEnum chainType, int batchSize) {
         var entities = reliableTransactionMapper.selectList(
                 new LambdaQueryWrapper<ReliableTransactionEntity>()
-                        .or(wrapper -> wrapper.eq(ReliableTransactionEntity::getState, ReliableTransactionStateEnum.TX_PENDING))
-                        .or(wrapper -> wrapper.eq(ReliableTransactionEntity::getState, ReliableTransactionStateEnum.TX_PACKAGED))
-                        .last("limit " + batchSize)
+                        .eq(ReliableTransactionEntity::getChainType, chainType)
+                        .and(
+                                w -> w.eq(
+                                                ReliableTransactionEntity::getState,
+                                                ReliableTransactionStateEnum.TX_PENDING)
+                                        .or(wrapper -> wrapper.eq(
+                                                ReliableTransactionEntity::getState,
+                                                ReliableTransactionStateEnum.TX_PACKAGED
+                                        ))
+                        ).last("limit " + batchSize)
         );
         if (ObjectUtil.isEmpty(entities)) {
             return ListUtil.empty();

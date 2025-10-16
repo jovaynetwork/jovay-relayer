@@ -4,7 +4,9 @@ import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
-import javax.annotation.Resource;
+
+import com.alipay.antchain.l2.relayer.commons.enums.TransactionTypeEnum;
+import jakarta.annotation.Resource;
 
 import cn.hutool.core.date.DatePattern;
 import cn.hutool.core.date.DateUtil;
@@ -49,6 +51,9 @@ public class RollupAlarm {
     @Value("${l2-relayer.alarm.rollup.tx-over-pending-threshold:1800000}")
     private long txDelayedThreshold;
 
+    @Value("${l2-relayer.alarm.rollup.max-gap-between-batch-and-proof-commit:20}")
+    private long maxGapBetweenBatchAndProofCommit;
+
     @Resource
     private IRollupRepository rollupRepository;
 
@@ -60,6 +65,7 @@ public class RollupAlarm {
         checkDelayedChunk();
         checkDelayedBatch();
         checkOverPendingTransactions();
+        checkGapBetweenBatchAndProofCommit();
     }
 
     private void checkProveReqs() {
@@ -113,6 +119,25 @@ public class RollupAlarm {
                     log.error("🚔 rollup alarm: delayed tx {} is pending since {}",
                             tx.getOriginalTxHash(), DateUtil.format(tx.getGmtCreate(), DatePattern.NORM_DATETIME_MS_PATTERN));
                 });
+    }
+
+    private void checkGapBetweenBatchAndProofCommit() {
+        var batchCommittedIndex = rollupRepository.getRollupNumberRecord(ChainTypeEnum.LAYER_TWO, RollupNumberRecordTypeEnum.BATCH_COMMITTED);
+        if (batchCommittedIndex == null) {
+            return;
+        }
+        var batchIndex = batchCommittedIndex.subtract(BigInteger.valueOf(maxGapBetweenBatchAndProofCommit));
+        if (batchIndex.compareTo(BigInteger.ZERO) <= 0) {
+            return;
+        }
+        if (ObjectUtil.isNull(rollupRepository.getReliableTransaction(
+                ChainTypeEnum.LAYER_ONE,
+                batchIndex,
+                TransactionTypeEnum.BATCH_TEE_PROOF_COMMIT_TX
+        ))) {
+            log.error("🚔 rollup alarm: gap between batch and proof committed is over limit, latest batch committed is {}",
+                    batchCommittedIndex);
+        }
     }
 
     private boolean isTimeOverThreshold(Date lastModified, long threshold) {

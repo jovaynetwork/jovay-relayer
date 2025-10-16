@@ -1,7 +1,7 @@
 package com.alipay.antchain.l2.relayer.query.dal.repo;
 
 import java.math.BigInteger;
-import javax.annotation.Resource;
+import jakarta.annotation.Resource;
 
 import cn.hutool.core.util.ObjectUtil;
 import com.alipay.antchain.l2.relayer.dal.entities.BatchesEntity;

@@ -1,7 +1,7 @@
 package com.alipay.antchain.l2.relayer.engine.checker;
 
 import java.util.concurrent.CompletableFuture;
-import javax.annotation.Resource;
+import jakarta.annotation.Resource;
 
 import cn.hutool.core.util.ObjectUtil;
 import com.alipay.antchain.l2.relayer.commons.enums.BizTaskTypeEnum;

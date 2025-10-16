@@ -5,16 +5,19 @@ import java.util.Date;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import cn.hutool.core.util.ByteUtil;
 import cn.hutool.core.util.HexUtil;
 import cn.hutool.core.util.StrUtil;
-import com.alipay.antchain.l2.relayer.commons.l2basic.Batch;
-import com.alipay.antchain.l2.relayer.commons.l2basic.BatchHeader;
-import com.alipay.antchain.l2.relayer.commons.l2basic.L2MsgProofData;
+import com.alibaba.fastjson.JSON;
+import com.alipay.antchain.l2.relayer.commons.enums.OracleRequestTypeEnum;
+import com.alipay.antchain.l2.relayer.commons.enums.OracleTransactionStateEnum;
+import com.alipay.antchain.l2.relayer.commons.enums.OracleTypeEnum;
+import com.alipay.antchain.l2.relayer.commons.l2basic.*;
 import com.alipay.antchain.l2.relayer.commons.merkle.AppendMerkleTree;
 import com.alipay.antchain.l2.relayer.commons.models.*;
 import com.alipay.antchain.l2.relayer.dal.entities.*;
 import lombok.NonNull;
+import org.springframework.util.ObjectUtils;
+import org.web3j.protocol.core.methods.response.TransactionReceipt;
 import org.web3j.utils.Numeric;
 
 public class ConvertUtil {
@@ -77,7 +80,7 @@ public class ConvertUtil {
 
     public static BatchesEntity convertFromBatch(BatchWrapper batchWrapper) {
         BatchesEntity entity = new BatchesEntity();
-        entity.setVersion((int) batchWrapper.getBatchHeader().getVersion());
+        entity.setVersion((int) batchWrapper.getBatchHeader().getVersion().getValue());
         entity.setBatchHeaderHash(HexUtil.encodeHexStr(batchWrapper.getBatchHeader().getHash()));
         entity.setBatchIndex(batchWrapper.getBatchHeader().getBatchIndex().toString());
         entity.setL1MsgRollingHash(HexUtil.encodeHexStr(batchWrapper.getBatchHeader().getL1MsgRollingHash()));
@@ -87,7 +90,7 @@ public class ConvertUtil {
         entity.setParentBatchHash(HexUtil.encodeHexStr(batchWrapper.getBatchHeader().getParentBatchHash()));
         entity.setStartNumber(batchWrapper.getBatch().getStartBlockNumber().toString());
         entity.setEndNumber(batchWrapper.getBatch().getEndBlockNumber().toString());
-        entity.setChunkNum(batchWrapper.getBatch().getChunks().size());
+        entity.setChunkNum(((ChunksPayload) batchWrapper.getBatch().getPayload()).chunks().size());
         entity.setPostStateRoot(HexUtil.encodeHexStr(batchWrapper.getPostStateRoot()));
         entity.setL2MsgRoot(HexUtil.encodeHexStr(batchWrapper.getL2MsgRoot()));
         return entity;
@@ -101,7 +104,7 @@ public class ConvertUtil {
             BigInteger endBlockNum
     ) {
         BatchesEntity entity = new BatchesEntity();
-        entity.setVersion((int) batchHeader.getVersion());
+        entity.setVersion((int) batchHeader.getVersion().getValue());
         entity.setBatchHeaderHash(HexUtil.encodeHexStr(batchHeader.getHash()));
         entity.setBatchIndex(batchHeader.getBatchIndex().toString());
         entity.setL1MsgRollingHash(HexUtil.encodeHexStr(batchHeader.getL1MsgRollingHash()));
@@ -118,19 +121,20 @@ public class ConvertUtil {
 
     public static BatchWrapper convertFromBatchEntityAndChunks(BatchesEntity entity, @NonNull List<ChunkWrapper> chunks, EthBlobs blobs) {
         BatchWrapper wrapper = new BatchWrapper();
+        var blobsDaData = ObjectUtils.isEmpty(blobs) ? null : BlobsDaData.lazyBuildFrom(blobs);
         wrapper.setBatch(
                 Batch.builder()
                         .batchHeader(
                                 BatchHeader.builder()
-                                        .version(ByteUtil.intToByte(entity.getVersion()))
+                                        .version(BatchVersionEnum.from(entity.getVersion()))
                                         .batchIndex(new BigInteger(entity.getBatchIndex()))
                                         .l1MsgRollingHash(Numeric.hexStringToByteArray(entity.getL1MsgRollingHash()))
                                         .dataHash(HexUtil.decodeHex(entity.getDataHash()))
                                         .parentBatchHash(HexUtil.decodeHex(entity.getParentBatchHash()))
                                         .hash(HexUtil.decodeHex(entity.getBatchHeaderHash()))
                                         .build()
-                        ).chunks(chunks.stream().map(ChunkWrapper::getChunk).collect(Collectors.toList()))
-                        .blobs(blobs)
+                        ).payload(new ChunksPayload(chunks.stream().map(ChunkWrapper::getChunk).collect(Collectors.toList())))
+                        .daData(blobsDaData)
                         .build()
         );
         wrapper.setPostStateRoot(HexUtil.decodeHex(entity.getPostStateRoot()));
@@ -149,7 +153,7 @@ public class ConvertUtil {
                 Batch.builder()
                         .batchHeader(
                                 BatchHeader.builder()
-                                        .version(ByteUtil.intToByte(entity.getVersion()))
+                                        .version(BatchVersionEnum.from(entity.getVersion()))
                                         .batchIndex(new BigInteger(entity.getBatchIndex()))
                                         .l1MsgRollingHash(Numeric.hexStringToByteArray(entity.getL1MsgRollingHash()))
                                         .dataHash(HexUtil.decodeHex(entity.getDataHash()))
@@ -170,7 +174,7 @@ public class ConvertUtil {
 
     public static BatchHeader convertFromBatchEntity(BatchesEntity entity) {
         return BatchHeader.builder()
-                .version(ByteUtil.intToByte(entity.getVersion()))
+                .version(BatchVersionEnum.from(entity.getVersion()))
                 .batchIndex(new BigInteger(entity.getBatchIndex()))
                 .l1MsgRollingHash(Numeric.hexStringToByteArray(entity.getL1MsgRollingHash()))
                 .dataHash(HexUtil.decodeHex(entity.getDataHash()))
@@ -218,5 +222,25 @@ public class ConvertUtil {
 
     public static AppendMerkleTree convertFromL2MerkleTreeEntity(L2MerkleTreeEntity entity) {
         return new AppendMerkleTree(entity.getNextMsgNonce(), entity.getBranches());
+    }
+
+    public static OracleRequestEntity convertFromL1BlockFeeInfo(L1BlockFeeInfo blockFeeInfo, OracleTypeEnum oracleType, OracleRequestTypeEnum requestTypeEnum, OracleTransactionStateEnum txState) {
+        OracleRequestEntity entity = new OracleRequestEntity();
+        entity.setOracleType(oracleType);
+        entity.setOracleTaskType(requestTypeEnum);
+        entity.setRequestIndex(blockFeeInfo.getNumber());
+        entity.setRawData(JSON.toJSONBytes(blockFeeInfo));
+        entity.setTxState(txState);
+        return entity;
+    }
+
+    public static OracleRequestEntity convertFromTxReceipt(TransactionReceipt txReceipt, BigInteger batchIndex, OracleTypeEnum oracleType, OracleRequestTypeEnum requestTypeEnum, OracleTransactionStateEnum txState) {
+        OracleRequestEntity entity = new OracleRequestEntity();
+        entity.setOracleType(oracleType);
+        entity.setOracleTaskType(requestTypeEnum);
+        entity.setRequestIndex(batchIndex);
+        entity.setRawData(JSON.toJSONBytes(txReceipt));
+        entity.setTxState(txState);
+        return entity;
     }
 }

@@ -9,7 +9,9 @@ import com.alibaba.fastjson.TypeReference;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.etherscan.EtherscanGetGasOracleResult;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.etherscan.EtherscanResponse;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.model.Eip1559GasPrice;
+import com.alipay.antchain.l2.relayer.core.blockchain.helper.model.Eip4844GasPrice;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.model.GasPriceProviderConfig;
+import com.alipay.antchain.l2.relayer.core.blockchain.helper.model.IGasPrice;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.Request;
 import okhttp3.Response;
@@ -66,7 +68,12 @@ public class EtherscanGasPriceProvider extends ApiGasPriceProvider {
     }
 
     @Override
-    public Eip1559GasPrice getEip1559GasPrice() {
+    public IGasPrice getEip1559GasPrice() {
         return new Eip1559GasPrice(getBaseFee().multiply(BigInteger.valueOf(2)), getMaxPriorityFeePerGas());
+    }
+
+    @Override
+    public IGasPrice getEip4844GasPrice() {
+        return new Eip4844GasPrice(getBaseFee().multiply(BigInteger.valueOf(2)), getMaxPriorityFeePerGas(), getMaxFeePerBlobGas());
     }
 }

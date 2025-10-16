@@ -1,6 +1,6 @@
 <div align="center">
-  <img alt="am logo" src="https://antchainbridge.oss-cn-shanghai.aliyuncs.com/antchainbridge/document/picture/antchain.png" width="250" >
-  <h1 align="center">AntChain L2 Relayer</h1>
+  <img alt="am logo" src="https://mdn.alipayobjects.com/huamei_hsbbrh/afts/img/A*HhJlTLtDKywAAAAAQVAAAAgAeiOMAQ/original" width="250" >
+  <h1 align="center">Jovay Relayer</h1>
   <p align="center">
     <a href="http://makeapullrequest.com">
       <img alt="pull requests welcome badge" src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat">

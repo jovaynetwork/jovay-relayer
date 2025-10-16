@@ -3,20 +3,25 @@ package com.alipay.antchain.l2.relayer.core.layer2;
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.List;
-import javax.annotation.Resource;
 
+import cn.hutool.core.collection.ListUtil;
+import cn.hutool.core.lang.Assert;
 import cn.hutool.core.util.ObjectUtil;
+import com.alibaba.fastjson.JSONObject;
 import com.alipay.antchain.l2.relayer.commons.enums.ChainTypeEnum;
 import com.alipay.antchain.l2.relayer.commons.enums.ProveTypeEnum;
 import com.alipay.antchain.l2.relayer.commons.enums.RollupNumberRecordTypeEnum;
 import com.alipay.antchain.l2.relayer.commons.exceptions.BlockPollingException;
 import com.alipay.antchain.l2.relayer.commons.exceptions.InvalidBatchException;
 import com.alipay.antchain.l2.relayer.commons.exceptions.InvalidChunkException;
+import com.alipay.antchain.l2.relayer.commons.l2basic.BatchVersionEnum;
+import com.alipay.antchain.l2.relayer.commons.l2basic.BlobsDaData;
 import com.alipay.antchain.l2.relayer.commons.l2basic.Chunk;
+import com.alipay.antchain.l2.relayer.commons.l2basic.ChunksPayload;
 import com.alipay.antchain.l2.relayer.commons.models.BatchWrapper;
 import com.alipay.antchain.l2.relayer.commons.models.ChunkWrapper;
-import com.alipay.antchain.l2.relayer.commons.models.EthBlobs;
-import com.alipay.antchain.l2.relayer.commons.utils.RollupUtils;
+import com.alipay.antchain.l2.relayer.commons.specs.IRollupSpecs;
+import com.alipay.antchain.l2.relayer.commons.specs.forks.ForkInfo;
 import com.alipay.antchain.l2.relayer.commons.utils.Utils;
 import com.alipay.antchain.l2.relayer.config.RollupConfig;
 import com.alipay.antchain.l2.relayer.core.blockchain.L1Client;
@@ -24,6 +29,8 @@ import com.alipay.antchain.l2.relayer.core.prover.ProverControllerClient;
 import com.alipay.antchain.l2.relayer.dal.repository.IRollupRepository;
 import com.alipay.antchain.l2.relayer.metrics.otel.IOtelMetric;
 import com.alipay.antchain.l2.trace.BasicBlockTrace;
+import jakarta.annotation.Resource;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -44,22 +51,37 @@ public class RollupAggregator implements IRollupAggregator {
     private ProverControllerClient proverControllerClient;
 
     @Resource
+    private IRollupSpecs rollupSpecs;
+
+    @Resource
     private IOtelMetric otelMetric;
+
+    /**
+     * Current batch chunks memory cache.
+     * Going to upgrade the growing batch calculation logic to optimize these stuff.
+     */
+    private List<Chunk> growingBatchChunks = new ArrayList<>();
 
     @Override
     public BigInteger process(BasicBlockTrace blockTrace, BigInteger currHeight) {
+        // Current building chunk index.
         long nextChunkIndex = getNextChunkIndex();
+        // Current building batch index.
         BigInteger nextBatchIndex = getNextBatchIndex();
+        // Tx number already counted from this building chunk.
         long currTxCntOfNextChunk = getChunkTxCount();
+        // Jovay Transaction Call data size already counted from this building chunk.
         long currCallDataSizeCountOfNextChunk = getChunkCallDataCount();
+        // Calc the sum of transaction calldata size from curr block
         long callDataSize = blockTrace.getTransactionsList().stream().map(Utils::getTxDataSize).reduce(Integer::sum).orElse(0);
         BigInteger currChunkStartBlockNumber = getCurrChunkStartBlockNumber(nextChunkIndex, nextBatchIndex);
         // if we add this block to the building chunk, let's see if that over batch tx data size limit.
         var buildingChunk = buildL2NextChunk(nextBatchIndex, nextChunkIndex, currChunkStartBlockNumber, currHeight);
-        var growingBatchByteSize = getGrowingBatchByteSize(buildingChunk);
-        log.debug("add this block and then commit batch, the blob byte size is {}", growingBatchByteSize);
-
-        var overBatchBlobLimitFlag = growingBatchByteSize - rollupConfig.getBatchCommitBlobSizeLimit() * EthBlobs.CAPACITY_BYTE_PER_BLOB;
+        // Growing batch info contains the uncompressed batch data.
+        // And capable to calc the actual eip4844 blobs size if rollup the building batch now.
+        var growingBatchInfo = getGrowingBatchInfo(buildingChunk);
+        var overBatchBlobLimitFlag = growingBatchInfo.getOverBatchBlobLimitFlag(rollupConfig.getBatchCommitBlobSizeLimit());
+        log.debug("add this block and then commit batch, the growing batch info is {}", growingBatchInfo.toJson());
 
         long zkAccumulator = getChunkZkCycleAccumulator();
         // if next chunk ready
@@ -120,14 +142,25 @@ public class RollupAggregator implements IRollupAggregator {
             }
 
             if (ObjectUtil.isNotNull(currChunk)) {
+                // check the new chunk to update the memory cache list
+                if (currChunk.getChunkIndex() == 0) {
+                    // if the first chunk of batch, then update the memory cache list
+                    growingBatchChunks = ListUtil.toList(currChunk.getChunk());
+                    log.info("update the growing chunks to new list object: (batch {}, chunk {})",
+                            currChunk.getBatchIndex(), currChunk.getChunkIndex());
+                } else {
+                    growingBatchChunks.add(currChunk.getChunk());
+                    log.info("add the next chunk into memory cache: (batch {}, chunk {})", currChunk.getBatchIndex(), currChunk.getChunkIndex());
+                }
+
                 rollupRepository.saveChunk(validateChunk(currChunk));
                 log.info("👏 chunk {} is ready on block height {}", nextChunkIndex, lastBlockHeight);
-                log.info("current chunk parameters: (zk_sum: {} + {}, curr_tx_cnt: {} + {}, curr_call_data_size_cnt: {} + {}, chunk_start_height: {}, growing_batch_bit_size: {})",
+                log.info("current chunk parameters: (zk_sum: {} + {}, curr_tx_cnt: {} + {}, curr_call_data_size_cnt: {} + {}, chunk_start_height: {}, growing_batch_info: {})",
                         zkAccumulator, blockTrace.getZkCycles(),
                         currTxCntOfNextChunk, blockTrace.getTransactionsCount(),
                         currCallDataSizeCountOfNextChunk, callDataSize,
                         currChunkStartBlockNumber,
-                        growingBatchByteSize
+                        growingBatchInfo.toJson()
                 );
 
                 proverControllerClient.notifyChunk(nextBatchIndex, nextChunkIndex);
@@ -139,7 +172,8 @@ public class RollupAggregator implements IRollupAggregator {
             var lastBlockTrace = currHeight.compareTo(lastBlockHeight) == 0 ? blockTrace : rollupRepository.getL2BlockTrace(lastBlockHeight);
             if (overBatchBlobLimitFlag >= 0
                 || rollupConfig.getMaxTimeIntervalBetweenBatches() <= lastBlockTrace.getHeader().getTimestamp() - getStartBlockTimestampForBatch(nextBatchIndex)) {
-                var nextBatch = validateBatch(BatchWrapper.createBatchV0(
+                var nextBatch = validateBatch(BatchWrapper.createBatch(
+                        growingBatchInfo.getBatchVersion(),
                         nextBatchIndex,
                         rollupRepository.getBatch(nextBatchIndex.subtract(BigInteger.ONE), false),
                         lastBlockTrace.getHeader().getStateRoot().toByteArray(),
@@ -149,7 +183,7 @@ public class RollupAggregator implements IRollupAggregator {
                 ));
 
                 log.info("🧱 build next batch (index: {}, hash: {}) with {} chunks from block height {} to {} included",
-                        nextBatch.getBatch().getBatchIndex(), nextBatch.getBatch().getBatchHashHex(), nextBatch.getBatch().getChunks().size(),
+                        nextBatch.getBatch().getBatchIndex(), nextBatch.getBatch().getBatchHashHex(), ((ChunksPayload) nextBatch.getBatch().getPayload()).chunks().size(),
                         nextBatch.getBatch().getStartBlockNumber(), nextBatch.getBatch().getEndBlockNumber());
 
                 proverControllerClient.proveBatch(nextBatch);
@@ -165,7 +199,11 @@ public class RollupAggregator implements IRollupAggregator {
                 nextChunkIndex = 0;
                 otelMetric.recordBatchConstructedEvent(nextBatch);
 
-                log.info("🏅 successful to process batch {} with {} chunks", nextBatch.getBatch().getBatchIndex(), nextBatch.getBatch().getChunks().size());
+                log.info("🏅 successful to process batch-v{} {} with {} chunks",
+                        nextBatch.getBatchHeader().getVersion().getValue(),
+                        nextBatch.getBatch().getBatchIndex(),
+                        ((ChunksPayload) nextBatch.getBatch().getPayload()).chunks().size()
+                );
             } else {
                 log.info("🏆 successful to process chunk {}@{}", nextBatchIndex, nextChunkIndex);
                 // batch not ready, so accumulate chunk index
@@ -187,17 +225,30 @@ public class RollupAggregator implements IRollupAggregator {
                || currCallDataSizeCountOfNextChunk + callDataSize > rollupConfig.getMaxCallDataInChunk();
     }
 
-    protected int getGrowingBatchByteSize(ChunkWrapper currChunk) {
-        var chunkList = new ArrayList<Chunk>();
-        for (int i = 0; i < currChunk.getChunkIndex(); i++) {
-            var chunkWrapper = rollupRepository.getChunk(currChunk.getBatchIndex(), i);
-            if (ObjectUtil.isNull(chunkWrapper)) {
-                throw new BlockPollingException("get null prev chunk for batch {} and chunk {}", currChunk.getBatchIndex(), currChunk.getChunkIndex());
+    private GrowingBatchInfo getGrowingBatchInfo(ChunkWrapper currChunk) {
+        if (growingBatchChunks.isEmpty()) {
+            // create the growing chunks memory cache
+            // when the program runs here first time.
+            for (int i = 0; i < currChunk.getChunkIndex(); i++) {
+                var chunkWrapper = rollupRepository.getChunk(currChunk.getBatchIndex(), i);
+                if (ObjectUtil.isNull(chunkWrapper)) {
+                    throw new BlockPollingException("get null prev chunk for batch {} and chunk {}", currChunk.getBatchIndex(), currChunk.getChunkIndex());
+                }
+                growingBatchChunks.add(chunkWrapper.getChunk());
             }
-            chunkList.add(chunkWrapper.getChunk());
         }
+
+        // do some checks
+        Assert.isTrue(currChunk.getChunkIndex() == 0 || !growingBatchChunks.isEmpty());
+        for (int i = 0; i < growingBatchChunks.size() - 1; i++) {
+            Assert.equals(
+                    growingBatchChunks.get(i).getEndBlockNumber().add(BigInteger.ONE),
+                    growingBatchChunks.get(i + 1).getStartBlockNumber()
+            );
+        }
+        var chunkList = new ArrayList<>(growingBatchChunks);
         chunkList.add(currChunk.getChunk());
-        return RollupUtils.serializeChunks(chunkList).length;
+        return new GrowingBatchInfo(getCurrBatchVersion(currChunk.getBatchIndex()), new ChunksPayload(chunkList).serialize());
     }
 
     private BatchWrapper validateBatch(BatchWrapper batchWrapper) {
@@ -333,5 +384,57 @@ public class RollupAggregator implements IRollupAggregator {
 
     private long getChunkCallDataCount() {
         return rollupRepository.getRollupNumberRecord(ChainTypeEnum.LAYER_TWO, RollupNumberRecordTypeEnum.NEXT_CHUNK_CALL_DATA_COUNT).longValue();
+    }
+
+    private BatchVersionEnum getCurrBatchVersion(BigInteger currBatchIndex) {
+        return getCurrFork(currBatchIndex).getBatchVersion();
+    }
+    private ForkInfo getCurrFork(BigInteger currBatchIndex) {
+        return this.rollupSpecs.getFork(currBatchIndex);
+    }
+
+    @Getter
+    private static class GrowingBatchInfo {
+        private final BatchVersionEnum batchVersion;
+        private final byte[] rawPayload;
+        private int compressedDataSize = -1;
+
+        public GrowingBatchInfo(BatchVersionEnum batchVersion, byte[] rawPayload) {
+            this.batchVersion = batchVersion;
+            this.rawPayload = rawPayload;
+        }
+
+        public int getPayloadSize() {
+            return rawPayload.length;
+        }
+
+        public int getOverBatchBlobLimitFlag(int batchCommitBlobSizeLimit) {
+            // Only batch version ge 1 use new layout for DA data
+            if (batchVersion == BatchVersionEnum.BATCH_V1) {
+                var res = getPayloadSize() + BlobsDaData.DA_DATA_META_LEN_SIZE - batchCommitBlobSizeLimit * BlobsDaData.CAPACITY_BYTE_PER_BLOB;
+                if (res >= 0) {
+                    // only when uncompressed data size over the limit, we do the compression
+                    // to cut down the cost
+                    res = getCompressedDataSize() - batchCommitBlobSizeLimit * BlobsDaData.CAPACITY_BYTE_PER_BLOB;
+                }
+                return res;
+            }
+            // for batch version 0, we use the old layout for DA data
+            return getPayloadSize() - batchCommitBlobSizeLimit * BlobsDaData.CAPACITY_BYTE_PER_BLOB;
+        }
+
+        public String toJson() {
+            var obj = new JSONObject();
+            obj.put("payloadSize", getPayloadSize());
+            obj.put("compressedDataSize", compressedDataSize);
+            return obj.toJSONString();
+        }
+
+        private int getCompressedDataSize() {
+            if (compressedDataSize == -1) {
+                compressedDataSize = this.batchVersion.getDaCompressor().compress(rawPayload).length + BlobsDaData.DA_DATA_META_LEN_SIZE;
+            }
+            return compressedDataSize;
+        }
     }
 }

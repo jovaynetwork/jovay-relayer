@@ -62,7 +62,7 @@ public interface IRollupRepository {
 
     List<ReliableTransactionDO> getTxPendingReliableTransactions(int batchSize);
 
-    List<ReliableTransactionDO> getNotFinalizedReliableTransactions(int batchSize);
+    List<ReliableTransactionDO> getNotFinalizedReliableTransactions(ChainTypeEnum chainType, int batchSize);
 
     List<ReliableTransactionDO> getFailedReliableTransactions(int batchSize, int retryCountLimit);
 

@@ -16,6 +16,7 @@ import cn.hutool.core.util.StrUtil;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.alibaba.fastjson.serializer.SerializerFeature;
+import com.alipay.antchain.l2.relayer.commons.enums.ChainTypeEnum;
 import com.alipay.antchain.l2.relayer.commons.enums.TransactionTypeEnum;
 import com.alipay.antchain.l2.relayer.commons.l2basic.BatchHeader;
 import com.alipay.antchain.l2.relayer.commons.l2basic.Chunk;
@@ -54,8 +55,8 @@ public class CoreCommands extends BaseCommands {
     Object initAnchorBatch(
             @ShellOption(help = "Index of anchor batch", defaultValue = "") String anchorBatchIndex,
             @ShellOption(help = "Raw anchor batch header in hex format", defaultValue = "") String rawAnchorBatchHeaderHex,
-            @ShellOption(help = "Raw anchor batch header in hex format", defaultValue = "") String nextL2MsgNonce,
-            @ShellOption(help = "Raw anchor batch header in hex format", defaultValue = "") String l2MerkleTreeBranchesHex
+            @ShellOption(help = "Next L2 message nonce", defaultValue = "") String nextL2MsgNonce,
+            @ShellOption(help = "L2 merkle tree branches in hex format", defaultValue = "") String l2MerkleTreeBranchesHex
     ) {
         try {
             if (StrUtil.isNotEmpty(anchorBatchIndex)) {
@@ -74,7 +75,7 @@ public class CoreCommands extends BaseCommands {
                         InitAnchorBatchReq.newBuilder()
                                 .setBatchHeaderInfo(
                                         BatchHeaderInfo.newBuilder()
-                                                .setVersion(batchHeader.getVersion())
+                                                .setVersion(batchHeader.getVersion().getValue())
                                                 .setBatchIndex(batchHeader.getBatchIndex().longValue())
                                                 .setDataHash(HexUtil.encodeHexStr(batchHeader.getDataHash()))
                                                 .setParentBatchHash(HexUtil.encodeHexStr(batchHeader.getParentBatchHash()))
@@ -141,22 +142,22 @@ public class CoreCommands extends BaseCommands {
                     chunk.setHash(HexUtil.decodeHex(x.getHash()));
                     return chunk;
                 }).toList();
+        var daInfo = response.getGetRawBatchResp().getDaInfo();
 
         JSONObject res = new JSONObject();
         res.put("batchHeader", JSON.parseObject(batchHeader.toJson()));
         res.put("chunks", chunks.stream().map(Chunk::toJson).map(JSON::parseObject).collect(Collectors.toList()));
+        var daInfoObj = new JSONObject();
+        daInfoObj.put("compressed", daInfo.getCompressed());
+        daInfoObj.put("compressionRatio", daInfo.getCompressionRatio());
+        daInfoObj.put("txCount", daInfo.getTxCount());
+        var blobInfoObj = new JSONObject();
+        blobInfoObj.put("blobSize", daInfo.getBlobInfo().getBlobSize());
+        blobInfoObj.put("validBlobBytesSize", daInfo.getBlobInfo().getValidBlobBytesSize());
+        daInfoObj.put("blobInfo", blobInfoObj);
+        res.put("daInfo", daInfoObj);
 
-        if (StrUtil.isNotEmpty(filePath)) {
-            try {
-                Files.write(Paths.get(filePath), res.toString(SerializerFeature.PrettyFormat).getBytes());
-            } catch (IOException e) {
-                log.error("failed to write file: {}", filePath, e);
-                return "failed to write file: " + filePath;
-            }
-            return "success. ";
-        }
-
-        return res.toString(SerializerFeature.PrettyFormat);
+        return saveToFileAndReturn(filePath, res);
     }
 
     @ShellMethod(value = "Get the proof by the specific message nonce")
@@ -175,17 +176,7 @@ public class CoreCommands extends BaseCommands {
         res.put("proof", HexUtil.encodeHexStr(proofs));
         res.put("messageNonce", messageNonce);
 
-        if (StrUtil.isNotEmpty(filePath)) {
-            try {
-                Files.write(Paths.get(filePath), res.toString(SerializerFeature.PrettyFormat).getBytes());
-            } catch (IOException e) {
-                log.error("failed to write file: {}", filePath, e);
-                return "failed to write file: " + filePath;
-            }
-            return "success. ";
-        }
-
-        return res.toString(SerializerFeature.PrettyFormat);
+        return saveToFileAndReturn(filePath, res);
     }
 
     @ShellMethod(value = "Retry the failed batch txs")
@@ -231,6 +222,78 @@ public class CoreCommands extends BaseCommands {
         );
     }
 
+    @ShellMethod(value = "Query DA info about the batch")
+    Object queryBatchDaInfo(
+            @ShellOption(help = "Index of batch") long batchIndex
+    ) {
+        var response = adminServiceBlockingStub.queryBatchDaInfo(QueryBatchDaInfoReq.newBuilder().setBatchIndex(batchIndex).build());
+        if (response.getCode() != 0) {
+            return "failed: " + response.getErrorMsg();
+        }
+        var daInfo = response.getQueryBatchDaInfoResp().getDaInfo();
+        return JSON.toJSONString(DaInfo.builder()
+                .daVersion(daInfo.getDaVersion())
+                .compressed(daInfo.getCompressed())
+                .compressionRatio(daInfo.getCompressionRatio())
+                .txCount(daInfo.getTxCount())
+                .blobSize(daInfo.getBlobInfo().getBlobSize())
+                .validBlobBytesSize(daInfo.getBlobInfo().getValidBlobBytesSize())
+                .build()
+        );
+    }
+
+    @ShellMethod(value = "Speedup specified rollup transaction with gas price setting")
+    Object speedupRollupTx(
+            @ShellOption(help = "Chain type of rollup transaction", valueProvider = EnumValueProvider.class, defaultValue = "LAYER_ONE") ChainTypeEnum chainType,
+            @ShellOption(help = "Type of rollup transaction", valueProvider = EnumValueProvider.class) TransactionTypeEnum txType,
+            @ShellOption(help = "Index of batch") long batchIndex,
+            @ShellOption(help = "Max fee per gas", defaultValue = "0") long maxFeePerGas,
+            @ShellOption(help = "Max priority fee per gas", defaultValue = "0") long maxPriorityFeePerGas,
+            @ShellOption(help = "Max fee per blob gas", defaultValue = "0") long maxFeePerBlobGas
+    ) {
+        var response = adminServiceBlockingStub.speedupTx(
+                SpeedupTxReq.newBuilder()
+                        .setChainType(chainType.name())
+                        .setType(txType.name())
+                        .setBatchIndex(batchIndex)
+                        .setMaxFeePerGas(maxFeePerGas)
+                        .setMaxPriorityFeePerGas(maxPriorityFeePerGas)
+                        .setMaxFeePerBlobGas(maxFeePerBlobGas)
+                        .build()
+        );
+        if (response.getCode() != 0) {
+            return "failed: " + response.getErrorMsg();
+        }
+        return "successful to speedup rollup transaction";
+    }
+
+    @ShellMethod(value = "Query relayer addresses")
+    Object queryRelayerAddress() {
+        var response = adminServiceBlockingStub.queryRelayerAddress(Empty.getDefaultInstance());
+        if (response.getCode() != 0) {
+            return "failed: " + response.getErrorMsg();
+        }
+        var jsonObj = new JSONObject();
+        jsonObj.put("l1-blob", response.getQueryRelayerAddressResp().getL1BlobAddress());
+        jsonObj.put("l1-legacy", response.getQueryRelayerAddressResp().getL1LegacyAddress());
+        jsonObj.put("l2", response.getQueryRelayerAddressResp().getL2Address());
+        return JSON.toJSONString(jsonObj, SerializerFeature.PrettyFormat);
+    }
+
+    private Object saveToFileAndReturn(@ShellOption(help = "File to save the batch json", valueProvider = FileValueProvider.class, defaultValue = "") String filePath, JSONObject res) {
+        if (StrUtil.isNotEmpty(filePath)) {
+            try {
+                Files.write(Paths.get(filePath), res.toString(SerializerFeature.PrettyFormat).getBytes());
+            } catch (IOException e) {
+                log.error("failed to write file: {}", filePath, e);
+                return "failed to write file: " + filePath;
+            }
+            return "success. ";
+        }
+
+        return res.toString(SerializerFeature.PrettyFormat);
+    }
+
     @Builder
     @AllArgsConstructor
     @NoArgsConstructor
@@ -243,5 +306,18 @@ public class CoreCommands extends BaseCommands {
         private String state;
         private int retryCount;
         private String revertReason;
+    }
+
+    @Builder
+    @AllArgsConstructor
+    @NoArgsConstructor
+    @Getter
+    public static class DaInfo {
+        private int daVersion;
+        private boolean compressed;
+        private double compressionRatio;
+        private long txCount;
+        private int blobSize;
+        private int validBlobBytesSize;
     }
 }

@@ -10,6 +10,7 @@ import java.util.stream.Collectors;
 import cn.hutool.core.collection.ListUtil;
 import cn.hutool.core.lang.Assert;
 import cn.hutool.core.util.*;
+import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.alipay.antchain.l2.relayer.commons.exceptions.InvalidChunkException;
@@ -51,6 +52,16 @@ public class Chunk {
         }
 
         return chunk;
+    }
+
+    public static Chunk fromJson(String rawJson) {
+        var result = new Chunk();
+        var jsonObj = JSON.parseObject(rawJson);
+        result.setNumBlocks(jsonObj.getByte("numBlocks"));
+        result.setBlocks(jsonObj.getJSONArray("blockContexts").toJavaList(BlockContext.class));
+        result.setL2Transactions(HexUtil.decodeHex(jsonObj.getString("l2Transactions")));
+        result.setHash(HexUtil.decodeHex(jsonObj.getString("hash")));
+        return result;
     }
 
     @SneakyThrows
@@ -115,6 +126,21 @@ public class Chunk {
 
     public int getNumBlocksVal() {
         return numBlocks;
+    }
+
+    @SneakyThrows
+    public long getL2RawTransactionTotalLength() {
+        if (ObjectUtil.isEmpty(this.l2Transactions)) {
+            return 0L;
+        }
+        long chunkTotalTxLength = 0;
+        DataInputStream inputStream = new DataInputStream(new ByteArrayInputStream(this.l2Transactions));
+        while (inputStream.available() > 0) {
+            int size = inputStream.readInt();
+            Assert.equals(size, inputStream.skipBytes(size));
+            chunkTotalTxLength += size;
+        }
+        return chunkTotalTxLength;
     }
 
     @SneakyThrows

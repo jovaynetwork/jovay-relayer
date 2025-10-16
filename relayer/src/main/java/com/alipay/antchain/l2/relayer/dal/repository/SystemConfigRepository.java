@@ -1,7 +1,7 @@
 package com.alipay.antchain.l2.relayer.dal.repository;
 
 import java.util.Map;
-import javax.annotation.Resource;
+import jakarta.annotation.Resource;
 
 import cn.hutool.cache.Cache;
 import cn.hutool.core.collection.ListUtil;

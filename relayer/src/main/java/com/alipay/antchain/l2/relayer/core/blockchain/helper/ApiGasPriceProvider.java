@@ -10,6 +10,7 @@ import javax.net.ssl.X509TrustManager;
 
 import cn.hutool.core.util.ObjectUtil;
 import cn.hutool.core.util.StrUtil;
+import com.alipay.antchain.l2.relayer.commons.utils.Utils;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.model.GasPriceProviderConfig;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -19,7 +20,6 @@ import lombok.extern.slf4j.Slf4j;
 import okhttp3.OkHttpClient;
 import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.DefaultBlockParameterName;
-import org.web3j.protocol.core.JsonRpc2_0Web3j;
 
 @Setter(AccessLevel.PROTECTED)
 @Getter(AccessLevel.PROTECTED)
@@ -124,8 +124,7 @@ public abstract class ApiGasPriceProvider implements IGasPriceProvider {
         return gasPrice;
     }
 
-    @Override
-    public BigInteger getMaxFeePerBlobGas() {
+    protected BigInteger getMaxFeePerBlobGas() {
         var maxFee = ethGetBaseFeePerBlobGas();
         return new BigDecimal(maxFee)
                 .multiply(BigDecimal.valueOf(getGasPriceProviderConfig().getBlobFeeMultiplier(maxFee)))
@@ -141,29 +140,11 @@ public abstract class ApiGasPriceProvider implements IGasPriceProvider {
             if (ethBlock.hasError()) {
                 throw new RuntimeException("failed to get block: " + ethBlock.getError().getMessage());
             }
-            return fakeExponential(ethBlock.getBlock().getExcessBlobGas());
+            return Utils.fakeExponential(ethBlock.getBlock().getExcessBlobGas());
         } catch (Exception e) {
             throw new RuntimeException("Failed to get baseFeePerBlobGas value: ", e);
         }
     }
 
-    /**
-     * From web3j {@link JsonRpc2_0Web3j#fakeExponential(BigInteger)}}but with pectra {@code BLOB_BASE_FEE_UPDATE_FRACTION}.
-     * @param numerator
-     * @return
-     */
-    private static BigInteger fakeExponential(BigInteger numerator) {
-        BigInteger i = BigInteger.ONE;
-        BigInteger output = BigInteger.ZERO;
-        BigInteger numeratorAccum = MIN_BLOB_BASE_FEE.multiply(BLOB_BASE_FEE_UPDATE_FRACTION);
-        while (numeratorAccum.compareTo(BigInteger.ZERO) > 0) {
-            output = output.add(numeratorAccum);
-            numeratorAccum =
-                    numeratorAccum
-                            .multiply(numerator)
-                            .divide(BLOB_BASE_FEE_UPDATE_FRACTION.multiply(i));
-            i = i.add(BigInteger.ONE);
-        }
-        return output.divide(BLOB_BASE_FEE_UPDATE_FRACTION);
-    }
+
 }

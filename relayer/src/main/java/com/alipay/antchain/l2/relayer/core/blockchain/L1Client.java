@@ -3,12 +3,13 @@ package com.alipay.antchain.l2.relayer.core.blockchain;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.net.SocketException;
+import java.net.SocketTimeoutException;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
-import javax.annotation.Resource;
 
 import cn.hutool.core.date.DatePattern;
 import cn.hutool.core.date.DateUtil;
@@ -28,14 +29,20 @@ import com.alipay.antchain.l2.relayer.core.blockchain.helper.BaseRawTransactionM
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.GasLimitPolicyEnum;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.IGasPriceProvider;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.model.Eip1559GasPrice;
+import com.alipay.antchain.l2.relayer.core.blockchain.helper.model.Eip4844GasPrice;
+import com.alipay.antchain.l2.relayer.core.blockchain.helper.model.IGasPrice;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.model.SendTxResult;
 import com.alipay.antchain.l2.relayer.dal.repository.IRollupRepository;
 import com.alipay.antchain.l2.relayer.metrics.selfreport.ISelfReportMetric;
 import com.alipay.antchain.l2.relayer.metrics.selfreport.RollupMetricRecord;
 import io.opentelemetry.instrumentation.annotations.WithSpan;
 import io.reactivex.Flowable;
+import jakarta.annotation.Resource;
+import lombok.NonNull;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -56,12 +63,14 @@ import org.web3j.crypto.TransactionDecoder;
 import org.web3j.crypto.transaction.type.Transaction1559;
 import org.web3j.crypto.transaction.type.Transaction4844;
 import org.web3j.protocol.Web3j;
+import org.web3j.protocol.core.DefaultBlockParameter;
 import org.web3j.protocol.core.DefaultBlockParameterName;
 import org.web3j.protocol.core.DefaultBlockParameterNumber;
 import org.web3j.protocol.core.methods.request.EthFilter;
 import org.web3j.protocol.core.methods.response.EthCall;
 import org.web3j.protocol.core.methods.response.EthGetCode;
 import org.web3j.protocol.core.methods.response.EthLog;
+import org.web3j.protocol.exceptions.ClientConnectionException;
 import org.web3j.utils.Numeric;
 
 import static com.alipay.antchain.l2.relayer.core.blockchain.abi.Rollup.FUNC_VERIFYBATCH;
@@ -93,6 +102,9 @@ public class L1Client extends AbstractWeb3jClient implements L1ClientInterface {
 
     @Resource
     private IRollupRepository rollupRepository;
+
+    @Resource
+    private RedissonClient redisson;
 
     @Autowired
     public L1Client(
@@ -138,7 +150,7 @@ public class L1Client extends AbstractWeb3jClient implements L1ClientInterface {
 
     @Override
     @WithSpan
-    @Retryable(retryFor = TxSimulateException.class, backoff = @Backoff(delay = 300))
+    @Retryable(retryFor = {TxSimulateException.class, ClientConnectionException.class, SocketException.class, SocketTimeoutException.class}, backoff = @Backoff(delay = 300))
     public TransactionInfo commitBatch(BatchWrapper batchWrapper, BatchHeader parentBatchHeader) throws L2RelayerException {
         log.info("start sending tx to commit batch#{} with retry {}", batchWrapper.getBatchIndex(),
                 ObjectUtil.isNull(RetrySynchronizationManager.getContext()) ? 0 : RetrySynchronizationManager.getContext().getRetryCount());
@@ -148,7 +160,7 @@ public class L1Client extends AbstractWeb3jClient implements L1ClientInterface {
         var function = new Function(
                 Rollup.FUNC_COMMITBATCH, // function name
                 Arrays.asList(
-                        new Uint8(batchWrapper.getBatch().getBatchHeader().getVersion()),
+                        new Uint8(batchWrapper.getBatch().getBatchHeader().getVersion().getValue()),
                         new Uint256(batchWrapper.getBatchIndex()),
                         new Uint256(batchWrapper.getTotalL1MessagePopped())
                 ), // inputs
@@ -160,7 +172,7 @@ public class L1Client extends AbstractWeb3jClient implements L1ClientInterface {
 
     @Override
     @WithSpan
-    @Retryable(retryFor = TxSimulateException.class, backoff = @Backoff(delay = 300))
+    @Retryable(retryFor = {TxSimulateException.class, ClientConnectionException.class, SocketException.class, SocketTimeoutException.class}, backoff = @Backoff(delay = 300))
     public TransactionInfo verifyBatch(ProveTypeEnum proveType, BatchWrapper batchWrapper, byte[] proof) throws L2RelayerException {
         log.info("start sending tx to verify batch#{} with retry {}", batchWrapper.getBatchIndex(),
                 ObjectUtil.isNull(RetrySynchronizationManager.getContext()) ? 0 : RetrySynchronizationManager.getContext().getRetryCount());
@@ -181,6 +193,7 @@ public class L1Client extends AbstractWeb3jClient implements L1ClientInterface {
     }
 
     @Override
+    @Retryable(retryFor = {ClientConnectionException.class, SocketException.class, SocketTimeoutException.class}, backoff = @Backoff(delay = 100))
     public BigInteger lastTeeVerifiedBatch() {
         BigInteger lastTeeVerifiedBatchIndex;
         try {
@@ -193,6 +206,7 @@ public class L1Client extends AbstractWeb3jClient implements L1ClientInterface {
     }
 
     @Override
+    @Retryable(retryFor = {ClientConnectionException.class, SocketException.class, SocketTimeoutException.class}, backoff = @Backoff(delay = 100))
     public BigInteger lastZkVerifiedBatch() {
         BigInteger lastZkVerifiedBatchIndex;
         try {
@@ -206,15 +220,17 @@ public class L1Client extends AbstractWeb3jClient implements L1ClientInterface {
     }
 
     @Override
+    @Retryable(retryFor = {ClientConnectionException.class, SocketException.class, SocketTimeoutException.class}, backoff = @Backoff(delay = 100))
     public BigInteger lastCommittedBatch() {
         return lastCommittedBatch(DefaultBlockParameterName.LATEST);
     }
 
     @Override
-    public BigInteger lastCommittedBatch(DefaultBlockParameterName blockLevel) {
+    @Retryable(retryFor = {ClientConnectionException.class, SocketException.class, SocketTimeoutException.class}, backoff = @Backoff(delay = 100))
+    public BigInteger lastCommittedBatch(DefaultBlockParameter blockParam) {
         try {
             var rollup = this.getRollupForEthCall();
-            rollup.setDefaultBlockParameter(blockLevel);
+            rollup.setDefaultBlockParameter(blockParam);
             var lastCommittedBatchIndex = rollup.lastCommittedBatch().send();
             log.debug("🔗 last commit batch index: {}", lastCommittedBatchIndex);
             return lastCommittedBatchIndex;
@@ -224,6 +240,7 @@ public class L1Client extends AbstractWeb3jClient implements L1ClientInterface {
     }
 
     @Override
+    @Retryable(retryFor = {ClientConnectionException.class, SocketException.class, SocketTimeoutException.class}, backoff = @Backoff(delay = 100))
     public BigInteger maxTxsInChunk() {
         BigInteger maxTxsInChunk;
         try {
@@ -236,6 +253,7 @@ public class L1Client extends AbstractWeb3jClient implements L1ClientInterface {
     }
 
     @Override
+    @Retryable(retryFor = {ClientConnectionException.class, SocketException.class, SocketTimeoutException.class}, backoff = @Backoff(delay = 100))
     public BigInteger maxBlockInChunk() {
         BigInteger maxBlockInChunk;
         try {
@@ -248,6 +266,7 @@ public class L1Client extends AbstractWeb3jClient implements L1ClientInterface {
     }
 
     @Override
+    @Retryable(retryFor = {ClientConnectionException.class, SocketException.class, SocketTimeoutException.class}, backoff = @Backoff(delay = 100))
     public BigInteger maxCallDataInChunk() {
         BigInteger maxCallData;
         try {
@@ -260,6 +279,7 @@ public class L1Client extends AbstractWeb3jClient implements L1ClientInterface {
     }
 
     @Override
+    @Retryable(retryFor = {ClientConnectionException.class, SocketException.class, SocketTimeoutException.class}, backoff = @Backoff(delay = 100))
     public BigInteger maxZkCircleInChunk() {
         BigInteger maxZkCircleInChunk;
         try {
@@ -272,6 +292,7 @@ public class L1Client extends AbstractWeb3jClient implements L1ClientInterface {
     }
 
     @Override
+    @Retryable(retryFor = {ClientConnectionException.class, SocketException.class, SocketTimeoutException.class}, backoff = @Backoff(delay = 100))
     public long l1BlobNumLimit() {
         BigInteger l1BlobNumberLimit;
         try {
@@ -284,6 +305,7 @@ public class L1Client extends AbstractWeb3jClient implements L1ClientInterface {
     }
 
     @Override
+    @Retryable(retryFor = {ClientConnectionException.class, SocketException.class, SocketTimeoutException.class}, backoff = @Backoff(delay = 100))
     public long maxTimeIntervalBetweenBatches() {
         BigInteger maxTimeIntervalBetweenBatches;
         try {
@@ -296,6 +318,7 @@ public class L1Client extends AbstractWeb3jClient implements L1ClientInterface {
     }
 
     @Override
+    @Retryable(retryFor = {ClientConnectionException.class, SocketException.class, SocketTimeoutException.class}, backoff = @Backoff(delay = 100))
     public byte[] committedBatchHash(BigInteger batchIndex) {
         byte[] batchHash;
         try {
@@ -312,6 +335,7 @@ public class L1Client extends AbstractWeb3jClient implements L1ClientInterface {
 
     @Override
     @WithSpan
+    @Retryable(retryFor = {ClientConnectionException.class, SocketException.class, SocketTimeoutException.class, L1ContractInvalidParameterException.class}, backoff = @Backoff(delay = 100))
     public TransactionInfo resendRollupTx(String encodedFunc) {
         var call = ethCall(this.rollupContractAddress, encodedFunc);
         if (call.isReverted()) {
@@ -322,6 +346,7 @@ public class L1Client extends AbstractWeb3jClient implements L1ClientInterface {
     }
 
     @Override
+    @Retryable(retryFor = {ClientConnectionException.class, SocketException.class, SocketTimeoutException.class}, backoff = @Backoff(delay = 100))
     public TransactionInfo resendRollupTx(Transaction4844 transaction4844) {
         var call = ethCall(this.rollupContractAddress, transaction4844);
         if (call.isReverted()) {
@@ -334,15 +359,97 @@ public class L1Client extends AbstractWeb3jClient implements L1ClientInterface {
     @Override
     @SneakyThrows
     @WithSpan
-    public TransactionInfo speedUpRollupTx(ReliableTransactionDO tx) {
-        var rawTransaction = TransactionDecoder.decode(Numeric.toHexString(tx.getRawTx()));
-        var currentGasPrice = checkIfSpeedUpTx(tx.getTransactionType(), tx.getBatchIndex(), rawTransaction, this.getGasPriceProvider().getEip1559GasPrice(), tx.getLatestTxSendTime());
+    @Retryable(retryFor = {ClientConnectionException.class, SocketException.class, SocketTimeoutException.class}, backoff = @Backoff(delay = 100))
+    public TransactionInfo speedUpRollupTx(@NonNull ReliableTransactionDO tx) {
+        var lock = getSpeedupTxLock(tx);
+        if (!lock.tryLock()) {
+            throw new SpeedupAsyncNowException(tx);
+        }
+        try {
+            var rawTransaction = TransactionDecoder.decode(Numeric.toHexString(tx.getRawTx()));
+            var currentGasPrice = checkIfSpeedUpTx(tx.getTransactionType(), tx.getBatchIndex(), rawTransaction, tx.getLatestTxSendTime());
+            return speedUpRollupTxLogic(rawTransaction, currentGasPrice);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    @Override
+    @SneakyThrows
+    public TransactionInfo speedUpRollupTx(ReliableTransactionDO tx, BigInteger maxFeePerGas, BigInteger maxPriorityFeePerGas, BigInteger maxFeePerBlobGas) {
+        var lock = getSpeedupTxLock(tx);
+        if (!lock.tryLock()) {
+            throw new SpeedupAsyncNowException(tx);
+        }
+        log.info("speed up tx with specific gas price setting : {maxFeePerGas: {}, maxPriorityFeePerGas: {}, maxFeePerBlobGas: {}}",
+                maxFeePerGas, maxPriorityFeePerGas, maxFeePerBlobGas);
+        try {
+            var netGasPrice = tx.getTransactionType() == TransactionTypeEnum.BATCH_COMMIT_TX ?
+                    this.getGasPriceProvider().getEip4844GasPrice() :
+                    this.getGasPriceProvider().getEip1559GasPrice();
+            var currentGasPrice = netGasPrice instanceof Eip4844GasPrice ?
+                    new Eip4844GasPrice(
+                            maxFeePerGas.compareTo(netGasPrice.maxFeePerGas()) > 0 ? maxFeePerGas : netGasPrice.maxFeePerGas(),
+                            maxPriorityFeePerGas.compareTo(netGasPrice.maxPriorityFeePerGas()) > 0 ? maxPriorityFeePerGas : netGasPrice.maxPriorityFeePerGas(),
+                            maxFeePerBlobGas.compareTo(netGasPrice.maxFeePerBlobGas()) > 0 ? maxFeePerBlobGas : netGasPrice.maxFeePerBlobGas()
+                    ) :
+                    new Eip1559GasPrice(
+                            maxFeePerGas.compareTo(netGasPrice.maxFeePerGas()) > 0 ? maxFeePerGas : netGasPrice.maxFeePerGas(),
+                            maxPriorityFeePerGas.compareTo(netGasPrice.maxPriorityFeePerGas()) > 0 ? maxPriorityFeePerGas : netGasPrice.maxPriorityFeePerGas()
+                    );
+            return speedUpRollupTxLogic(
+                    TransactionDecoder.decode(Numeric.toHexString(tx.getRawTx())),
+                    currentGasPrice
+            );
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    @Override
+    public void processFailedEthCall(EthCall call, String toAddress, String funcNameOrDigest) {
+        if (call.getRevertReason().contains("WARNING")) {
+            throw new L1ContractWarnException(L2RelayerErrorCodeEnum.CALL_WITH_WARNING,
+                    String.format("failed to local call %s to %s error-msg %s", funcNameOrDigest, toAddress, call.getRevertReason())
+            );
+        } else if (call.getRevertReason().contains("INVALID_PERMISSION")) {
+            throw new L1ContractInvalidPermissionException(
+                    String.format("failed to local call %s to %s error-msg %s", funcNameOrDigest, toAddress, call.getRevertReason()),
+                    call.getRevertReason()
+            );
+        } else if (call.getRevertReason().contains("INVALID_PARAMETER")) {
+            throw new L1ContractInvalidParameterException(
+                    String.format("failed to local call %s to %s error-msg %s", funcNameOrDigest, toAddress, call.getRevertReason()),
+                    call.getRevertReason()
+            );
+        } else if (call.getRevertReason().contains("ERROR")) {
+            throw new L1ContractSeriousException(
+                    String.format("failed to local call %s to %s error-msg %s", funcNameOrDigest, toAddress, call.getRevertReason()),
+                    call.getRevertReason()
+            );
+        } else {
+            throw new L2RelayerException(L2RelayerErrorCodeEnum.ROLLUP_SEND_TX_ERROR,
+                    String.format("failed to local call %s to %s error-msg %s", funcNameOrDigest, toAddress, getRpcError(call))
+            );
+        }
+    }
+
+    @Override
+    public Flowable<L1MsgTransactionBatch> flowableL1MsgFromMailbox(BigInteger start, BigInteger end) {
+        List<CompletableFuture<L1MsgTransactionBatch>> futures = new ArrayList<>();
+        for (BigInteger h = start; h.compareTo(end) <= 0; h = h.add(BigInteger.ONE)) {
+            BigInteger finalH = h;
+            futures.add(CompletableFuture.supplyAsync(() -> getL1MsgsFromBlock(finalH), fetchingL1MsgThreadsPool));
+        }
+        return Flowable.merge(futures.stream().map(x -> Flowable.fromFuture(x, 30, TimeUnit.SECONDS)).collect(Collectors.toList()));
+    }
+
+    private TransactionInfo speedUpRollupTxLogic(RawTransaction rawTransaction, IGasPrice currentGasPrice) throws IOException {
         String fromAcc;
         SendTxResult result;
         var gasLimitProvider = createEthCallGasLimitProvider(this.rollupContractAddress, rawTransaction.getData());
         if (rawTransaction.getType().isEip4844()) {
-            var blobPrice = calcSpeedUpMaxBlobFeePerGas(((Transaction4844) rawTransaction.getTransaction()).getMaxFeePerBlobGas());
-            log.info("speed up eip 4844 tx with new gas price combination {}, blob fee {}...", currentGasPrice.toJson(), blobPrice);
+            log.info("speed up eip 4844 tx with new gas price combination {}", currentGasPrice.toJson());
             result = this.getBlobPoolTxManager().sendTx(
                     ((Transaction4844) rawTransaction.getTransaction()).getBlobs().orElse(new ArrayList<>()),
                     currentGasPrice,
@@ -350,8 +457,7 @@ public class L1Client extends AbstractWeb3jClient implements L1ClientInterface {
                     rawTransaction.getTo(),
                     rawTransaction.getNonce(),
                     rawTransaction.getValue(),
-                    rawTransaction.getData(),
-                    blobPrice
+                    rawTransaction.getData()
             );
             fromAcc = this.getBlobPoolTxManager().getAddress();
         } else {
@@ -377,7 +483,7 @@ public class L1Client extends AbstractWeb3jClient implements L1ClientInterface {
                 .build();
     }
 
-    private Eip1559GasPrice checkIfSpeedUpTx(TransactionTypeEnum transactionType, BigInteger batchIndex, RawTransaction rawTransaction, Eip1559GasPrice currentGasPrice, Date lastSendTime) {
+    private IGasPrice checkIfSpeedUpTx(TransactionTypeEnum transactionType, BigInteger batchIndex, RawTransaction rawTransaction, Date lastSendTime) {
         checkTxIfNextNonce(rawTransaction);
         var lastTx = rollupRepository.getReliableTransaction(ChainTypeEnum.LAYER_ONE, batchIndex.subtract(BigInteger.ONE), transactionType);
         if (ObjectUtil.isNotNull(lastTx)) {
@@ -389,10 +495,11 @@ public class L1Client extends AbstractWeb3jClient implements L1ClientInterface {
             lastSendTime = lastSendTime.after(lastTx.getGmtModified()) ? lastSendTime : lastTx.getGmtModified();
             log.info("finally, last tx send time is {}", DateUtil.format(lastSendTime, DatePattern.NORM_DATETIME_MS_PATTERN));
         }
-        return checkAndGetGasPrice(rawTransaction, currentGasPrice, lastSendTime);
+        return checkAndGetGasPrice(rawTransaction, lastSendTime);
     }
 
-    private Eip1559GasPrice checkAndGetGasPrice(RawTransaction rawTransaction, Eip1559GasPrice currentGasPrice, Date lastSendTime) {
+    private IGasPrice checkAndGetGasPrice(RawTransaction rawTransaction, Date lastSendTime) {
+        var currentGasPrice = rawTransaction.getType().isEip4844() ? this.getGasPriceProvider().getEip4844GasPrice() : this.getGasPriceProvider().getEip1559GasPrice();
         if (rawTransaction.getType().isLegacy()) {
             if (!isOkToSpeedUpLegacyTx(currentGasPrice.maxFeePerGas(), rawTransaction.getGasPrice())) {
                 throw new PreviousGasPriceJustFineException(rawTransaction.getGasPrice(), null, currentGasPrice.maxFeePerGas(), currentGasPrice.maxPriorityFeePerGas());
@@ -414,7 +521,15 @@ public class L1Client extends AbstractWeb3jClient implements L1ClientInterface {
                 throw new SpeedUpOverLimitException("speed up priority fee over limit: curr is {}, prev is {} and limit is {}",
                         speedupPrice.maxPriorityFeePerGas(), innerTx.getMaxPriorityFeePerGas(), txSpeedUpPriorityFeeLimit.toString());
             }
-            currentGasPrice = speedupPrice;
+            if (innerTx.getType().isEip4844()) {
+                currentGasPrice = new Eip4844GasPrice(
+                        speedupPrice.maxFeePerGas(),
+                        speedupPrice.maxPriorityFeePerGas(),
+                        calcSpeedUpMaxBlobFeePerGas(((Transaction4844) rawTransaction.getTransaction()).getMaxFeePerBlobGas(), currentGasPrice.maxFeePerBlobGas())
+                );
+            } else {
+                currentGasPrice = speedupPrice;
+            }
         }
         return currentGasPrice.validate();
     }
@@ -458,44 +573,6 @@ public class L1Client extends AbstractWeb3jClient implements L1ClientInterface {
         if (StrUtil.isEmpty(Numeric.cleanHexPrefix(result.getCode()))) {
             throw new RuntimeException("mailbox contract not exist");
         }
-    }
-
-    @Override
-    public void processFailedEthCall(EthCall call, String toAddress, String funcNameOrDigest) {
-        if (call.getRevertReason().contains("WARNING")) {
-            throw new L1ContractWarnException(L2RelayerErrorCodeEnum.CALL_WITH_WARNING,
-                    String.format("failed to local call %s to %s error-msg %s", funcNameOrDigest, toAddress, call.getRevertReason())
-            );
-        } else if (call.getRevertReason().contains("INVALID_PERMISSION")) {
-            throw new L1ContractInvalidPermissionException(
-                    String.format("failed to local call %s to %s error-msg %s", funcNameOrDigest, toAddress, call.getRevertReason()),
-                    call.getRevertReason()
-            );
-        } else if (call.getRevertReason().contains("INVALID_PARAMETER")) {
-            throw new L1ContractInvalidParameterException(
-                    String.format("failed to local call %s to %s error-msg %s", funcNameOrDigest, toAddress, call.getRevertReason()),
-                    call.getRevertReason()
-            );
-        } else if (call.getRevertReason().contains("ERROR")) {
-            throw new L1ContractSeriousException(
-                    String.format("failed to local call %s to %s error-msg %s", funcNameOrDigest, toAddress, call.getRevertReason()),
-                    call.getRevertReason()
-            );
-        } else {
-            throw new L2RelayerException(L2RelayerErrorCodeEnum.ROLLUP_SEND_TX_ERROR,
-                    String.format("failed to local call %s to %s error-msg %s", funcNameOrDigest, toAddress, call.getRevertReason())
-            );
-        }
-    }
-
-    @Override
-    public Flowable<L1MsgTransactionBatch> flowableL1MsgFromMailbox(BigInteger start, BigInteger end) {
-        List<CompletableFuture<L1MsgTransactionBatch>> futures = new ArrayList<>();
-        for (BigInteger h = start; h.compareTo(end) <= 0; h = h.add(BigInteger.ONE)) {
-            BigInteger finalH = h;
-            futures.add(CompletableFuture.supplyAsync(() -> getL1MsgsFromBlock(finalH), fetchingL1MsgThreadsPool));
-        }
-        return Flowable.merge(futures.stream().map(x -> Flowable.fromFuture(x, 30, TimeUnit.SECONDS)).collect(Collectors.toList()));
     }
 
     private L1MsgTransactionBatch getL1MsgsFromBlock(BigInteger height) {
@@ -559,7 +636,7 @@ public class L1Client extends AbstractWeb3jClient implements L1ClientInterface {
      * @param oldMaxPriorityFee
      * @return
      */
-    private Eip1559GasPrice isOkToSpeedUpEip1559Tx(Eip1559GasPrice newGasPrice, BigInteger oldMaxFee, BigInteger oldMaxPriorityFee, double priceBump, Date lastSendTime) {
+    private IGasPrice isOkToSpeedUpEip1559Tx(IGasPrice newGasPrice, BigInteger oldMaxFee, BigInteger oldMaxPriorityFee, double priceBump, Date lastSendTime) {
         var miniSpeedUpMaxFee = new BigDecimal(oldMaxFee).multiply(BigDecimal.valueOf(1 + priceBump)).toBigInteger();
         var miniSpeedUpMaxPriorityFee = new BigDecimal(oldMaxPriorityFee).multiply(BigDecimal.valueOf(1 + priceBump)).toBigInteger();
         var greaterMaxFee = newGasPrice.maxFeePerGas().compareTo(miniSpeedUpMaxFee) >= 0;
@@ -588,12 +665,11 @@ public class L1Client extends AbstractWeb3jClient implements L1ClientInterface {
         return null;
     }
 
-    private BigInteger calcSpeedUpMaxBlobFeePerGas(BigInteger previous) {
+    private BigInteger calcSpeedUpMaxBlobFeePerGas(BigInteger previous, BigInteger maxBlobFeeFromNet) {
         var speedUpBlobFee = new BigDecimal(previous).multiply(BigDecimal.valueOf(1 + txSpeedUpBlobFeeBump)).toBigInteger();
         if (speedUpBlobFee.compareTo(txSpeedUpBlobFeeLimit) > 0) {
             throw new SpeedUpOverLimitException("speed up blob fee over limit: previous is {} and limit is {}", previous.toString(), txSpeedUpBlobFeeLimit.toString());
         }
-        var maxBlobFeeFromNet = this.getGasPriceProvider().getMaxFeePerBlobGas();
         return speedUpBlobFee.compareTo(maxBlobFeeFromNet) > 0 ? speedUpBlobFee : maxBlobFeeFromNet;
     }
 
@@ -605,5 +681,29 @@ public class L1Client extends AbstractWeb3jClient implements L1ClientInterface {
         }
         log.debug("get latest block base fee {}", ethBlock.getBlock().getBaseFeePerGas());
         return ethBlock.getBlock().getBaseFeePerGas();
+    }
+
+    private RLock getSpeedupTxLock(ReliableTransactionDO tx) {
+        return redisson.getLock(getSpeedupTxLockName(tx));
+    }
+
+    private String getSpeedupTxLockName(ReliableTransactionDO tx) {
+        return StrUtil.format("SPEEDUP_TX_{}-{}-{}", tx.getChainType().name(), tx.getTransactionType(), tx.getBatchIndex());
+    }
+
+    private String getRpcError(EthCall call) {
+        if (!call.hasError()) {
+            return "";
+        }
+        var revertReason = call.getRevertReason();
+        if (StrUtil.length(revertReason) > 18) {
+            // has info more tha 'execution reverted'
+            return revertReason;
+        }
+        if (StrUtil.isNotEmpty(call.getError().getData())) {
+            // add data for more detail
+            revertReason = StrUtil.concat(true, revertReason, ": ", call.getError().getData());
+        }
+        return revertReason;
     }
 }

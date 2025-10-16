@@ -1,18 +1,14 @@
 package com.alipay.antchain.l2.relayer.commons.l2basic;
 
-import java.io.ByteArrayOutputStream;
 import java.math.BigInteger;
 import java.util.List;
 
-import cn.hutool.core.util.ByteUtil;
 import cn.hutool.core.util.HexUtil;
 import cn.hutool.core.util.ObjectUtil;
 import com.alipay.antchain.l2.relayer.commons.exceptions.InvalidBatchException;
 import com.alipay.antchain.l2.relayer.commons.models.EthBlobs;
 import lombok.*;
 import lombok.extern.slf4j.Slf4j;
-import org.bouncycastle.jcajce.provider.digest.Keccak;
-import org.web3j.crypto.BlobUtils;
 
 @Setter
 @Builder
@@ -21,38 +17,29 @@ import org.web3j.crypto.BlobUtils;
 public class Batch {
 
     /**
-     * Create a v0 batch
+     * Create a batch with existing blobs
      *
-     * @param batchIndex      index of the batch
+     * @param daData            eip4844 blobs from chunks
+     * @param batchVersion      version of the batch
+     * @param batchIndex        index of the batch
      * @param parentBatchHeader header of the parent batch
-     * @param chunks          chunks of the batch, every chunk inside must have hash calculated.
+     * @param l1MsgRollingHash  l1MsgRollingHash from the last block trace of this batch
+     * @param chunks            chunks of the batch, every chunk inside must have hash calculated.
      * @return batch
      */
-    public static Batch createBatchV0(BigInteger batchIndex, BatchHeader parentBatchHeader, byte[] l1MsgRollingHash, @NonNull List<Chunk> chunks) {
-        return new Batch(0, batchIndex, parentBatchHeader, l1MsgRollingHash, chunks);
-    }
-
-    /**
-     * Create a v0 batch with existing blobs
-     *
-     * @param batchIndex      index of the batch
-     * @param parentBatchHeader header of the parent batch
-     * @param chunks          chunks of the batch, every chunk inside must have hash calculated.
-     * @return batch
-     */
-    public static Batch createBatchV0(BigInteger batchIndex, BatchHeader parentBatchHeader, byte[] l1MsgRollingHash, @NonNull List<Chunk> chunks, EthBlobs blobs) {
-        return new Batch(0, batchIndex, parentBatchHeader, l1MsgRollingHash, chunks, blobs);
+    public static Batch createBatch(BatchVersionEnum batchVersion, BigInteger batchIndex, BatchHeader parentBatchHeader, byte[] l1MsgRollingHash, @NonNull List<Chunk> chunks, IDaData daData) {
+        return new Batch(batchVersion, batchIndex, parentBatchHeader, l1MsgRollingHash, chunks, daData);
     }
 
     @Getter
     private BatchHeader batchHeader;
 
     @Getter
-    private List<Chunk> chunks;
+    private IBatchPayload payload;
 
-    private EthBlobs blobs;
+    private IDaData daData;
 
-    public Batch(int version, BigInteger batchIndex, BatchHeader parentBatchHeader, byte[] l1MsgRollingHash, @NonNull List<Chunk> chunks) {
+    public Batch(BatchVersionEnum version, BigInteger batchIndex, BatchHeader parentBatchHeader, byte[] l1MsgRollingHash, @NonNull List<Chunk> chunks) {
         this(version, batchIndex, parentBatchHeader, l1MsgRollingHash, chunks, null);
     }
 
@@ -63,32 +50,35 @@ public class Batch {
      * @param parentBatchHeader header of the parent batch
      * @param l1MsgRollingHash  l1MsgRollingHash from block trace
      * @param chunks            chunks of the batch, every chunk inside must have hash calculated.
-     * @param blobs             blobs from chunks
+     * @param daData            blobs from chunks
      */
-    public Batch(int version, BigInteger batchIndex, BatchHeader parentBatchHeader, byte[] l1MsgRollingHash, @NonNull List<Chunk> chunks, EthBlobs blobs) {
+    public Batch(BatchVersionEnum version, BigInteger batchIndex, BatchHeader parentBatchHeader, byte[] l1MsgRollingHash, @NonNull List<Chunk> chunks, IDaData daData) {
         if (ObjectUtil.isEmpty(chunks)) {
             throw new RuntimeException("batch has no chunk");
         }
-        if (ObjectUtil.isNull(blobs)) {
-            blobs = EthBlobs.extractBlobsFromChunks(chunks);
-            if (ObjectUtil.isEmpty(blobs)) {
-                throw new RuntimeException("empty blobs");
-            }
+        this.payload = new ChunksPayload(chunks);
+        if (ObjectUtil.isNull(daData)) {
+            this.daData = BlobsDaData.buildFrom(version, this.payload);
         }
 
-        var versionedHashesStream = new ByteArrayOutputStream();
-        blobs.blobs().stream().map(BlobUtils::getCommitment).map(BlobUtils::kzgToVersionedHash)
-                .forEach(versionedHash -> versionedHashesStream.writeBytes(versionedHash.toArray()));
-
         this.batchHeader = BatchHeader.builder()
-                .version(ByteUtil.intToByte(version))
+                .version(version)
                 .batchIndex(batchIndex)
                 .l1MsgRollingHash(l1MsgRollingHash)
                 .parentBatchHash(parentBatchHeader.getHash())
-                .dataHash(new Keccak.Digest256().digest(versionedHashesStream.toByteArray()))
+                .dataHash(this.daData.dataHash())
                 .build();
-        this.chunks = chunks;
-        this.blobs = blobs;
+    }
+
+    public long getBatchTxsLength() {
+        return this.payload.getRawTxTotalSize();
+    }
+
+    public IDaData getDaData() {
+        if (ObjectUtil.isNull(this.daData)) {
+            this.daData = BlobsDaData.buildFrom(this.batchHeader.getVersion(), this.payload);
+        }
+        return this.daData;
     }
 
     public byte[] getBatchHash() {
@@ -104,10 +94,7 @@ public class Batch {
     }
 
     public BigInteger getStartBlockNumber() {
-        if (ObjectUtil.isEmpty(chunks)) {
-            throw new RuntimeException("block has no chunk");
-        }
-        return this.chunks.stream().map(Chunk::getStartBlockNumber).min(BigInteger::compareTo).get();
+        return this.payload.getStartBlockNumber();
     }
 
     /**
@@ -116,29 +103,18 @@ public class Batch {
      * @return included block number
      */
     public BigInteger getEndBlockNumber() {
-        if (ObjectUtil.isEmpty(chunks)) {
-            throw new RuntimeException("block has no chunk");
-        }
-        return this.chunks.stream().map(Chunk::getEndBlockNumber).max(BigInteger::compareTo).get();
+        return this.payload.getEndBlockNumber();
     }
 
     public void validate() throws InvalidBatchException {
-        BigInteger currEnd = null;
-        for (int i = 0; i < chunks.size(); i++) {
-            Chunk chunk = chunks.get(i);
-            if (ObjectUtil.isNotNull(currEnd)) {
-                if (!currEnd.add(BigInteger.ONE).equals(chunk.getStartBlockNumber())) {
-                    throw new InvalidBatchException("discontinuous chunks block numbers: (batch: {}, chunk: {})", this.getBatchIndex().toString(), i);
-                }
-            }
-            currEnd = chunk.getEndBlockNumber();
-        }
+        this.payload.validate();
     }
 
     public EthBlobs getEthBlobs() {
-        if (ObjectUtil.isNotEmpty(this.blobs)) {
-            return this.blobs;
+        if (ObjectUtil.isNull(this.daData) || 0 == this.daData.getDataLen()) {
+            this.daData = BlobsDaData.buildFrom(this.batchHeader.getVersion(), this.payload);
         }
-        return EthBlobs.extractBlobsFromChunks(this.chunks);
+        // for now, we only have eip4844 blobs as DA
+        return ((BlobsDaData) this.daData).getBlobs();
     }
 }

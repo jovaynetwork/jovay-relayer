@@ -1,7 +1,7 @@
 package com.alipay.antchain.l2.relayer.core.blockchain;
 
 import java.math.BigInteger;
-import javax.annotation.Resource;
+import jakarta.annotation.Resource;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;

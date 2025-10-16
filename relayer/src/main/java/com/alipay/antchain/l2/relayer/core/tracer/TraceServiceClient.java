@@ -20,8 +20,6 @@ import io.opentelemetry.instrumentation.annotations.WithSpan;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import net.devh.boot.grpc.client.inject.GrpcClient;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.retry.annotation.EnableRetry;
@@ -34,11 +32,6 @@ import org.springframework.stereotype.Component;
 @Setter
 @EnableRetry
 public class TraceServiceClient {
-
-    private static final Logger ZK_CYCLE_LOGGER = LoggerFactory.getLogger("zk-cycle");
-
-    @Value("${l2-relayer.alarm.zk-cycle.threshold:1000000000}")
-    private long zkCycleThreshold;
 
     @GrpcClient("tracer-client")
     private TraceServiceGrpc.TraceServiceBlockingStub stub;
@@ -111,10 +104,6 @@ public class TraceServiceClient {
                     response.getStatus().getErrorCode(), response.getStatus().getErrorMessage(),
                     "failed to get basic for {}", blockNumber.toString()
             );
-        }
-
-        if (response.getBasicTrace().getZkCycles() >= zkCycleThreshold) {
-            ZK_CYCLE_LOGGER.error("📢 zk cycle {} from block#{} is too large", response.getBasicTrace().getZkCycles(), blockNumber);
         }
 
         return response.getBasicTrace();

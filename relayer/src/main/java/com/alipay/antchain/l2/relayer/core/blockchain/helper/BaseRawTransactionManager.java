@@ -6,22 +6,27 @@ import java.util.Date;
 import java.util.List;
 
 import cn.hutool.core.util.ObjectUtil;
+import cn.hutool.core.util.ReflectUtil;
+import com.alipay.antchain.l2.relayer.commons.l2basic.FusakaTransaction4844;
 import com.alipay.antchain.l2.relayer.commons.l2basic.L1MsgRawTransactionWrapper;
 import com.alipay.antchain.l2.relayer.commons.l2basic.L1MsgTransaction;
 import com.alipay.antchain.l2.relayer.commons.utils.Utils;
-import com.alipay.antchain.l2.relayer.core.blockchain.helper.model.Eip1559GasPrice;
+import com.alipay.antchain.l2.relayer.core.blockchain.helper.model.IGasPrice;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.model.SendTxResult;
 import lombok.Getter;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.web3j.abi.datatypes.Address;
 import org.web3j.crypto.*;
+import org.web3j.crypto.transaction.type.ITransaction;
 import org.web3j.crypto.transaction.type.Transaction4844;
 import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.Response;
 import org.web3j.protocol.core.methods.response.EthSendTransaction;
 import org.web3j.protocol.core.methods.response.EthTransaction;
+import org.web3j.service.TxSignService;
 import org.web3j.tx.RawTransactionManager;
 import org.web3j.tx.exceptions.TxHashMismatchException;
 import org.web3j.utils.Numeric;
@@ -36,18 +41,21 @@ public abstract class BaseRawTransactionManager extends RawTransactionManager im
 
     private final long chainId;
 
-    private final Credentials credentials;
+    private final TxSignService txSignService;
 
-    public BaseRawTransactionManager(Web3j web3j, Credentials credentials, long chainId, RedissonClient redisson) {
-        super(web3j, new RelayerTxSignServiceImpl(credentials), chainId);
-        sendTxLock = redisson.getLock(getSendTxLockKey(chainId, credentials.getAddress()));
+    private final int blobSidecarVersion;
+
+    public BaseRawTransactionManager(Web3j web3j, TxSignService txSignService, long chainId, RedissonClient redisson, int blobSidecarVersion) {
+        super(web3j, txSignService, chainId);
+        sendTxLock = redisson.getLock(getSendTxLockKey(chainId, txSignService.getAddress()));
         this.web3j = web3j;
         this.chainId = chainId;
-        this.credentials = credentials;
+        this.txSignService = txSignService;
+        this.blobSidecarVersion = blobSidecarVersion;
     }
 
     @Override
-    public SendTxResult sendTx(Eip1559GasPrice gasPrice, BigInteger gasLimit, String to, String data, BigInteger nonce, BigInteger value, boolean constructor) throws IOException {
+    public SendTxResult sendTx(IGasPrice gasPrice, BigInteger gasLimit, String to, String data, BigInteger nonce, BigInteger value, boolean constructor) throws IOException {
         var rawTransaction = L1MsgTransaction.L2_MAILBOX_AS_RECEIVER.equals(new Address(to)) && ObjectUtil.isNull(gasPrice) ?
                 new L1MsgRawTransactionWrapper(new L1MsgTransaction(nonce, gasLimit, data)) :
                 RawTransaction.createTransaction(getChainId(), nonce, gasLimit, to, value, data, gasPrice.maxPriorityFeePerGas(), gasPrice.maxFeePerGas());
@@ -86,19 +94,39 @@ public abstract class BaseRawTransactionManager extends RawTransactionManager im
     }
 
     @Override
-    public SendTxResult sendTx(List<Blob> blobs, Eip1559GasPrice gasPrice, BigInteger gasLimit, String to, BigInteger nonce, BigInteger value, String data, BigInteger maxFeePerBlobGas) throws IOException {
-        var rawTransaction = RawTransaction.createTransaction(
-                blobs,
-                getChainId(),
-                nonce,
-                gasPrice.maxPriorityFeePerGas(),
-                gasPrice.maxFeePerGas(),
-                gasLimit,
-                to,
-                value,
-                data,
-                maxFeePerBlobGas
-        );
+    @SneakyThrows
+    public SendTxResult sendTx(List<Blob> blobs, IGasPrice gasPrice, BigInteger gasLimit, String to, BigInteger nonce, BigInteger value, String data) throws IOException {
+        RawTransaction rawTransaction;
+        if (blobSidecarVersion != 0) {
+            var constructor = ReflectUtil.getConstructor(RawTransaction.class, ITransaction.class);
+            constructor.setAccessible(true);
+            rawTransaction = constructor.newInstance(new FusakaTransaction4844(
+                    blobs,
+                    getChainId(),
+                    nonce,
+                    gasPrice.maxPriorityFeePerGas(),
+                    gasPrice.maxFeePerGas(),
+                    gasLimit,
+                    to,
+                    value,
+                    data,
+                    gasPrice.maxFeePerBlobGas()
+            ));
+        } else {
+            rawTransaction = RawTransaction.createTransaction(
+                    blobs,
+                    getChainId(),
+                    nonce,
+                    gasPrice.maxPriorityFeePerGas(),
+                    gasPrice.maxFeePerGas(),
+                    gasLimit,
+                    to,
+                    value,
+                    data,
+                    gasPrice.maxFeePerBlobGas()
+            );
+        }
+
         var signedRawTx = sign(rawTransaction);
         EthSendTransaction ethSendTransaction;
         try {
@@ -124,7 +152,7 @@ public abstract class BaseRawTransactionManager extends RawTransactionManager im
 
     @Override
     public String getAddress() {
-        return credentials.getAddress();
+        return txSignService.getAddress();
     }
 
     private SendTxResult handleSendRawTxFailedRpc(Exception e, String hexRawTx) {

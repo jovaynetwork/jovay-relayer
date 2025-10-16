@@ -47,6 +47,12 @@ public enum L2RelayerErrorCodeEnum {
 
     PREVIOUS_TX_NOT_READY("020a", "previous tx not ready"),
 
+    INVALID_ROLLUP_SPECS("020b", "invalid rollup specs"),
+
+    L1_GAS_PRICE_TOO_HIGH("020c", "l1 gas price too high"),
+
+    SPEEDUP_TX_ASYNC("020d", "other thread speedup same tx now"),
+
     SERVICE_BLOCK_POLLING_ERROR("0301", "block polling error"),
 
     COMMIT_L2_BATCH_ERROR("0302", "batch commit error"),
@@ -56,6 +62,8 @@ public enum L2RelayerErrorCodeEnum {
     L2_BATCH_COMMIT_FAILED("0304", "batch commit failed"),
 
     BATCH_PROOF_COMMIT_FAILED("0305", "batch proof commit failed"),
+
+    BREAK_ORACLE_REQUEST("0306", "break oracle request process"),
 
     INIT_MAILBOX_SERVICE_ERROR("0401", "init mailbox service error"),
 
@@ -72,6 +80,10 @@ public enum L2RelayerErrorCodeEnum {
     CALL_WITH_INVALID_PARAMETER("1003", "call with invalid parameter more info in revert reason"),
 
     CALL_WITH_SERIOUS_ERROR("1004", "SERIOUS MISTAKE!!! more info in revert reason"),
+
+    ORACLE_SEND_TX_ERROR("1005", "send oracle gas feed tx error"),
+
+    TX_NOT_FOUND_BUT_RETRY("1006", "l2 tx not found but we need to retry the query"),
     /**
      *
      */

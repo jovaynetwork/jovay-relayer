@@ -7,7 +7,9 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.model.Eip1559GasPrice;
+import com.alipay.antchain.l2.relayer.core.blockchain.helper.model.Eip4844GasPrice;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.model.GasPriceProviderConfig;
+import com.alipay.antchain.l2.relayer.core.blockchain.helper.model.IGasPrice;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.web3j.protocol.Web3j;
@@ -51,8 +53,61 @@ public class EthereumGasPriceProvider extends ApiGasPriceProvider {
 
     @Override
     @SneakyThrows
-    public Eip1559GasPrice getEip1559GasPrice() {
-        var tipRespFuture = CompletableFuture.supplyAsync(() -> {
+    public IGasPrice getEip1559GasPrice() {
+        var tipRespFuture = getTipFeeAsync();
+        var priorityRespFuture = getPriorityFeeAsync();
+
+        var maxPriorityFee = new BigDecimal(priorityRespFuture.get(5, TimeUnit.SECONDS)).multiply(
+                BigDecimal.valueOf(getGasPriceProviderConfig().getPriorityFeePerGasIncreasedPercentage() + 1)
+        ).toBigInteger();
+        maxPriorityFee = maxPriorityFee.compareTo(getGasPriceProviderConfig().getMinimumEip1559PriorityPrice()) > 0 ?
+                maxPriorityFee :
+                getGasPriceProviderConfig().getMinimumEip1559PriorityPrice();
+        var baseFee = tipRespFuture.get(5, TimeUnit.SECONDS);
+        getGasPriceProviderConfig().checkIfPriceOutOfLimit(baseFee, maxPriorityFee);
+        return new Eip1559GasPrice(
+                baseFee.multiply(BigInteger.valueOf(getGasPriceProviderConfig().getBaseFeeMultiplier())).add(maxPriorityFee),
+                maxPriorityFee
+        ).validate();
+    }
+
+    @Override
+    @SneakyThrows
+    public IGasPrice getEip4844GasPrice() {
+        var tipRespFuture = getTipFeeAsync();
+        var priorityRespFuture = getPriorityFeeAsync();
+
+        var maxPriorityFee = new BigDecimal(priorityRespFuture.get(5, TimeUnit.SECONDS)).multiply(
+                BigDecimal.valueOf(getGasPriceProviderConfig().getEip4844PriorityFeePerGasIncreasedPercentage() + 1)
+        ).toBigInteger();
+        maxPriorityFee = maxPriorityFee.compareTo(getGasPriceProviderConfig().getMinimumEip4844PriorityPrice()) > 0 ?
+                maxPriorityFee :
+                getGasPriceProviderConfig().getMinimumEip4844PriorityPrice();
+        var baseFee = tipRespFuture.get(5, TimeUnit.SECONDS);
+        getGasPriceProviderConfig().checkIfPriceOutOfLimit(baseFee, maxPriorityFee);
+        return new Eip4844GasPrice(
+                baseFee.multiply(BigInteger.valueOf(getGasPriceProviderConfig().getBaseFeeMultiplier())).add(maxPriorityFee),
+                maxPriorityFee,
+                getMaxFeePerBlobGas()
+        ).validate();
+    }
+
+    private CompletableFuture<BigInteger> getPriorityFeeAsync() {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                var priorityResp = getWeb3j().ethMaxPriorityFeePerGas().send();
+                if (priorityResp.hasError()) {
+                    throw new RuntimeException("get priority gas price failed: " + priorityResp.getError().getMessage());
+                }
+                return priorityResp.getMaxPriorityFeePerGas();
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        });
+    }
+
+    private CompletableFuture<BigInteger> getTipFeeAsync() {
+        return CompletableFuture.supplyAsync(() -> {
             try {
                 var tipResp =
                         getWeb3j().ethGetBlockByNumber(DefaultBlockParameterName.LATEST, false)
@@ -65,26 +120,5 @@ public class EthereumGasPriceProvider extends ApiGasPriceProvider {
                 throw new RuntimeException(e);
             }
         });
-
-        var priorityRespFuture = CompletableFuture.supplyAsync(() -> {
-            try {
-                var priorityResp = getWeb3j().ethMaxPriorityFeePerGas().send();
-                if (priorityResp.hasError()) {
-                    throw new RuntimeException("get priority gas price failed: " + priorityResp.getError().getMessage());
-                }
-                return priorityResp.getMaxPriorityFeePerGas();
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-        });
-
-        var maxPriorityFee = new BigDecimal(priorityRespFuture.get(5, TimeUnit.SECONDS)).multiply(
-                BigDecimal.valueOf(getGasPriceProviderConfig().getPriorityFeePerGasIncreasedPercentage() + 1)
-        ).toBigInteger();
-        var baseFee = tipRespFuture.get(5, TimeUnit.SECONDS);
-        return new Eip1559GasPrice(
-                baseFee.multiply(BigInteger.valueOf(getGasPriceProviderConfig().getBaseFeeMultiplier())).add(maxPriorityFee),
-                maxPriorityFee
-        ).validate();
     }
 }

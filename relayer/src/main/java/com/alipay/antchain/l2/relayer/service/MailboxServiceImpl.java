@@ -4,20 +4,17 @@ import java.math.BigInteger;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
-import javax.annotation.Resource;
+import jakarta.annotation.Resource;
 
 import cn.hutool.core.map.MapUtil;
 import cn.hutool.core.util.ObjectUtil;
 import com.alipay.antchain.l2.relayer.commons.enums.*;
-import com.alipay.antchain.l2.relayer.commons.exceptions.FetchL1MsgException;
 import com.alipay.antchain.l2.relayer.commons.exceptions.InitMailboxServiceException;
 import com.alipay.antchain.l2.relayer.commons.exceptions.ProcessL1MsgException;
 import com.alipay.antchain.l2.relayer.commons.l2basic.L1MsgTransaction;
 import com.alipay.antchain.l2.relayer.commons.models.InterBlockchainMessageDO;
-import com.alipay.antchain.l2.relayer.commons.models.L1MsgTransactionBatch;
 import com.alipay.antchain.l2.relayer.commons.models.ReliableTransactionDO;
 import com.alipay.antchain.l2.relayer.commons.models.TransactionInfo;
-import com.alipay.antchain.l2.relayer.core.blockchain.L1Client;
 import com.alipay.antchain.l2.relayer.core.blockchain.L2Client;
 import com.alipay.antchain.l2.relayer.core.layer2.IL2MerkleTreeAggregator;
 import com.alipay.antchain.l2.relayer.dal.repository.IMailboxRepository;
@@ -29,7 +26,6 @@ import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionCallbackWithoutResult;
 import org.springframework.transaction.support.TransactionTemplate;
-import org.web3j.protocol.core.DefaultBlockParameterName;
 
 @Service
 @Slf4j
@@ -45,28 +41,16 @@ public class MailboxServiceImpl implements IMailboxService {
     private IL2MerkleTreeAggregator l2MerkleTreeAggregator;
 
     @Resource
-    private L1Client l1Client;
-
-    @Resource
     private L2Client l2Client;
 
     @Resource
     private TransactionTemplate transactionTemplate;
-
-    @Value("${l2-relayer.tasks.block-polling.l1.max-poling-block-size:32}")
-    private int maxPollingBlockSize;
-
-    @Value("${l2-relayer.tasks.block-polling.l1.policy:FINALIZED}")
-    private DefaultBlockParameterName blockPollingPolicy;
 
     @Value("${l2-relayer.tasks.mailbox.max-pending-l1msg:256}")
     private int maxPendingL1Msg;
 
     @Value("${l2-relayer.tasks.mailbox.l1msg-per-batch-limit:32}")
     private int l1MsgNumberPerBatchLimit;
-
-    @Value("${l2-relayer.tasks.mailbox.l2msg-to-prove-per-batch-limit:32}")
-    private int l2MsgNumberToProvePerBatchLimit;
 
     @Override
     public void initService(BigInteger startBlockNumber) {
@@ -75,36 +59,6 @@ public class MailboxServiceImpl implements IMailboxService {
         }
         log.info("init mailbox service that scanning work from height {}", startBlockNumber);
         updateProcessedL1BlockNumber(startBlockNumber.subtract(BigInteger.ONE));
-    }
-
-    @Override
-    public void pollL1MsgBatch() {
-        BigInteger processedL1BlockNumber = getProcessedL1BlockNumber();
-        BigInteger latestL1BlockNumber = l1Client.queryLatestBlockNumber(blockPollingPolicy);
-        if (ObjectUtil.isNull(processedL1BlockNumber)) {
-            log.info("⌛️ set the start height for l1Msg polling task please, wait for it...");
-            return;
-        }
-        if (latestL1BlockNumber.compareTo(processedL1BlockNumber) <= 0) {
-            log.debug("already processed the latest height {} on L1", latestL1BlockNumber);
-            return;
-        }
-
-        BigInteger maxPollingLimit = processedL1BlockNumber.add(BigInteger.valueOf(maxPollingBlockSize));
-        maxPollingLimit = latestL1BlockNumber.compareTo(maxPollingLimit) <= 0 ? latestL1BlockNumber : maxPollingLimit;
-        log.info("process blocks from {} to {} included and latest {} on l1 chain", processedL1BlockNumber.add(BigInteger.ONE), maxPollingLimit, latestL1BlockNumber);
-
-        BigInteger finalMaxPollingLimit = maxPollingLimit;
-        l1Client.flowableL1MsgFromMailbox(processedL1BlockNumber.add(BigInteger.ONE), maxPollingLimit)
-                .subscribe(
-                        this::receiveL1Msgs,
-                        throwable -> {
-                            throw new FetchL1MsgException(throwable, "failed to fetch l1 msg");
-                        },
-                        () -> log.info("fetch l1 msg from height {} to {} completed", processedL1BlockNumber.add(BigInteger.ONE), finalMaxPollingLimit)
-                );
-
-        log.info("🎉 successful to process l1 block from {} to {}", processedL1BlockNumber.add(BigInteger.ONE), maxPollingLimit);
     }
 
     @Override
@@ -167,23 +121,6 @@ public class MailboxServiceImpl implements IMailboxService {
 
         log.info("🎉 successful to generate {} l2Msg proof for batch#{}",
                 ObjectUtil.defaultIfNull(proofResult, MapUtil.empty()).size(), nextBatchIndex);
-    }
-
-    private void receiveL1Msgs(L1MsgTransactionBatch batch) {
-        transactionTemplate.execute(
-                new TransactionCallbackWithoutResult() {
-                    @Override
-                    protected void doInTransactionWithoutResult(TransactionStatus status) {
-                        updateProcessedL1BlockNumber(batch.getHeight());
-                        if (batch.getL1MsgTransactionInfos().isEmpty()) {
-                            log.debug("get empty l1Msg batch for {}", batch.getHeight());
-                            return;
-                        }
-                        log.info("receiving {} l1Msgs from height {}", batch.getL1MsgTransactionInfos().size(), batch.getHeight());
-                        mailboxRepository.saveMessages(batch.toInterBlockchainMessages());
-                    }
-                }
-        );
     }
 
     private void processL1MsgPackaged(InterBlockchainMessageDO messageDO, L1MsgTransaction l1MsgTransaction) {

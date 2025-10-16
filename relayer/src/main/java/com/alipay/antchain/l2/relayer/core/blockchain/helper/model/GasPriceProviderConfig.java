@@ -2,6 +2,7 @@ package com.alipay.antchain.l2.relayer.core.blockchain.helper.model;
 
 import java.math.BigInteger;
 
+import com.alipay.antchain.l2.relayer.commons.exceptions.L1GasPriceTooHighException;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.GasPriceProviderSupplierEnum;
 import lombok.Getter;
 import lombok.Setter;
@@ -29,9 +30,36 @@ public class GasPriceProviderConfig {
 
     private double priorityFeePerGasIncreasedPercentage = 0.1;
 
+    private double eip4844PriorityFeePerGasIncreasedPercentage = 1;
+
+    private BigInteger maxPriceLimit = BigInteger.ZERO;
+
+    /**
+     * Only for legacy tx now.
+     */
+    @Deprecated(since = "0.8")
     private BigInteger extraGasPrice = BigInteger.valueOf(2_000_000_000L);
+
+    /**
+     * The eip4844 tx minimum priority price
+     */
+    private BigInteger minimumEip4844PriorityPrice = BigInteger.ZERO;
+
+    /**
+     * The eip1559 tx minimum priority price
+     */
+    private BigInteger minimumEip1559PriorityPrice = BigInteger.ZERO;
 
     public double getBlobFeeMultiplier(BigInteger maxFeeFromNode) {
         return maxFeeFromNode.compareTo(feePerBlobGasDividingVal) > 0 ? largerFeePerBlobGasMultiplier : smallerFeePerBlobGasMultiplier;
+    }
+
+    public void checkIfPriceOutOfLimit(BigInteger baseFee, BigInteger maxPriorityFee) {
+        if (maxPriceLimit.compareTo(BigInteger.ZERO) == 0) {
+            return;
+        }
+        if (baseFee.add(maxPriorityFee).compareTo(maxPriceLimit) > 0) {
+            throw new L1GasPriceTooHighException(baseFee, maxPriorityFee, maxPriceLimit);
+        }
     }
 }

@@ -1,18 +1,20 @@
-package com.alipay.antchain.l2.relayer.core.blockchain.helper;
+package com.alipay.antchain.l2.relayer.signservice.core;
 
 import com.alipay.antchain.l2.relayer.commons.l2basic.L1MsgRawTransactionWrapper;
+import com.alipay.antchain.l2.relayer.signservice.config.NativeConfig;
+import lombok.NonNull;
 import org.web3j.crypto.Credentials;
 import org.web3j.crypto.RawTransaction;
 import org.web3j.crypto.Sign;
 import org.web3j.crypto.TransactionEncoder;
 import org.web3j.service.TxSignService;
 
-public class RelayerTxSignServiceImpl implements TxSignService {
+public class Web3jTxSignService implements TxSignService {
 
     private final Credentials credentials;
 
-    public RelayerTxSignServiceImpl(Credentials credentials) {
-        this.credentials = credentials;
+    public Web3jTxSignService(@NonNull NativeConfig config) {
+        this.credentials = config.toCredentials();
     }
 
     @Override

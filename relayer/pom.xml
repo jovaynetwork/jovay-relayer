@@ -5,7 +5,7 @@
     <parent>
         <groupId>com.alipay.antchain.l2</groupId>
         <artifactId>l2-relayer</artifactId>
-        <version>0.7.0</version>
+        <version>0.8.0</version>
     </parent>
 
     <artifactId>relayer</artifactId>
@@ -103,13 +103,25 @@
             <artifactId>relayer-dal</artifactId>
         </dependency>
         <dependency>
+            <groupId>com.alipay.antchain.l2</groupId>
+            <artifactId>jovay-sign-service-spring-boot-starter</artifactId>
+        </dependency>
+        <dependency>
             <groupId>io.opentelemetry.instrumentation</groupId>
             <artifactId>opentelemetry-instrumentation-annotations</artifactId>
         </dependency>
         <dependency>
             <groupId>com.squareup.okhttp3</groupId>
-            <artifactId>mockwebserver</artifactId>
+            <artifactId>okhttp-jvm</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.squareup.okhttp3</groupId>
+            <artifactId>mockwebserver3</artifactId>
             <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.squareup.okhttp3</groupId>
+            <artifactId>logging-interceptor</artifactId>
         </dependency>
         <dependency>
             <groupId>io.grpc</groupId>
@@ -142,6 +154,7 @@
                     <include>**/*.xml</include>
                     <include>**/banner.txt</include>
                     <include>**/db/**</include>
+                    <include>**/specs/*.json</include>
                 </includes>
                 <!-- 是否替换@xx@表示的maven properties属性值 -->
                 <filtering>true</filtering>
@@ -230,7 +243,7 @@
                         <!--no api for us, errors come up if abiSourceFiles not set-->
                         <directory>src/main/resources/contracts/noop</directory>
                         <includes>
-                            <include>noop.json</include>
+                            <include>xxx.json</include>
                         </includes>
                     </abiSourceFiles>
                     <contract>

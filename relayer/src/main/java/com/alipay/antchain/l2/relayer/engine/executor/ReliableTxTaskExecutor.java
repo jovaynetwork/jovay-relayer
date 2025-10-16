@@ -1,8 +1,8 @@
 package com.alipay.antchain.l2.relayer.engine.executor;
 
 import java.util.concurrent.ExecutorService;
-import javax.annotation.PreDestroy;
-import javax.annotation.Resource;
+import jakarta.annotation.PreDestroy;
+import jakarta.annotation.Resource;
 
 import com.alipay.antchain.l2.relayer.commons.models.IDistributedTask;
 import com.alipay.antchain.l2.relayer.engine.checker.IDistributedTaskChecker;
@@ -31,7 +31,9 @@ public class ReliableTxTaskExecutor extends BaseScheduleTaskExecutor {
     public Runnable genTask(IDistributedTask task) {
         return () -> {
             try {
-                reliableTxService.processNotFinalizedTx();
+                // consider to do the jobs async
+                reliableTxService.processL1NotFinalizedTx();
+                reliableTxService.processL2NotFinalizedTx();
                 reliableTxService.retryFailedTx();
             } catch (Exception e) {
                 log.error("reliable tx process failed: ", e);

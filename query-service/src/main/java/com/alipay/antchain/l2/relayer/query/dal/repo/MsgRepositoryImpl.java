@@ -2,7 +2,7 @@ package com.alipay.antchain.l2.relayer.query.dal.repo;
 
 import java.math.BigInteger;
 
-import javax.annotation.Resource;
+import jakarta.annotation.Resource;
 
 import com.alipay.antchain.l2.relayer.commons.enums.InterBlockchainMessageTypeEnum;
 import com.alipay.antchain.l2.relayer.commons.l2basic.L2MsgProofData;

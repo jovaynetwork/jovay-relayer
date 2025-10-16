@@ -6,19 +6,19 @@ import java.util.List;
 
 import cn.hutool.core.lang.Assert;
 import com.alipay.antchain.l2.relayer.commons.l2basic.L1MsgTransaction;
-import com.alipay.antchain.l2.relayer.core.blockchain.helper.model.Eip1559GasPrice;
+import com.alipay.antchain.l2.relayer.core.blockchain.helper.model.IGasPrice;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.model.SendTxResult;
 import org.redisson.api.RedissonClient;
 import org.web3j.abi.datatypes.Address;
 import org.web3j.crypto.Blob;
-import org.web3j.crypto.Credentials;
 import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.methods.response.EthSendTransaction;
+import org.web3j.service.TxSignService;
 
 public class AcbRawTransactionManager extends BaseRawTransactionManager implements ITransactionManager {
 
-    public AcbRawTransactionManager(Web3j web3j, Credentials credentials, long chainId, RedissonClient redisson) {
-        super(web3j, credentials, chainId, redisson);
+    public AcbRawTransactionManager(Web3j web3j, TxSignService txSignService, long chainId, RedissonClient redisson, int blobSidecarVersion) {
+        super(web3j, txSignService, chainId, redisson, blobSidecarVersion);
     }
 
     protected synchronized BigInteger getNonce() throws IOException {
@@ -26,7 +26,7 @@ public class AcbRawTransactionManager extends BaseRawTransactionManager implemen
     }
 
     @Override
-    public SendTxResult sendTx(Eip1559GasPrice gasPrice, BigInteger gasLimit, String to, String data, BigInteger value, boolean constructor) throws IOException {
+    public SendTxResult sendTx(IGasPrice gasPrice, BigInteger gasLimit, String to, String data, BigInteger value, boolean constructor) throws IOException {
         // do not use this method to send L1Msg
         Assert.notEquals(L1MsgTransaction.L2_MAILBOX_AS_RECEIVER, new Address(to));
         getSendTxLock().lock();
@@ -50,18 +50,17 @@ public class AcbRawTransactionManager extends BaseRawTransactionManager implemen
     @Override
     public SendTxResult sendTx(
             List<Blob> blobs,
-            Eip1559GasPrice gasPrice,
+            IGasPrice gasPrice,
             BigInteger gasLimit,
             String to,
             BigInteger value,
-            String data,
-            BigInteger maxFeePerBlobGas
+            String data
     ) throws IOException {
         // do not use this method to send L1Msg
         Assert.notEquals(L1MsgTransaction.L2_MAILBOX_AS_RECEIVER, new Address(to));
         getSendTxLock().lock();
         try {
-            return sendTx(blobs, gasPrice, gasLimit, to, getNonce(), value, data, maxFeePerBlobGas);
+            return sendTx(blobs, gasPrice, gasLimit, to, getNonce(), value, data);
         } finally {
             getSendTxLock().unlock();
         }

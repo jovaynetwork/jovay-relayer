@@ -1,7 +1,7 @@
 package com.alipay.antchain.l2.relayer.metrics.monitor;
 
 import java.math.BigDecimal;
-import javax.annotation.Resource;
+import jakarta.annotation.Resource;
 
 import cn.hutool.core.collection.ListUtil;
 import cn.hutool.core.util.ObjectUtil;

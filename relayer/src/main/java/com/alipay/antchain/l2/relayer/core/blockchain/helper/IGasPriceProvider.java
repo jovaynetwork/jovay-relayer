@@ -2,7 +2,7 @@ package com.alipay.antchain.l2.relayer.core.blockchain.helper;
 
 import java.math.BigInteger;
 
-import com.alipay.antchain.l2.relayer.core.blockchain.helper.model.Eip1559GasPrice;
+import com.alipay.antchain.l2.relayer.core.blockchain.helper.model.IGasPrice;
 
 public interface IGasPriceProvider {
 
@@ -11,7 +11,7 @@ public interface IGasPriceProvider {
     @Deprecated
     BigInteger getGasPrice();
 
-    Eip1559GasPrice getEip1559GasPrice();
+    IGasPrice getEip1559GasPrice();
 
-    BigInteger getMaxFeePerBlobGas();
+    IGasPrice getEip4844GasPrice();
 }

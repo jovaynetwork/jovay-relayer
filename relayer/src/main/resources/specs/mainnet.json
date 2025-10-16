@@ -1,0 +1,10 @@
+{
+  "network": "mainnet",
+  "layer2_chain_id": "5734951",
+  "layer1_chain_id": "1",
+  "forks": {
+    "1": {
+      "batch_version": 1
+    }
+  }
+}

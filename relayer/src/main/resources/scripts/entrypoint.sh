@@ -37,12 +37,12 @@ if [ -z "${REDIS_USER_PASSWORD}" ]; then
    log_error "no env REDIS_USER_PASSWORD set"
    exit 1
 fi
-if [ -z "${L1_CLIENT_LEGACY_POOL_TX_PRIVATE_KEY}" ]; then
-   log_error "no env L1_CLIENT_LEGACY_POOL_TX_PRIVATE_KEY set"
+if [ -z "${L1_BLOB_POOL_TX_SIGN_SERVICE_TYPE}" ]; then
+   log_error "no env L1_BLOB_POOL_TX_SIGN_SERVICE_TYPE set"
    exit 1
 fi
-if [ -z "${L1_CLIENT_BLOB_POOL_TX_PRIVATE_KEY}" ]; then
-   log_error "no env L1_CLIENT_BLOB_POOL_TX_PRIVATE_KEY set"
+if [ -z "${L1_LEGACY_POOL_TX_SIGN_SERVICE_TYPE}" ]; then
+   log_error "no env L1_LEGACY_POOL_TX_SIGN_SERVICE_TYPE set"
    exit 1
 fi
 if [ -z "${L1_RPC_URL}" ]; then
@@ -57,8 +57,8 @@ if [ -z "${L1_MAILBOX_CONTRACT}" ]; then
    log_error "no env L1_MAILBOX_CONTRACT set"
    exit 1
 fi
-if [ -z "${L2_CLIENT_PRIVATE_KEY}" ]; then
-   log_error "no env L2_CLIENT_PRIVATE_KEY set"
+if [ -z "${L2_TX_SIGN_SERVICE_TYPE}" ]; then
+   log_error "no env L2_TX_SIGN_SERVICE_TYPE set"
    exit 1
 fi
 if [ -z "${L2_RPC_URL}" ]; then
@@ -91,9 +91,7 @@ if [ -n "${JASYPT_PASSWD}" ]; then
 fi
 
 # fix supervisor conf and add java link
-sed -i 's|supervisor/conf.d/\*.conf|supervisord.d/\*.ini|g' /etc/supervisord.conf
-# set nodaemon=true
-sed -i 's/nodaemon=false/nodaemon=true/g' /etc/supervisord.conf
+sed -i 's|supervisor/conf.d/\*.conf|supervisord.d/\*.ini|g' /etc/supervisor/supervisord.conf
 if [ ! -f /usr/bin/java ]; then
   ln -s /opt/java/openjdk/bin/java /usr/bin/java
 fi
@@ -108,5 +106,4 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 
-# start supervisord
-supervisord -c /etc/supervisord.conf
+exec supervisord

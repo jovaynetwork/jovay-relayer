@@ -1,25 +1,49 @@
 package com.alipay.antchain.l2.relayer.cli.commands;
 
+import java.nio.charset.Charset;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+
+import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.HexUtil;
 import cn.hutool.core.util.RandomUtil;
 import cn.hutool.core.util.ReflectUtil;
 import cn.hutool.core.util.StrUtil;
 import com.alibaba.fastjson.JSON;
+import com.alipay.antchain.l2.relayer.commons.enums.ChainTypeEnum;
 import com.alipay.antchain.l2.relayer.commons.enums.TransactionTypeEnum;
 import com.alipay.antchain.l2.relayer.server.grpc.*;
 import com.google.protobuf.ByteString;
+import lombok.SneakyThrows;
 import org.junit.Assert;
 import org.junit.Test;
 import org.web3j.abi.datatypes.generated.Bytes32;
+import org.web3j.crypto.Keys;
 import org.web3j.utils.Numeric;
 
-import static org.mockito.ArgumentMatchers.notNull;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 public class CommandsTest {
 
     private CoreCommands coreCommands;
+
+    private UtilsCommands utilsCommands;
+
+    @Test
+    @SneakyThrows
+    public void testUtils() {
+        var keyPair = Keys.createEcKeyPair();
+        FileUtil.writeString(Numeric.toHexString(keyPair.getPrivateKey().toByteArray()), "/tmp/test_key", Charset.defaultCharset());
+        utilsCommands = new UtilsCommands();
+        Assert.assertEquals("success", utilsCommands.convertPrivateKeyToPem("/tmp/test_key", "/tmp/", "pubkey", "privkey"));
+        Assert.assertTrue(Files.exists(Paths.get("/tmp/pubkey")));
+        Assert.assertTrue(Files.exists(Paths.get("/tmp/privkey")));
+
+        var res = utilsCommands.convertPublicKeyToEthAddress("/tmp/pubkey");
+        Assert.assertTrue(StrUtil.equalsIgnoreCase((String) res, Numeric.prependHexPrefix(Keys.getAddress(keyPair.getPublicKey()))));
+    }
 
     @Test
     public void testBaseAvailability() {
@@ -103,6 +127,34 @@ public class CommandsTest {
     }
 
     @Test
+    public void testSpeedupRollupTx() {
+        coreCommands = new CoreCommands();
+        var stub = mock(AdminServiceGrpc.AdminServiceBlockingStub.class);
+        when(stub.speedupTx(notNull())).thenReturn(Response.newBuilder().setCode(0).build());
+        ReflectUtil.setFieldValue(coreCommands, "adminServiceBlockingStub", stub);
+
+        coreCommands.speedupRollupTx(ChainTypeEnum.LAYER_ONE, TransactionTypeEnum.BATCH_TEE_PROOF_COMMIT_TX, 1L, 3L, 2L, 1L);
+    }
+
+    @Test
+    public void testQueryRelayerAddress() {
+        coreCommands = new CoreCommands();
+        var stub = mock(AdminServiceGrpc.AdminServiceBlockingStub.class);
+        when(stub.queryRelayerAddress(notNull())).thenReturn(Response.newBuilder().setCode(0)
+                .setQueryRelayerAddressResp(
+                        QueryRelayerAddressResp.newBuilder()
+                                .setL1BlobAddress("0x123")
+                                .setL1LegacyAddress("0x456")
+                                .setL2Address("0x789")
+                                .build()
+                ).build());
+        ReflectUtil.setFieldValue(coreCommands, "adminServiceBlockingStub", stub);
+        Assert.assertTrue(
+                StrUtil.containsAll((String) coreCommands.queryRelayerAddress(), "0x123", "0x456", "0x789")
+        );
+    }
+
+    @Test
     public void testQueryBatchTxInfo() {
         var txhash = Numeric.toHexString(RandomUtil.randomBytes(32));
         coreCommands = new CoreCommands();
@@ -122,6 +174,30 @@ public class CommandsTest {
         ReflectUtil.setFieldValue(coreCommands, "adminServiceBlockingStub", stub);
         Assert.assertTrue(
                 StrUtil.contains((String) coreCommands.queryBatchTxInfo(TransactionTypeEnum.BATCH_COMMIT_TX, 1L), txhash)
+        );
+    }
+
+    @Test
+    public void testQueryBatchDaInfo() {
+        coreCommands = new CoreCommands();
+        var stub = mock(AdminServiceGrpc.AdminServiceBlockingStub.class);
+        when(stub.queryBatchDaInfo(argThat(x -> x.getBatchIndex() == 1L))).thenReturn(Response.newBuilder().setCode(0)
+                .setQueryBatchDaInfoResp(
+                        QueryBatchDaInfoResp.newBuilder()
+                                .setBatchIndex(1L)
+                                .setDaInfo(DaInfo.newBuilder()
+                                        .setCompressed(true)
+                                        .setCompressionRatio(2.3)
+                                        .setTxCount(10116)
+                                        .setBlobInfo(BlobInfo.newBuilder()
+                                                .setBlobSize(6)
+                                                .setValidBlobBytesSize(100)
+                                        ).build()
+                                ).build()
+                ).build());
+        ReflectUtil.setFieldValue(coreCommands, "adminServiceBlockingStub", stub);
+        Assert.assertTrue(
+                StrUtil.contains((String) coreCommands.queryBatchDaInfo(1L), "compressionRatio\":2.3")
         );
     }
 }

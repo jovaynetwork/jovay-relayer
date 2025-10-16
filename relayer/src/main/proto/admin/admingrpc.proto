@@ -15,6 +15,11 @@ message Response {
         GetRawBatchResp getRawBatchResp = 4;
         GetL2MsgProofResp getL2MsgProofResp = 5;
         QueryBatchTxInfoResp queryBatchTxInfoResp = 6;
+        WithdrawFromVaultResp withdrawFromVaultResp = 7;
+        UpdateFixedProfitResp updateFixedProfitResp = 8;
+        UpdateTotalScalaResp updateTotalScalaResp = 9;
+        QueryBatchDaInfoResp queryBatchDaInfoResp = 10;
+        QueryRelayerAddressResp queryRelayerAddressResp = 11;
     }
 }
 
@@ -86,6 +91,20 @@ message GetRawBatchReq {
 message GetRawBatchResp {
     bytes batchHeader = 1;
     repeated RawChunkInfo chunks = 2;
+    DaInfo daInfo = 3;
+}
+
+message DaInfo{
+    uint32 daVersion = 1;
+    bool compressed = 2;
+    double compressionRatio = 3;
+    uint64 txCount = 4;
+    BlobInfo blobInfo = 5;
+}
+
+message BlobInfo {
+    uint32 blobSize = 1;
+    uint32 validBlobBytesSize = 2;
 }
 
 message RawChunkInfo {
@@ -113,6 +132,40 @@ message QueryBatchTxInfoResp {
     TxInfo txInfo = 2;
 }
 
+message QueryBatchDaInfoReq {
+    uint64 batchIndex = 2;
+}
+
+message QueryBatchDaInfoResp {
+    uint64 batchIndex = 1;
+    DaInfo daInfo = 2;
+}
+
+message WithdrawFromVaultReq {
+    string to = 1;
+    uint32 amount = 2;
+}
+
+message WithdrawFromVaultResp {
+    string txHash = 1;
+}
+
+message UpdateFixedProfitReq {
+    string profit = 1;
+}
+
+message UpdateFixedProfitResp {
+    string txHash = 1;
+}
+
+message UpdateTotalScalaReq {
+    string totalScala = 1;
+}
+
+message UpdateTotalScalaResp {
+    string txHash = 1;
+}
+
 message TxInfo {
     string type = 1;
     string original_tx = 2;
@@ -121,6 +174,24 @@ message TxInfo {
     string state = 5;
     uint32 retry_count = 6;
     string revert_reason = 7;
+}
+
+message SpeedupTxReq {
+    string chainType = 1;
+    string type = 2;
+    uint64 batchIndex = 3;
+    uint64 maxFeePerGas = 4;
+    uint64 maxPriorityFeePerGas = 5;
+    uint64 maxFeePerBlobGas = 6;
+}
+
+message Empty {
+}
+
+message QueryRelayerAddressResp {
+    string l1BlobAddress = 1;
+    string l1LegacyAddress = 2;
+    string l2Address = 3;
 }
 
 service AdminService {
@@ -138,4 +209,16 @@ service AdminService {
     rpc retryBatchTx(RetryBatchTxReq) returns (Response) {}
 
     rpc queryBatchTxInfo(QueryBatchTxInfoReq) returns (Response) {}
+
+    rpc queryBatchDaInfo(QueryBatchDaInfoReq) returns (Response) {}
+
+    rpc withdrawFromVault(WithdrawFromVaultReq) returns (Response) {}
+
+    rpc updateFixedProfit(UpdateFixedProfitReq) returns (Response) {}
+
+    rpc updateTotalScala(UpdateTotalScalaReq) returns (Response) {}
+
+    rpc speedupTx(SpeedupTxReq) returns (Response) {}
+
+    rpc queryRelayerAddress(Empty) returns (Response) {}
 }

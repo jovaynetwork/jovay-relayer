@@ -38,6 +38,12 @@ public class BytesUtils {
         return ByteUtil.bytesToInt(rawNum, ByteOrder.BIG_ENDIAN);
     }
 
+    public static int getUint24(byte[] raw, int offset) {
+        byte[] rawNum = new byte[4];
+        System.arraycopy(raw, offset, rawNum, 1, 3);
+        return ByteUtil.bytesToInt(rawNum, ByteOrder.BIG_ENDIAN);
+    }
+
     public static long getUint32(byte[] raw, int offset) {
         byte[] rawNum = new byte[8];
         System.arraycopy(raw, offset, rawNum, 4, 4);

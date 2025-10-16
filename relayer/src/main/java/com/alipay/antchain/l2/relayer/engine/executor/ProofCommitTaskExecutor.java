@@ -1,8 +1,8 @@
 package com.alipay.antchain.l2.relayer.engine.executor;
 
 import java.util.concurrent.ExecutorService;
-import javax.annotation.PreDestroy;
-import javax.annotation.Resource;
+import jakarta.annotation.PreDestroy;
+import jakarta.annotation.Resource;
 
 import com.alipay.antchain.l2.relayer.commons.models.IDistributedTask;
 import com.alipay.antchain.l2.relayer.dal.repository.ISystemConfigRepository;

@@ -11,4 +11,5 @@ public class L1ContractFatalException extends L2RelayerException {
     public L1ContractFatalException(L2RelayerErrorCodeEnum errorCode, String errMsg, String revertReason) {
         super(errorCode, StrUtil.format("code: {}, err_msg: {}", errorCode.getErrorCode(), errMsg));
         this.revertReason = revertReason;
-    }}
+    }
+}

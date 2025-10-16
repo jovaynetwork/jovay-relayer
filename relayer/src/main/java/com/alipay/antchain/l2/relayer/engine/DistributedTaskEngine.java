@@ -2,8 +2,8 @@ package com.alipay.antchain.l2.relayer.engine;
 
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import javax.annotation.PreDestroy;
-import javax.annotation.Resource;
+import jakarta.annotation.PreDestroy;
+import jakarta.annotation.Resource;
 
 import com.alipay.antchain.l2.relayer.engine.core.Activator;
 import com.alipay.antchain.l2.relayer.engine.core.Dispatcher;
@@ -44,7 +44,7 @@ public class DistributedTaskEngine implements ApplicationRunner {
     private long dutyPeriod;
 
     @Override
-    public void run(ApplicationArguments args) throws Exception {
+    public void run(ApplicationArguments args) {
 
         log.info("Starting DistributedTask Engine Now");
 

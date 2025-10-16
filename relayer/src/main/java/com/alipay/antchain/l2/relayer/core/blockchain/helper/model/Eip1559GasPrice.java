@@ -4,9 +4,10 @@ import java.math.BigInteger;
 
 import cn.hutool.json.JSONObject;
 
-public record Eip1559GasPrice(BigInteger maxFeePerGas, BigInteger maxPriorityFeePerGas) {
+public record Eip1559GasPrice(BigInteger maxFeePerGas, BigInteger maxPriorityFeePerGas) implements IGasPrice {
 
-    public Eip1559GasPrice validate() {
+    @Override
+    public IGasPrice validate() {
         if (maxFeePerGas.compareTo(maxPriorityFeePerGas) < 0) {
             throw new IllegalArgumentException("max priority fee per gas higher than max fee per gas");
         }
@@ -18,5 +19,10 @@ public record Eip1559GasPrice(BigInteger maxFeePerGas, BigInteger maxPriorityFee
         obj.set("maxFeePerGas", maxFeePerGas);
         obj.set("maxPriorityFeePerGas", maxPriorityFeePerGas);
         return obj.toString();
+    }
+
+    @Override
+    public BigInteger maxFeePerBlobGas() {
+        throw new UnsupportedOperationException("maxFeePerBlobGas is not supported");
     }
 }

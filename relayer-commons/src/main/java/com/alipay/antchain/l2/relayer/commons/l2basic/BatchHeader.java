@@ -22,7 +22,7 @@ public class BatchHeader {
         BatchHeader header = new BatchHeader();
 
         int offset = 0;
-        header.setVersion(BytesUtils.getUint8(raw, offset++));
+        header.setVersion(BatchVersionEnum.from(BytesUtils.getUint8(raw, offset++)));
 
         header.setBatchIndex(BytesUtils.getUint64(raw, offset));
         offset += 8;
@@ -38,7 +38,7 @@ public class BatchHeader {
         return header;
     }
 
-    private byte version;
+    private BatchVersionEnum version;
 
     private BigInteger batchIndex;
 
@@ -66,7 +66,7 @@ public class BatchHeader {
         ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
         DataOutputStream stream = new DataOutputStream(byteArrayOutputStream);
 
-        stream.writeByte(version);
+        stream.writeByte(version.getValue());
         stream.write(BytesUtils.fromUint64(batchIndex));
         stream.write(l1MsgRollingHash);
         stream.write(dataHash);
