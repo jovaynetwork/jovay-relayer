@@ -15,6 +15,7 @@ import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.alipay.antchain.l2.relayer.commons.exceptions.InvalidChunkException;
 import com.alipay.antchain.l2.relayer.commons.utils.BytesUtils;
+import com.alipay.antchain.l2.relayer.commons.utils.EthTxDecoder;
 import com.alipay.antchain.l2.relayer.commons.utils.Utils;
 import com.alipay.antchain.l2.trace.BasicBlockTrace;
 import com.alipay.antchain.l2.trace.Transaction;
@@ -22,7 +23,6 @@ import lombok.*;
 import lombok.extern.slf4j.Slf4j;
 import org.web3j.crypto.Hash;
 import org.web3j.crypto.SignedRawTransaction;
-import org.web3j.crypto.TransactionDecoder;
 import org.web3j.crypto.TransactionEncoder;
 
 @Slf4j
@@ -154,7 +154,7 @@ public class Chunk {
             int size = inputStream.readInt();
             byte[] rawTx = new byte[size];
             Assert.equals(size, inputStream.read(rawTx));
-            transactions.add((SignedRawTransaction) TransactionDecoder.decode(HexUtil.encodeHexStr(rawTx)));
+            transactions.add((SignedRawTransaction) EthTxDecoder.decode(HexUtil.encodeHexStr(rawTx)));
         }
         return transactions;
     }

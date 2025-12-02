@@ -26,10 +26,6 @@ if [ -z "${MYSQL_USER_NAME}" ]; then
    exit 1
 fi
 
-if [ -n "${JASYPT_PASSWD}" ]; then
-    RELAYER_START_FLAG="${RELAYER_START_FLAG} -P ${JASYPT_PASSWD}"
-fi
-
 # fix supervisor conf and add java link
 sed -i 's|supervisor/conf.d/\*.conf|supervisord.d/\*.ini|g' /etc/supervisor/supervisord.conf
 if [ ! -f /usr/bin/java ]; then

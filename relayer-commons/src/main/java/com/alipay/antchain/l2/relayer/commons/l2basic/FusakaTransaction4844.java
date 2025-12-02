@@ -56,6 +56,28 @@ public class FusakaTransaction4844 extends Transaction4844 {
                         .collect(Collectors.toList());
     }
 
+    public FusakaTransaction4844(
+            List<Blob> blobs,
+            List<Bytes> kzgCommitments,
+            List<Bytes> kzgProofs,
+            long chainId,
+            BigInteger nonce,
+            BigInteger maxPriorityFeePerGas,
+            BigInteger maxFeePerGas,
+            BigInteger gasLimit,
+            String to,
+            BigInteger value,
+            String data,
+            BigInteger maxFeePerBlobGas,
+            List<Bytes> versionedHashes
+    ) {
+        super(blobs, kzgCommitments, kzgProofs, chainId, nonce, maxPriorityFeePerGas, maxFeePerGas, gasLimit, to, value, data, maxFeePerBlobGas, versionedHashes);
+        this.versionedHashes = versionedHashes;
+        this.blobs = Optional.ofNullable(blobs);
+        this.kzgCommitments = Optional.ofNullable(kzgCommitments);
+        this.kzgProofs = Optional.ofNullable(kzgProofs);
+    }
+
     @Override
     public List<RlpType> asRlpValues(Sign.SignatureData signatureData) {
         List<RlpType> resultTx = new ArrayList<>();
@@ -67,7 +89,7 @@ public class FusakaTransaction4844 extends Transaction4844 {
         resultTx.add(RlpString.create(getGasLimit()));
 
         String to = getTo();
-        if (to != null && to.length() > 0) {
+        if (to != null && !to.isEmpty()) {
             resultTx.add(RlpString.create(Numeric.hexStringToByteArray(to)));
         } else {
             resultTx.add(RlpString.create(""));

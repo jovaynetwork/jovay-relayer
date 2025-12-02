@@ -1,0 +1,213 @@
+[
+  {
+    "type": "function",
+    "name": "getIdentityContentHash",
+    "inputs": [
+      {
+        "name": "identity",
+        "type": "tuple",
+        "internalType": "struct IdentityObj",
+        "components": [
+          {
+            "name": "id",
+            "type": "uint8",
+            "internalType": "enum EnclaveId"
+          },
+          {
+            "name": "version",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "issueDateTimestamp",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "nextUpdateTimestamp",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "tcbEvaluationDataNumber",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "miscselect",
+            "type": "bytes4",
+            "internalType": "bytes4"
+          },
+          {
+            "name": "miscselectMask",
+            "type": "bytes4",
+            "internalType": "bytes4"
+          },
+          {
+            "name": "attributes",
+            "type": "bytes16",
+            "internalType": "bytes16"
+          },
+          {
+            "name": "attributesMask",
+            "type": "bytes16",
+            "internalType": "bytes16"
+          },
+          {
+            "name": "mrsigner",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "isvprodid",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "tcb",
+            "type": "tuple[]",
+            "internalType": "struct Tcb[]",
+            "components": [
+              {
+                "name": "isvsvn",
+                "type": "uint16",
+                "internalType": "uint16"
+              },
+              {
+                "name": "dateTimestamp",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "status",
+                "type": "uint8",
+                "internalType": "enum EnclaveIdTcbStatus"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "identityTcbString",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "contentHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "pure"
+  },
+  {
+    "type": "function",
+    "name": "parseIdentityString",
+    "inputs": [
+      {
+        "name": "identityStr",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "identity",
+        "type": "tuple",
+        "internalType": "struct IdentityObj",
+        "components": [
+          {
+            "name": "id",
+            "type": "uint8",
+            "internalType": "enum EnclaveId"
+          },
+          {
+            "name": "version",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "issueDateTimestamp",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "nextUpdateTimestamp",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "tcbEvaluationDataNumber",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "miscselect",
+            "type": "bytes4",
+            "internalType": "bytes4"
+          },
+          {
+            "name": "miscselectMask",
+            "type": "bytes4",
+            "internalType": "bytes4"
+          },
+          {
+            "name": "attributes",
+            "type": "bytes16",
+            "internalType": "bytes16"
+          },
+          {
+            "name": "attributesMask",
+            "type": "bytes16",
+            "internalType": "bytes16"
+          },
+          {
+            "name": "mrsigner",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "isvprodid",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "tcb",
+            "type": "tuple[]",
+            "internalType": "struct Tcb[]",
+            "components": [
+              {
+                "name": "isvsvn",
+                "type": "uint16",
+                "internalType": "uint16"
+              },
+              {
+                "name": "dateTimestamp",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "status",
+                "type": "uint8",
+                "internalType": "enum EnclaveIdTcbStatus"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "identityTcbString",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "stateMutability": "pure"
+  },
+  {
+    "type": "error",
+    "name": "Invalid_ID",
+    "inputs": []
+  }
+]

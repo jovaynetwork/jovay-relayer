@@ -25,6 +25,8 @@ message BasicBlockTrace {
   uint32 spec_version = 10;
   uint32 base_gas_deduction = 11;
   Hash l1_msg_rolling_hash = 12;
+  bytes l1_oracle_address = 13;
+  uint64 finalize_l1_msg_index = 14;
 }
 
 message L2Msgs { repeated L2Msg l2_msgs = 2; }
@@ -487,4 +489,32 @@ message TraceItemStepInfo {}
 message ExecBlockTrace {
   uint64 block_number = 1;
   repeated ExecTransactionTrace traces = 2;
+}
+
+
+message AddressBalanceChange {
+  string address = 1;
+  U256 current_balance = 2;
+}
+
+
+message TransactionInfo {
+  string tx_hash = 1;
+  uint64 tx_index = 2;
+  string from_address = 3;
+  string to_address = 4;
+  uint64 gas_used = 5;
+  uint64 gas_price = 6;
+  uint64 gas_fee = 7;
+  repeated AddressBalanceChange address_changes = 8;
+}
+
+
+message BlockAddressBalances {
+  uint64 block_height = 1;
+  string block_hash = 2;
+  uint64 timestamp = 3;
+  uint64 total_gas_used = 4;
+  uint64 total_gas_fee = 5;
+  repeated TransactionInfo transactions = 6;
 }

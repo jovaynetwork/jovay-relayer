@@ -39,7 +39,6 @@ import org.web3j.crypto.Hash;
 import org.web3j.crypto.transaction.type.Transaction1559;
 import org.web3j.crypto.transaction.type.Transaction2930;
 import org.web3j.crypto.transaction.type.Transaction4844;
-import org.web3j.protocol.core.JsonRpc2_0Web3j;
 import org.web3j.rlp.RlpEncoder;
 import org.web3j.rlp.RlpList;
 import org.web3j.rlp.RlpString;
@@ -47,9 +46,6 @@ import org.web3j.rlp.RlpType;
 import org.web3j.utils.Numeric;
 
 public class Utils {
-
-    private static final BigInteger MIN_BLOB_BASE_FEE = BigInteger.ONE;
-    private static final BigInteger BLOB_BASE_FEE_UPDATE_FRACTION = new BigInteger("5007716");
 
     public static BlockContext convertFromBlockTrace(BasicBlockTrace blockTrace) {
         return BlockContext.builder()
@@ -174,26 +170,6 @@ public class Utils {
                         .put(encoded)
                         .array()
         ));
-    }
-
-    /**
-     * From web3j {@link JsonRpc2_0Web3j#fakeExponential(BigInteger)}}but with pectra {@code BLOB_BASE_FEE_UPDATE_FRACTION}.
-     * @param numerator
-     * @return
-     */
-    public static BigInteger fakeExponential(BigInteger numerator) {
-        BigInteger i = BigInteger.ONE;
-        BigInteger output = BigInteger.ZERO;
-        BigInteger numeratorAccum = MIN_BLOB_BASE_FEE.multiply(BLOB_BASE_FEE_UPDATE_FRACTION);
-        while (numeratorAccum.compareTo(BigInteger.ZERO) > 0) {
-            output = output.add(numeratorAccum);
-            numeratorAccum =
-                    numeratorAccum
-                            .multiply(numerator)
-                            .divide(BLOB_BASE_FEE_UPDATE_FRACTION.multiply(i));
-            i = i.add(BigInteger.ONE);
-        }
-        return output.divide(BLOB_BASE_FEE_UPDATE_FRACTION);
     }
 
     /**

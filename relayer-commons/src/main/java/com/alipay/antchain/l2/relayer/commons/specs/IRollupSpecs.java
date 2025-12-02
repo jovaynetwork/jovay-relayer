@@ -28,8 +28,8 @@ public interface IRollupSpecs {
 
     /**
      * Get the fork info by current batch index.
-     * @param currBatchIndex curr batch index
+     * @param currTimestamp the timestamp of the first block for the curr batch
      * @return {@link ForkInfo }
      */
-    ForkInfo getFork(BigInteger currBatchIndex);
+    ForkInfo getFork(long currTimestamp);
 }

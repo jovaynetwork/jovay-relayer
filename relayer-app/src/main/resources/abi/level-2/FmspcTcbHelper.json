@@ -1,0 +1,543 @@
+[
+  {
+    "type": "function",
+    "name": "generateFmspcTcbContentHash",
+    "inputs": [
+      {
+        "name": "tcbInfoContent",
+        "type": "tuple",
+        "internalType": "struct TcbInfoBasic",
+        "components": [
+          {
+            "name": "tcbType",
+            "type": "uint8",
+            "internalType": "uint8"
+          },
+          {
+            "name": "id",
+            "type": "uint8",
+            "internalType": "enum TcbId"
+          },
+          {
+            "name": "version",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "issueDate",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "nextUpdate",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "evaluationDataNumber",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "fmspc",
+            "type": "bytes6",
+            "internalType": "bytes6"
+          },
+          {
+            "name": "pceid",
+            "type": "bytes2",
+            "internalType": "bytes2"
+          }
+        ]
+      },
+      {
+        "name": "tcbLevelsString",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "tdxModuleString",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "tdxModuleIdentitiesString",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "contentHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "pure"
+  },
+  {
+    "type": "function",
+    "name": "parseTcbLevels",
+    "inputs": [
+      {
+        "name": "version",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "tcbLevelsString",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "tcbLevels",
+        "type": "tuple[]",
+        "internalType": "struct TCBLevelsObj[]",
+        "components": [
+          {
+            "name": "pcesvn",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "sgxComponentCpuSvns",
+            "type": "uint8[]",
+            "internalType": "uint8[]"
+          },
+          {
+            "name": "tdxComponentCpuSvns",
+            "type": "uint8[]",
+            "internalType": "uint8[]"
+          },
+          {
+            "name": "tcbDateTimestamp",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "status",
+            "type": "uint8",
+            "internalType": "enum TCBStatus"
+          },
+          {
+            "name": "advisoryIDs",
+            "type": "string[]",
+            "internalType": "string[]"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "pure"
+  },
+  {
+    "type": "function",
+    "name": "parseTcbString",
+    "inputs": [
+      {
+        "name": "tcbInfoStr",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "tcbInfo",
+        "type": "tuple",
+        "internalType": "struct TcbInfoBasic",
+        "components": [
+          {
+            "name": "tcbType",
+            "type": "uint8",
+            "internalType": "uint8"
+          },
+          {
+            "name": "id",
+            "type": "uint8",
+            "internalType": "enum TcbId"
+          },
+          {
+            "name": "version",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "issueDate",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "nextUpdate",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "evaluationDataNumber",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "fmspc",
+            "type": "bytes6",
+            "internalType": "bytes6"
+          },
+          {
+            "name": "pceid",
+            "type": "bytes2",
+            "internalType": "bytes2"
+          }
+        ]
+      },
+      {
+        "name": "tcbLevelsString",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "tdxModuleString",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "tdxModuleIdentitiesString",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "stateMutability": "pure"
+  },
+  {
+    "type": "function",
+    "name": "parseTcbTdxModules",
+    "inputs": [
+      {
+        "name": "tdxModuleString",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "tdxModuleIdentitiesString",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "module",
+        "type": "tuple",
+        "internalType": "struct TDXModule",
+        "components": [
+          {
+            "name": "mrsigner",
+            "type": "bytes",
+            "internalType": "bytes"
+          },
+          {
+            "name": "attributes",
+            "type": "bytes8",
+            "internalType": "bytes8"
+          },
+          {
+            "name": "attributesMask",
+            "type": "bytes8",
+            "internalType": "bytes8"
+          }
+        ]
+      },
+      {
+        "name": "moduleIdentities",
+        "type": "tuple[]",
+        "internalType": "struct TDXModuleIdentity[]",
+        "components": [
+          {
+            "name": "id",
+            "type": "string",
+            "internalType": "string"
+          },
+          {
+            "name": "attributes",
+            "type": "bytes8",
+            "internalType": "bytes8"
+          },
+          {
+            "name": "attributesMask",
+            "type": "bytes8",
+            "internalType": "bytes8"
+          },
+          {
+            "name": "mrsigner",
+            "type": "bytes",
+            "internalType": "bytes"
+          },
+          {
+            "name": "tcbLevels",
+            "type": "tuple[]",
+            "internalType": "struct TDXModuleTCBLevelsObj[]",
+            "components": [
+              {
+                "name": "isvsvn",
+                "type": "uint8",
+                "internalType": "uint8"
+              },
+              {
+                "name": "tcbDateTimestamp",
+                "type": "uint64",
+                "internalType": "uint64"
+              },
+              {
+                "name": "status",
+                "type": "uint8",
+                "internalType": "enum TCBStatus"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "stateMutability": "pure"
+  },
+  {
+    "type": "function",
+    "name": "tcbLevelsObjFromBytes",
+    "inputs": [
+      {
+        "name": "encoded",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "parsed",
+        "type": "tuple",
+        "internalType": "struct TCBLevelsObj",
+        "components": [
+          {
+            "name": "pcesvn",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "sgxComponentCpuSvns",
+            "type": "uint8[]",
+            "internalType": "uint8[]"
+          },
+          {
+            "name": "tdxComponentCpuSvns",
+            "type": "uint8[]",
+            "internalType": "uint8[]"
+          },
+          {
+            "name": "tcbDateTimestamp",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "status",
+            "type": "uint8",
+            "internalType": "enum TCBStatus"
+          },
+          {
+            "name": "advisoryIDs",
+            "type": "string[]",
+            "internalType": "string[]"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "pure"
+  },
+  {
+    "type": "function",
+    "name": "tcbLevelsObjToBytes",
+    "inputs": [
+      {
+        "name": "obj",
+        "type": "tuple",
+        "internalType": "struct TCBLevelsObj",
+        "components": [
+          {
+            "name": "pcesvn",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "sgxComponentCpuSvns",
+            "type": "uint8[]",
+            "internalType": "uint8[]"
+          },
+          {
+            "name": "tdxComponentCpuSvns",
+            "type": "uint8[]",
+            "internalType": "uint8[]"
+          },
+          {
+            "name": "tcbDateTimestamp",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "status",
+            "type": "uint8",
+            "internalType": "enum TCBStatus"
+          },
+          {
+            "name": "advisoryIDs",
+            "type": "string[]",
+            "internalType": "string[]"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "serialized",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
+    "stateMutability": "pure"
+  },
+  {
+    "type": "function",
+    "name": "tdxModuleIdentityFromBytes",
+    "inputs": [
+      {
+        "name": "packedTdxModuleIdentity",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "tdxModuleIdentity",
+        "type": "tuple",
+        "internalType": "struct TDXModuleIdentity",
+        "components": [
+          {
+            "name": "id",
+            "type": "string",
+            "internalType": "string"
+          },
+          {
+            "name": "attributes",
+            "type": "bytes8",
+            "internalType": "bytes8"
+          },
+          {
+            "name": "attributesMask",
+            "type": "bytes8",
+            "internalType": "bytes8"
+          },
+          {
+            "name": "mrsigner",
+            "type": "bytes",
+            "internalType": "bytes"
+          },
+          {
+            "name": "tcbLevels",
+            "type": "tuple[]",
+            "internalType": "struct TDXModuleTCBLevelsObj[]",
+            "components": [
+              {
+                "name": "isvsvn",
+                "type": "uint8",
+                "internalType": "uint8"
+              },
+              {
+                "name": "tcbDateTimestamp",
+                "type": "uint64",
+                "internalType": "uint64"
+              },
+              {
+                "name": "status",
+                "type": "uint8",
+                "internalType": "enum TCBStatus"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "stateMutability": "pure"
+  },
+  {
+    "type": "function",
+    "name": "tdxModuleIdentityToBytes",
+    "inputs": [
+      {
+        "name": "tdxModuleIdentity",
+        "type": "tuple",
+        "internalType": "struct TDXModuleIdentity",
+        "components": [
+          {
+            "name": "id",
+            "type": "string",
+            "internalType": "string"
+          },
+          {
+            "name": "attributes",
+            "type": "bytes8",
+            "internalType": "bytes8"
+          },
+          {
+            "name": "attributesMask",
+            "type": "bytes8",
+            "internalType": "bytes8"
+          },
+          {
+            "name": "mrsigner",
+            "type": "bytes",
+            "internalType": "bytes"
+          },
+          {
+            "name": "tcbLevels",
+            "type": "tuple[]",
+            "internalType": "struct TDXModuleTCBLevelsObj[]",
+            "components": [
+              {
+                "name": "isvsvn",
+                "type": "uint8",
+                "internalType": "uint8"
+              },
+              {
+                "name": "tcbDateTimestamp",
+                "type": "uint64",
+                "internalType": "uint64"
+              },
+              {
+                "name": "status",
+                "type": "uint8",
+                "internalType": "enum TCBStatus"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "packedTdxModuleIdentity",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
+    "stateMutability": "pure"
+  },
+  {
+    "type": "error",
+    "name": "TCBInfo_Invalid",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "TCB_TDX_ID_Invalid",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "TCB_TDX_Version_Invalid",
+    "inputs": []
+  }
+]

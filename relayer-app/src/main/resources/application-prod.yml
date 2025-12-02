@@ -1,0 +1,169 @@
+spring:
+  application:
+    name: l2-relayer
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DB_NAME:l2relayer}?serverTimezone=Asia/Shanghai&rewriteBatchedStatements=true&createDatabaseIfNotExist=true
+    password: ${MYSQL_USER_PASSWORD:YOUR_PWD}
+    username: ${MYSQL_USER_NAME:root}
+  data:
+    redis:
+      host: ${REDIS_URL:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_USER_PASSWORD:YOUR_PWD}
+      database: ${REDIS_DATABASE:0}
+logging:
+  file:
+    path: ./log
+l2-relayer:
+  rollup:
+    config:
+      zk-verification-start-batch: ${ROLLUP_CONFIG_ZK_VERIFICATION_START_BATCH:9223372036854775807}
+    specs:
+      network: ${ROLLUP_SPECS_NETWORK:mainnet}
+      private-net:
+        specs-file: ${ROLLUP_SPECS_PRIVATE_NET_FILE:null}
+    economic-strategy-conf:
+      switch: ${ROLLUP_ECONOMIC_STRATEGY_CONF_SWITCH:true}
+      default-mid-eip1559-price-limit: ${ROLLUP_ECONOMIC_STRATEGY_CONF_DEFAULT_MID_EIP1559_PRICE_LIMIT:3000000000}
+      default-high-eip1559-price-limit: ${ROLLUP_ECONOMIC_STRATEGY_CONF_DEFAULT_HIGH_EIP1559_PRICE_LIMIT:8000000000}
+      default-max-pending-batch-count: ${ROLLUP_ECONOMIC_STRATEGY_CONF_DEFAULT_MAX_PENDING_BATCH_COUNT:12}
+      default-max-pending-proof-count: ${ROLLUP_ECONOMIC_STRATEGY_CONF_DEFAULT_MAX_PENDING_PROOF_COUNT:12}
+      default-max-batch-waiting-time: ${ROLLUP_ECONOMIC_STRATEGY_CONF_DEFAULT_MAX_BATCH_WAITING_TIME:43200}
+      default-max-proof-waiting-time: ${ROLLUP_ECONOMIC_STRATEGY_CONF_DEFAULT_MAX_PROOF_WAITING_TIME:43200}
+  alarm:
+    rollup:
+      batch-delayed-threshold: ${ROLLUP_ALARM_BATCH_DELAYED_THRESHOLD:10800000}
+      chunk-delayed-threshold: ${ROLLUP_ALARM_CHUNK_DELAYED_THRESHOLD:3600000}
+      proof-delayed-threshold: ${ROLLUP_ALARM_PROOF_DELAYED_THRESHOLD:300000}
+      l2-block-delayed-threshold: ${ROLLUP_ALARM_L2_BLOCK_DELAYED_THRESHOLD:300000}
+      tx-over-pending-threshold: ${ROLLUP_ALARM_TX_OVER_PENDING_THRESHOLD:1800000}
+      max-gap-between-batch-and-proof-commit: ${ROLLUP_ALARM_MAX_GAP_BETWEEN_BATCH_AND_PROOF_COMMIT:20}
+      circuit-breaker-threshold: ${ROLLUP_ALARM_CIRCUIT_BREAKER_THRESHOLD:18000000}
+      switch: ${ROLLUP_ALARM_SWITCH:true}
+  metrics:
+    self-report:
+      url: ${SELF_REPORT_URL:}
+      switch: ${SELF_REPORT_SWITCH:false}
+    blockchain:
+      acc-balance-monitor:
+        switch: ${ACC_BALANCE_MONITOR_SWITCH:false}
+        l1-interval: ${ACC_BALANCE_MONITOR_INTERVAL:10000}
+        l1-balance-threshold: ${ACC_BALANCE_MONITOR_BALANCE_THRESHOLD:3.0}
+  engine:
+    schedule:
+      duty:
+        period: ${DUTY_PERIOD:100}
+  l1-client:
+    eth-network-fork:
+      unknown-network-config-file: ${ETH_NETWORK_FORK_UNKNOWN_NETWORK_CONFIG_FILE:null}
+    http-client:
+      protocols: ${L1_CLIENT_HTTP_CLIENT_PROTOCOLS:HTTP_1_1}
+    gas-price-policy: ${L1_CLIENT_GAS_PRICE_POLICY:FROM_API}
+    static-gas-price: ${L1_CLIENT_STATIC_GAS_PRICE:4100000000}
+    gas-limit-policy: ${L1_CLIENT_GAS_LIMIT_POLICY:STATIC}
+    static-gas-limit: ${L1_CLIENT_STATIC_GAS_LIMIT:7200000}
+    tx-speedup-blob-fee-limit: ${L1_CLIENT_TX_SPEEDUP_BLOB_FEE_LIMIT:1000000000000}
+    tx-speedup-priority-fee-limit: ${L1_CLIENT_TX_SPEEDUP_PRIORITY_FEE_LIMIT:100000000000}
+    tx-speedup-blob-price-bump: ${L1_CLIENT_TX_SPEEDUP_BLOB_PRICE_BUMP:1}
+    force-tx-speedup-time-limit: ${L1_CLIENT_FORCE_TX_SPEEDUP_TIME_LIMIT:900000}
+    extra-gas: ${L1_CLIENT_EXTRA_GAS:400000}
+    rpc-url: ${L1_RPC_URL}
+    rollup-contract: ${L1_ROLLUP_CONTRACT}
+    mailbox-contract: ${L1_MAILBOX_CONTRACT}
+    nonce-policy: FAST
+    blob-pool-tx-traffic-limit: ${L1_BLOB_POOL_TX_TRAFFIC_LIMIT:16}
+    legacy-pool-tx-traffic-limit: ${L1_LEGACY_POOL_TX_TRAFFIC_LIMIT:-1}
+  l2-client:
+    rpc-url: ${L2_RPC_URL}
+    coinbase-contract: ${L2_COINBASE_PROXY_CONTRACT:0x7100000000000000000000000000000000000000}
+    gas-oracle-contract: ${L2_GAS_ORACLE_CONTRACT:0x8100000000000000000000000000000000000000}
+    extra-gas: ${L2_CLIENT_EXTRA_GAS:500000}
+  tracer-client:
+    req-retry:
+      max-attempts: ${TRACER_CLIENT_REQ_RETRY_MAX_ATTEMPTS:10}
+      backoff-delay: ${TRACER_CLIENT_REQ_RETRY_BACKOFF_DELAY:5}
+      backoff-multiplier: ${TRACER_CLIENT_REQ_RETRY_BACKOFF_MULTIPLIER:10}
+      backoff-max-delay: ${TRACER_CLIENT_REQ_RETRY_BACKOFF_MAX_DELAY:500}
+      max-block-stable-gap: ${TRACER_CLIENT_MAX_BLOCK_STABLE_GAP:10}
+  tasks:
+    cache:
+      l2-block-trace-ttl: ${L2_BLOCK_TRACE_CACHE_TTL:3600000}
+      l2-chunk-ttl: ${L2_CHUNK_CACHE_TTL:3600000}
+      l2-batch-eth-blobs-ttl: ${L2_BATCH_ETH_BLOBS_CACHE_TTL:300000}
+    batch-commit:
+      batch-commit-windows-length: ${BATCH_COMMIT_WINDOWS_LENGTH:12}
+    block-polling:
+      l2:
+        growing-batch-chunks-mem-cache:
+          async-core-size: ${L2_BLOCK_POLLING_GROWING_BATCH_CHUNKS_MEM_CACHE_ASYNC_CORE_SIZE:4}
+        get-block-timeout: ${L2_BLOCK_POLLING_GET_BLOCK_TIMEOUT:10}
+        policy: ${L2_CONSISTENCY_LEVEL:FINALIZED}
+      l1:
+        max-poling-block-size: ${L1_MAX_POLLING_BLOCK_SIZE:32}
+        policy: ${L1_CONSISTENCY_LEVEL:FINALIZED}
+    proof-commit:
+      rollup-query-level: ${PROOF_COMMIT_ROLLUP_QUERY_LEVEL:LATEST}
+      rollup-query-height-backoff: ${PROOF_COMMIT_ROLLUP_QUERY_HEIGHT_BACKOFF:0}
+    batch-prove:
+      req-types: ${BATCH_PROVE_REQ_TYPES:ALL}
+    reliable-tx:
+      tx-timeout-limit: ${RELIABLE_TX_TX_TIMEOUT_LIMIT:600}
+      process-batch-size: ${RELIABLE_TX_PROCESS_BATCH_SIZE:32}
+      retry-limit: ${RELIABLE_TX_RETRY_LIMIT:1}
+    oracle-gas-feed:
+      oracle-req-number-per-round-limit: ${ORACLE_GAS_FEED_ORACLE_REQ_NUMBER_PER_ROUND_LIMIT:10}
+      oracle-base-fee-update-threshold: ${ORACLE_GAS_FEED_ORACLE_BASE_FEE_UPDATE_THRESHOLD:0}
+      base-proof: ${ORACLE_GAS_FEED_ORACLE_BASE_PROOF:TEE_PROOF}
+grpc:
+  client:
+    prover-client:
+      address: "static://${PROVER_CONTROLLER_ENDPOINTS}"
+      negotiation-type: plaintext
+    tracer-client:
+      address: "static://${TRACER_IP}:${TRACER_PORT:5000}"
+      negotiation-type: plaintext
+jovay:
+  sign-service:
+    l1LegacyPoolTxSignService:
+      type: ${L1_LEGACY_POOL_TX_SIGN_SERVICE_TYPE:web3j_native}
+      web3j-native:
+        private-key: ${L1_CLIENT_LEGACY_POOL_TX_PRIVATE_KEY:}
+      kms:
+        endpoint: ${L1_CLIENT_LEGACY_POOL_KMS_ENDPOINT:}
+        access-key-id: ${L1_CLIENT_LEGACY_POOL_KMS_ACCESS_KEY_ID:}
+        access-key-secret: ${L1_CLIENT_LEGACY_POOL_KMS_ACCESS_KEY_SECRET:}
+        private-key-id: ${L1_CLIENT_LEGACY_POOL_KMS_PRIVATE_KEY_ID:}
+        private-key-version-id: ${L1_CLIENT_LEGACY_POOL_KMS_PRIVATE_KEY_VERSION_ID:}
+        public-key: ${L1_CLIENT_LEGACY_POOL_KMS_PUBLIC_KEY:}
+        ca: |
+          ${L1_CLIENT_LEGACY_POOL_KMS_CA:}
+    l1BlobPoolTxSignService:
+      type: ${L1_BLOB_POOL_TX_SIGN_SERVICE_TYPE:web3j_native}
+      web3j-native:
+        private-key: ${L1_CLIENT_BLOB_POOL_TX_PRIVATE_KEY:}
+      kms:
+        endpoint: ${L1_CLIENT_BLOB_POOL_KMS_ENDPOINT:}
+        access-key-id: ${L1_CLIENT_BLOB_POOL_KMS_ACCESS_KEY_ID:}
+        access-key-secret: ${L1_CLIENT_BLOB_POOL_KMS_ACCESS_KEY_SECRET:}
+        private-key-id: ${L1_CLIENT_BLOB_POOL_KMS_PRIVATE_KEY_ID:}
+        private-key-version-id: ${L1_CLIENT_BLOB_POOL_KMS_PRIVATE_KEY_VERSION_ID:}
+        public-key: ${L1_CLIENT_BLOB_POOL_KMS_PUBLIC_KEY:}
+        ca: |
+          ${L1_CLIENT_BLOB_POOL_KMS_CA:}
+    l2TxSignService:
+      type: ${L2_TX_SIGN_SERVICE_TYPE:web3j_native}
+      web3j-native:
+        private-key: ${L2_CLIENT_PRIVATE_KEY:}
+      kms:
+        endpoint: ${L2_CLIENT_KMS_ENDPOINT:}
+        access-key-id: ${L2_CLIENT_KMS_ACCESS_KEY_ID:}
+        access-key-secret: ${L2_CLIENT_KMS_ACCESS_KEY_SECRET:}
+        private-key-id: ${L2_CLIENT_KMS_PRIVATE_KEY_ID:}
+        private-key-version-id: ${L2_CLIENT_KMS_PRIVATE_KEY_VERSION_ID:}
+        public-key: ${L2_CLIENT_KMS_PUBLIC_KEY:}
+        ca: |
+          ${L2_CLIENT_KMS_CA:}
+jasypt:
+  encryptor:
+    password: ${JASYPT_PASSWD:}

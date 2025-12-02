@@ -58,6 +58,14 @@ public class ChunkWrapper {
 
     private long zkCycleSum;
 
+    public BigInteger getStartBlockNumber() {
+        return chunk.getStartBlockNumber();
+    }
+
+    public BigInteger getEndBlockNumber() {
+        return chunk.getEndBlockNumber();
+    }
+
     public String toJson() {
         JSONObject jsonObject = new JSONObject();
         jsonObject.put("batch_index", batchIndex.toString());

@@ -4,6 +4,8 @@ import com.alipay.antchain.l2.relayer.commons.enums.BizTaskTypeEnum;
 
 public interface IDistributedTask {
 
+    String getNodeId();
+
     void setNodeId(String nodeId);
 
     void setStartTime(long startTime);

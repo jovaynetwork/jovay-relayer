@@ -1,0 +1,197 @@
+package com.alipay.antchain.l2.relayer.service;
+
+import java.math.BigInteger;
+import java.util.Date;
+import java.util.List;
+
+import cn.hutool.core.collection.ListUtil;
+import cn.hutool.core.util.HexUtil;
+import cn.hutool.core.util.RandomUtil;
+import com.alipay.antchain.l2.relayer.TestBase;
+import com.alipay.antchain.l2.relayer.commons.enums.*;
+import com.alipay.antchain.l2.relayer.commons.l2basic.L1MsgTransaction;
+import com.alipay.antchain.l2.relayer.commons.merkle.AppendMerkleTree;
+import com.alipay.antchain.l2.relayer.commons.models.BatchProveRequestDO;
+import com.alipay.antchain.l2.relayer.commons.models.InterBlockchainMessageDO;
+import com.alipay.antchain.l2.relayer.commons.models.L1MsgTransactionInfo;
+import com.alipay.antchain.l2.relayer.commons.models.TransactionInfo;
+import com.alipay.antchain.l2.relayer.config.RollupConfig;
+import com.alipay.antchain.l2.relayer.core.blockchain.L1Client;
+import com.alipay.antchain.l2.relayer.core.blockchain.L2Client;
+import com.alipay.antchain.l2.relayer.core.prover.ProverControllerClient;
+import com.alipay.antchain.l2.relayer.core.tracer.TraceServiceClient;
+import com.alipay.antchain.l2.relayer.dal.repository.*;
+import com.alipay.antchain.l2.relayer.engine.DistributedTaskEngine;
+import jakarta.annotation.Resource;
+import org.junit.Before;
+import org.junit.Test;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.web3j.protocol.Web3j;
+import org.web3j.utils.Numeric;
+
+import static org.mockito.Mockito.*;
+
+public class MailboxServiceTest extends TestBase {
+
+    @Resource
+    private IMailboxService mailboxService;
+
+    @MockitoBean
+    private ISystemConfigRepository systemConfigRepository;
+
+    @MockitoBean
+    private IRollupRepository rollupRepository;
+
+    @MockitoBean
+    private IOracleRepository oracleRepository;
+
+    @MockitoBean
+    private IL2MerkleTreeRepository l2MerkleTreeRepository;
+
+    @MockitoBean
+    private IMailboxRepository mailboxRepository;
+
+    @MockitoBean
+    private ProverControllerClient proverControllerClient;
+
+    @MockitoBean
+    private TraceServiceClient traceServiceClient;
+
+    @MockitoBean
+    private L1Client l1Client;
+
+    @MockitoBean
+    private L2Client l2Client;
+
+    @MockitoBean
+    private RollupConfig rollupConfig;
+
+    @MockitoBean
+    private DistributedTaskEngine distributedTaskEngine;
+
+    @MockitoBean(name = "l1Web3j")
+    private Web3j l1Web3j;
+
+    @MockitoBean(name = "l1ChainId")
+    private BigInteger l1ChainId;
+
+    @Before
+    public void initMock() {
+        when(rollupConfig.getMaxCallDataInChunk()).thenReturn(1000_000L);
+        when(rollupConfig.getOneChunkBlocksLimit()).thenReturn(32L);
+        when(rollupConfig.getMaxTxsInChunks()).thenReturn(1000);
+        when(rollupConfig.getBatchCommitBlobSizeLimit()).thenReturn(4);
+        when(rollupConfig.getChunkZkCycleSumLimit()).thenReturn(940_000L);
+    }
+
+    @Test
+    public void testInitService() {
+        mailboxService.initService(BigInteger.ONE);
+        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_ONE), eq(RollupNumberRecordTypeEnum.BLOCK_PROCESSED), eq(BigInteger.ZERO));
+    }
+
+    @Test
+    public void testProcessL1MsgBatch_processMissedL1Msg_processL1MsgReady() {
+        L1MsgTransactionInfo tx1 = new L1MsgTransactionInfo(new L1MsgTransaction(BigInteger.valueOf(3), BigInteger.valueOf(1_000), "123"), BigInteger.ONE, HexUtil.encodeHexStr(RandomUtil.randomBytes(32)));
+        L1MsgTransactionInfo tx2 = new L1MsgTransactionInfo(new L1MsgTransaction(BigInteger.valueOf(4), BigInteger.valueOf(1_000), "123"), BigInteger.ONE, HexUtil.encodeHexStr(RandomUtil.randomBytes(32)));
+        L1MsgTransactionInfo tx3 = new L1MsgTransactionInfo(new L1MsgTransaction(BigInteger.valueOf(2), BigInteger.valueOf(1_000), "123"), BigInteger.ONE, HexUtil.encodeHexStr(RandomUtil.randomBytes(32)));
+
+        List<InterBlockchainMessageDO> messageDOS = ListUtil.toList(
+                InterBlockchainMessageDO.fromL1MsgTx(BigInteger.ONE, tx1.getSourceTxHash(), tx1.getL1MsgTransaction()),
+                InterBlockchainMessageDO.fromL1MsgTx(BigInteger.valueOf(2), tx2.getSourceTxHash(), tx2.getL1MsgTransaction())
+        );
+
+        when(l2Client.queryL2MailboxPendingNonce()).thenReturn(BigInteger.ONE);
+        when(l2Client.queryL2MailboxLatestNonce()).thenReturn(BigInteger.valueOf(0));
+        when(mailboxRepository.peekReadyMessages(notNull(), anyInt())).thenReturn(messageDOS);
+
+        InterBlockchainMessageDO messageDO = InterBlockchainMessageDO.fromL1MsgTx(tx3.getSourceBlockHeight(), tx3.getSourceTxHash(), tx3.getL1MsgTransaction());
+        messageDO.setState(InterBlockchainMessageStateEnum.MSG_READY);
+        when(mailboxRepository.getMessage(notNull(), eq(2L))).thenReturn(messageDO);
+
+        when(l2Client.sendL1MsgTx(notNull())).thenReturn(
+                TransactionInfo.builder()
+                        .txHash(Numeric.toHexString(RandomUtil.randomBytes(32)))
+                        .sendTxTime(new Date())
+                        .rawTx("123".getBytes())
+                        .senderAccount("0x863df6bfa4469f3ead0be8f9f2aae51c91a907b4")
+                        .nonce(BigInteger.valueOf(2))
+                        .build()
+        );
+
+        mailboxService.processL1MsgBatch();
+
+        verify(mailboxRepository, times(1)).updateMessageState(
+                eq(InterBlockchainMessageTypeEnum.L1_MSG),
+                eq(2L),
+                eq(InterBlockchainMessageStateEnum.MSG_COMMITTED)
+        );
+        verify(rollupRepository, times(3)).insertReliableTransaction(argThat(
+                argument -> argument.getSenderAccount().equals("0x863df6bfa4469f3ead0be8f9f2aae51c91a907b4")
+        ));
+    }
+
+    @Test
+    public void testProcessL1MsgBatch_processL1MsgPackaged_processL1MsgPending() {
+        L1MsgTransactionInfo tx1 = new L1MsgTransactionInfo(new L1MsgTransaction(BigInteger.valueOf(3), BigInteger.valueOf(1_000), "123"), BigInteger.ONE, HexUtil.encodeHexStr(RandomUtil.randomBytes(32)));
+        L1MsgTransactionInfo tx2 = new L1MsgTransactionInfo(new L1MsgTransaction(BigInteger.valueOf(4), BigInteger.valueOf(1_000), "123"), BigInteger.ONE, HexUtil.encodeHexStr(RandomUtil.randomBytes(32)));
+
+        List<InterBlockchainMessageDO> messageDOS = ListUtil.toList(
+                InterBlockchainMessageDO.fromL1MsgTx(BigInteger.ONE, tx1.getSourceTxHash(), tx1.getL1MsgTransaction()),
+                InterBlockchainMessageDO.fromL1MsgTx(BigInteger.valueOf(2), tx2.getSourceTxHash(), tx2.getL1MsgTransaction())
+        );
+
+        when(l2Client.queryL2MailboxPendingNonce()).thenReturn(BigInteger.valueOf(4));
+        when(l2Client.queryL2MailboxLatestNonce()).thenReturn(BigInteger.valueOf(3));
+        when(mailboxRepository.peekReadyMessages(notNull(), anyInt())).thenReturn(messageDOS);
+
+        when(l2Client.sendL1MsgTx(notNull())).thenReturn(
+                TransactionInfo.builder()
+                        .txHash(Numeric.toHexString(RandomUtil.randomBytes(32)))
+                        .sendTxTime(new Date())
+                        .rawTx("123".getBytes())
+                        .senderAccount("0x863df6bfa4469f3ead0be8f9f2aae51c91a907b4")
+                        .nonce(BigInteger.valueOf(2))
+                        .build()
+        );
+
+        mailboxService.processL1MsgBatch();
+
+        verify(mailboxRepository, times(1)).updateMessageState(
+                eq(InterBlockchainMessageTypeEnum.L1_MSG),
+                eq(3L),
+                eq(InterBlockchainMessageStateEnum.MSG_COMMITTED)
+        );
+        verify(mailboxRepository, times(1)).updateMessageState(
+                eq(InterBlockchainMessageTypeEnum.L1_MSG),
+                eq(4L),
+                eq(InterBlockchainMessageStateEnum.MSG_COMMITTED)
+        );
+        verify(rollupRepository, times(1)).insertReliableTransaction(argThat(
+                argument -> argument.getSenderAccount().equals(L1MsgTransaction.L1_MAILBOX_AS_SENDER.toString())
+        ));
+    }
+
+    @Test
+    public void testProveL2Msg() {
+        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_MSG_PROVE_BATCH)))
+                .thenReturn(BigInteger.ONE);
+        when(rollupRepository.hasBatch(eq(BigInteger.ONE))).thenReturn(true);
+        when(rollupRepository.getBatchProveRequest(eq(BigInteger.ONE), eq(ProveTypeEnum.TEE_PROOF)))
+                .thenReturn(new BatchProveRequestDO(BigInteger.ONE, ProveTypeEnum.TEE_PROOF, new byte[]{}, BatchProveRequestStateEnum.COMMITTED, new Date()));
+        when(l2MerkleTreeRepository.getMerkleTree(eq(BigInteger.ZERO))).thenReturn(
+                new AppendMerkleTree(BigInteger.ZERO, new byte[]{})
+        );
+        when(mailboxRepository.getMsgHashes(eq(InterBlockchainMessageTypeEnum.L2_MSG), eq(BigInteger.ONE))).thenReturn(ListUtil.toList(RandomUtil.randomBytes(32)));
+
+        mailboxService.proveL2Msg();
+
+        verify(l2MerkleTreeRepository, times(1)).saveMerkleTree(notNull(), eq(BigInteger.ONE));
+        verify(mailboxRepository, times(1)).saveL2MsgProofs(notNull());
+        verify(rollupRepository, times(1)).updateRollupNumberRecord(
+                eq(ChainTypeEnum.LAYER_TWO),
+                eq(RollupNumberRecordTypeEnum.NEXT_MSG_PROVE_BATCH),
+                eq(BigInteger.valueOf(2))
+        );
+    }
+}

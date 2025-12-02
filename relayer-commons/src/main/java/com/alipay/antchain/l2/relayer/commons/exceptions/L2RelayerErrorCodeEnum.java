@@ -53,6 +53,8 @@ public enum L2RelayerErrorCodeEnum {
 
     SPEEDUP_TX_ASYNC("020d", "other thread speedup same tx now"),
 
+    ROLLUP_ECONOMIC_STRATEGY_NOT_ALLOWED("020e", "rollup economic strategy not allowed"),
+
     SERVICE_BLOCK_POLLING_ERROR("0301", "block polling error"),
 
     COMMIT_L2_BATCH_ERROR("0302", "batch commit error"),

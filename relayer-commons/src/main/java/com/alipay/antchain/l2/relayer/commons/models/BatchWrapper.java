@@ -4,6 +4,7 @@ import java.math.BigInteger;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import cn.hutool.core.lang.Assert;
 import cn.hutool.core.util.ObjectUtil;
 import cn.hutool.core.util.StrUtil;
 import com.alipay.antchain.l2.relayer.commons.l2basic.*;
@@ -24,6 +25,7 @@ public class BatchWrapper {
             byte[] postStateRoot,
             byte[] l1MsgRollingHash,
             byte[] l2MsgRoot,
+            long finalizedL1MsgIndex,
             @NonNull List<ChunkWrapper> chunks
     ) {
         var wrapper = new BatchWrapper();
@@ -32,9 +34,8 @@ public class BatchWrapper {
                 throw new RuntimeException(StrUtil.format("chunk index {} not equal to the array index {}", chunks.get(i).getChunkIndex(), i));
             }
         }
-        var l1MessagePopped = chunks.stream()
-                .map(x -> x.getChunk().getBlocks().stream().mapToLong(BlockContext::getNumL1Messages).sum())
-                .mapToLong(value -> value).sum();
+        var l1MessagePopped = finalizedL1MsgIndex - parentBatchWrapper.getTotalL1MessagePopped();
+        Assert.isTrue(l1MessagePopped >= 0, "finalizedL1MsgIndex becoming smaller than the one from previous batch");
         wrapper.setBatch(Batch.createBatch(
                 batchVersion,
                 batchIndex,
@@ -45,7 +46,7 @@ public class BatchWrapper {
         ));
         wrapper.setPostStateRoot(postStateRoot);
         wrapper.setL2MsgRoot(l2MsgRoot);
-        wrapper.setTotalL1MessagePopped(parentBatchWrapper.getTotalL1MessagePopped() + l1MessagePopped);
+        wrapper.setTotalL1MessagePopped(finalizedL1MsgIndex);
         wrapper.setL1MessagePopped(l1MessagePopped);
         return wrapper;
     }
@@ -63,6 +64,8 @@ public class BatchWrapper {
     private long totalL1MessagePopped;
 
     private long l1MessagePopped;
+
+    private long gmtCreate;
 
     public BigInteger getBatchIndex() {
         return batch.getBatchIndex();

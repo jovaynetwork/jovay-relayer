@@ -6,7 +6,7 @@
     <parent>
         <groupId>com.alipay.antchain.l2</groupId>
         <artifactId>l2-relayer</artifactId>
-        <version>0.8.0</version>
+        <version>0.9.0</version>
     </parent>
 
     <artifactId>relayer-commons</artifactId>
@@ -90,6 +90,10 @@
         <dependency>
             <groupId>com.github.luben</groupId>
             <artifactId>zstd-jni</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.esaulpaugh</groupId>
+            <artifactId>headlong</artifactId>
         </dependency>
         <dependency>
             <groupId>ch.qos.logback</groupId>

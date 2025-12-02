@@ -36,12 +36,12 @@ public class RollupSpecs implements IRollupSpecs {
     private Map<BigInteger, ForkInfo> forks;
 
     @Override
-    public ForkInfo getFork(BigInteger currBatchIndex) {
+    public ForkInfo getFork(long currTimestamp) {
         for (var entry : MapUtil.sort(forks, Comparator.reverseOrder()).entrySet()) {
-            if (entry.getKey().compareTo(currBatchIndex) <= 0) {
+            if (entry.getKey().longValue() <= currTimestamp) {
                 return entry.getValue().validate();
             }
         }
-        throw new RuntimeException("No fork found for batch index " + currBatchIndex);
+        throw new RuntimeException("No fork found for batch start timestamp " + currTimestamp);
     }
 }

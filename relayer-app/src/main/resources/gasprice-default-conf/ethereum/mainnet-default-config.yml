@@ -1,0 +1,19 @@
+l2-relayer:
+  l1-client:
+    gas-price-provider-conf:
+      extra-gas-price: ${L1_CLIENT_EXTRA_GAS_PRICE:2000000000}
+      gas-price-increased-percentage: ${L1_CLIENT_GAS_PRICE_INCREASED_PERCENTAGE:0.1}
+      # for eip1559 tx
+      priority-fee-per-gas-increased-percentage: ${L1_CLIENT_PRIORITY_FEE_PER_GAS_INCREASED_PERCENTAGE:3}
+      # for eip4844 tx
+      eip4844-priority-fee-per-gas-increased-percentage: ${L1_CLIENT_EIP4844_PRIORITY_FEE_PER_GAS_INCREASED_PERCENTAGE:1}
+      base-fee-multiplier: ${L1_CLIENT_BASE_FEE_MULTIPLIER:2}
+      # 1GWei to divide that using larger multiplier or smaller one
+      fee-per-blob-gas-dividing-val: ${L1_CLIENT_FEE_PER_BLOB_GAS_DIVIDING_VAL:10000000}
+      larger-fee-per-blob-gas-multiplier: ${L1_CLIENT_LARGER_FEE_PER_BLOB_GAS_MULTIPLIER:2}
+      smaller-fee-per-blob-gas-multiplier: ${L1_CLIENT_SMALLER_FEE_PER_BLOB_GAS_MULTIPLIER:1000}
+      max-price-limit: ${L1_CLIENT_MAX_PRICE_LIMIT:5000000000}
+      # To control the competitiveness of our tx
+      # by setting the minimum priority price
+      minimum-eip1559-priority-price: ${L1_CLIENT_MINIMUM_EIP1559_PRIORITY_PRICE:0}
+      minimum-eip4844-priority-price: ${L1_CLIENT_MINIMUM_EIP4844_PRIORITY_PRICE:1000000000}

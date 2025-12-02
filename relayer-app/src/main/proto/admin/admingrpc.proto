@@ -1,0 +1,262 @@
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "com.alipay.antchain.l2.relayer.server.grpc";
+option java_outer_classname = "AdminGrpcServerOuter";
+option objc_class_prefix = "AdminGrpcServer";
+
+package l2.relayer.admin;
+
+message Response {
+    uint32 code = 1;
+    string errorMsg = 2;
+    oneof response {
+        GetBatchResp getBatchResp = 3;
+        GetRawBatchResp getRawBatchResp = 4;
+        GetL2MsgProofResp getL2MsgProofResp = 5;
+        QueryBatchTxInfoResp queryBatchTxInfoResp = 6;
+        WithdrawFromVaultResp withdrawFromVaultResp = 7;
+        UpdateFixedProfitResp updateFixedProfitResp = 8;
+        UpdateTotalScalaResp updateTotalScalaResp = 9;
+        QueryBatchDaInfoResp queryBatchDaInfoResp = 10;
+        QueryRelayerAddressResp queryRelayerAddressResp = 11;
+        GetGasPriceConfigResp getGasPriceConfigResp = 12;
+        GetRollupEconomicConfigResp getRollupEconomicConfigResp = 13;
+    }
+}
+
+message InitAnchorBatchReq {
+    uint64 anchorBatchIndex = 1;
+    optional BatchHeaderInfo batchHeaderInfo = 2;
+    optional L2MerkleTree anchorMerkleTree = 3;
+}
+
+message L2MerkleTree {
+    uint64 nextMsgNonce = 1;
+    repeated bytes branches = 2;
+}
+
+message BatchHeaderInfo {
+    uint32 version = 1;
+    uint64 batchIndex = 2;
+    uint64 l1MessagePopped = 3;
+    uint64 totalL1MessagePopped = 4;
+    string dataHash = 5;
+    string parentBatchHash = 6;
+    optional string hash = 7;
+    string l1MsgRollingHash = 8;
+}
+
+message GetBatchReq {
+    string batchIndex = 1;
+}
+
+message GetL2MsgProofReq {
+    string messageNonce = 1;
+}
+
+message GetL2MsgProofResp {
+    string messageNonce = 1;
+    string batchIndex   = 2;
+    bytes proof         = 3;
+}
+
+message Batch {
+    BatchHeaderInfo header = 1;
+    repeated Chunk chunks = 2;
+}
+
+message Chunk {
+    uint32 numBlocks = 1;
+    repeated BlockContext blocks = 2;
+    bytes l2Transactions = 3;
+    optional string hash = 4;
+}
+
+message BlockContext {
+    uint64 blockNumber = 1;
+    uint64 timestamp = 2;
+    uint64 baseFee = 3;
+    uint64 gasLimit = 4;
+    uint32 numTransactions = 5;
+    uint32 numL1Messages = 6;
+}
+
+message GetBatchResp {
+    Batch batch = 1;
+}
+
+message GetRawBatchReq {
+    string batchIndex = 1;
+}
+
+message GetRawBatchResp {
+    bytes batchHeader = 1;
+    repeated RawChunkInfo chunks = 2;
+    DaInfo daInfo = 3;
+}
+
+message DaInfo{
+    uint32 daVersion = 1;
+    bool compressed = 2;
+    double compressionRatio = 3;
+    uint64 txCount = 4;
+    BlobInfo blobInfo = 5;
+}
+
+message BlobInfo {
+    uint32 blobSize = 1;
+    uint32 validBlobBytesSize = 2;
+}
+
+message RawChunkInfo {
+    string hash = 1;
+    bytes rawChunk = 2;
+}
+
+message SetL1StartHeightReq {
+    string startHeight = 1;
+}
+
+message RetryBatchTxReq {
+    string type = 1;
+    uint64 fromBatchIndex = 2;
+    uint64 toBatchIndex = 3;
+}
+
+message QueryBatchTxInfoReq {
+    string type = 1;
+    uint64 batchIndex = 2;
+}
+
+message QueryBatchTxInfoResp {
+    uint64 batchIndex = 1;
+    TxInfo txInfo = 2;
+}
+
+message QueryBatchDaInfoReq {
+    uint64 batchIndex = 2;
+}
+
+message QueryBatchDaInfoResp {
+    uint64 batchIndex = 1;
+    DaInfo daInfo = 2;
+}
+
+message WithdrawFromVaultReq {
+    string to = 1;
+    uint32 amount = 2;
+}
+
+message WithdrawFromVaultResp {
+    string txHash = 1;
+}
+
+message UpdateFixedProfitReq {
+    string profit = 1;
+}
+
+message UpdateFixedProfitResp {
+    string txHash = 1;
+}
+
+message UpdateTotalScalaReq {
+    string totalScala = 1;
+}
+
+message UpdateTotalScalaResp {
+    string txHash = 1;
+}
+
+message TxInfo {
+    string type = 1;
+    string original_tx = 2;
+    string latest_tx = 3;
+    string latest_send_date = 4;
+    string state = 5;
+    uint32 retry_count = 6;
+    string revert_reason = 7;
+}
+
+message SpeedupTxReq {
+    string chainType = 1;
+    string type = 2;
+    uint64 batchIndex = 3;
+    uint64 maxFeePerGas = 4;
+    uint64 maxPriorityFeePerGas = 5;
+    uint64 maxFeePerBlobGas = 6;
+}
+
+message UpdateGasPriceConfigReq {
+    string chainType = 1;
+    string configKey = 2;
+    string configValue = 3;
+}
+
+message GetGasPriceConfigReq {
+    string chainType = 1;
+    string configKey = 2;
+}
+
+message GetGasPriceConfigResp {
+    string configValue = 1;
+}
+
+message UpdateRollupEconomicStrategyConfigReq {
+    string configKey = 1;
+    string configValue = 2;
+}
+
+message GetRollupEconomicConfigReq {
+    string configKey = 1;
+}
+
+message GetRollupEconomicConfigResp {
+    string configValue = 1;
+}
+
+message Empty {
+}
+
+message QueryRelayerAddressResp {
+    string l1BlobAddress = 1;
+    string l1LegacyAddress = 2;
+    string l2Address = 3;
+}
+
+service AdminService {
+
+    rpc initAnchorBatch(InitAnchorBatchReq) returns (Response) {}
+
+    rpc setL1StartHeight(SetL1StartHeightReq) returns (Response) {}
+
+    rpc getBatch(GetBatchReq) returns (Response) {}
+
+    rpc getRawBatch(GetRawBatchReq) returns (Response) {}
+
+    rpc getL2MsgProof(GetL2MsgProofReq) returns (Response) {}
+
+    rpc retryBatchTx(RetryBatchTxReq) returns (Response) {}
+
+    rpc queryBatchTxInfo(QueryBatchTxInfoReq) returns (Response) {}
+
+    rpc queryBatchDaInfo(QueryBatchDaInfoReq) returns (Response) {}
+
+    rpc withdrawFromVault(WithdrawFromVaultReq) returns (Response) {}
+
+    rpc updateFixedProfit(UpdateFixedProfitReq) returns (Response) {}
+
+    rpc updateTotalScala(UpdateTotalScalaReq) returns (Response) {}
+
+    rpc speedupTx(SpeedupTxReq) returns (Response) {}
+
+    rpc queryRelayerAddress(Empty) returns (Response) {}
+
+    rpc updateGasPriceConfig(UpdateGasPriceConfigReq) returns (Response) {}
+
+    rpc getGasPriceConfig(GetGasPriceConfigReq) returns (Response) {}
+
+    rpc updateRollupEconomicStrategyConfig(UpdateRollupEconomicStrategyConfigReq) returns (Response) {}
+
+    rpc getRollupEconomicConfig(GetRollupEconomicConfigReq) returns (Response) {}
+}

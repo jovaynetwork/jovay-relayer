@@ -6,7 +6,7 @@
     <parent>
         <groupId>com.alipay.antchain.l2</groupId>
         <artifactId>l2-relayer</artifactId>
-        <version>0.8.0</version>
+        <version>0.9.0</version>
     </parent>
 
     <artifactId>admin-cli</artifactId>
@@ -98,7 +98,7 @@
                     <pluginId>grpc-java</pluginId>
                     <pluginArtifact>io.grpc:protoc-gen-grpc-java:${grpc.version}:exe:${os.detected.classifier}</pluginArtifact>
                     <protoSourceRoot>
-                        ${project.basedir}/../relayer/src/main/proto/admin
+                        ${project.basedir}/../relayer-app/src/main/proto/admin
                     </protoSourceRoot>
                     <includes>
                         <include>**/admingrpc.proto</include>

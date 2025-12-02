@@ -1,0 +1,145 @@
+package com.alipay.antchain.l2.relayer.dal;
+
+import java.math.BigInteger;
+import java.util.List;
+
+import cn.hutool.core.collection.ListUtil;
+import com.alipay.antchain.l2.prover.controller.ProverControllerServerGrpc;
+import com.alipay.antchain.l2.relayer.L2RelayerApplication;
+import com.alipay.antchain.l2.relayer.TestBase;
+import com.alipay.antchain.l2.relayer.commons.enums.ActiveNodeStatusEnum;
+import com.alipay.antchain.l2.relayer.commons.enums.BizTaskTypeEnum;
+import com.alipay.antchain.l2.relayer.commons.models.ActiveNode;
+import com.alipay.antchain.l2.relayer.commons.models.BizDistributedTask;
+import com.alipay.antchain.l2.relayer.config.RollupConfig;
+import com.alipay.antchain.l2.relayer.core.blockchain.L1Client;
+import com.alipay.antchain.l2.relayer.core.blockchain.L2Client;
+import com.alipay.antchain.l2.relayer.core.blockchain.helper.gasprice.L1GasPriceProviderConfig;
+import com.alipay.antchain.l2.relayer.core.blockchain.helper.gasprice.L2GasPriceProviderConfig;
+import com.alipay.antchain.l2.relayer.core.layer2.economic.RollupEconomicStrategyConfig;
+import com.alipay.antchain.l2.relayer.dal.mapper.ActiveNodeMapper;
+import com.alipay.antchain.l2.relayer.dal.repository.IOracleRepository;
+import com.alipay.antchain.l2.relayer.dal.repository.IScheduleRepository;
+import com.alipay.antchain.l2.relayer.engine.core.Activator;
+import com.alipay.antchain.l2.relayer.engine.core.Dispatcher;
+import com.alipay.antchain.l2.tracer.TraceServiceGrpc;
+import jakarta.annotation.Resource;
+import org.junit.Before;
+import org.junit.Test;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.jdbc.Sql;
+import org.web3j.protocol.Web3j;
+
+import static org.junit.Assert.*;
+import static org.mockito.Mockito.when;
+
+@SpringBootTest(
+        classes = L2RelayerApplication.class,
+        webEnvironment = SpringBootTest.WebEnvironment.NONE,
+        properties = {"spring.flyway.enabled=false", "l2-relayer.l1-client.eth-network-fork.unknown-network-config-file=bpo/unknown.json"}
+)
+@Sql(scripts = {"classpath:data/ddl.sql"}, executionPhase = Sql.ExecutionPhase.BEFORE_TEST_METHOD)
+@Sql(scripts = "classpath:data/drop_all.sql", executionPhase = Sql.ExecutionPhase.AFTER_TEST_METHOD)
+public class ScheduleRepositoryTest extends TestBase {
+
+    @Resource
+    private IScheduleRepository scheduleRepository;
+
+    @Resource
+    private ActiveNodeMapper activeNodeMapper;
+
+    @MockitoBean
+    private IOracleRepository oracleRepository;
+
+    @MockitoBean(name = "prover-client")
+    private ProverControllerServerGrpc.ProverControllerServerBlockingStub proverStub;
+
+    @MockitoBean(name = "tracer-client")
+    private TraceServiceGrpc.TraceServiceBlockingStub tracerStub;
+
+    @MockitoBean
+    private L1Client l1Client;
+
+    @MockitoBean
+    private L2Client l2Client;
+
+    @MockitoBean
+    private RollupConfig rollupConfig;
+
+    @MockitoBean
+    private Activator activator;
+
+    @MockitoBean
+    private Dispatcher dispatcher;
+
+    @MockitoBean
+    private RollupEconomicStrategyConfig rollupEconomicStrategyConfig;
+
+    @MockitoBean
+    private L1GasPriceProviderConfig l1GasPriceProviderConfig;
+
+    @MockitoBean
+    private L2GasPriceProviderConfig l2GasPriceProviderConfig;
+
+    @MockitoBean(name = "l1Web3j")
+    private Web3j l1Web3j;
+
+    @MockitoBean(name = "l1ChainId")
+    private BigInteger l1ChainId;
+
+    @Before
+    public void initMock() {
+        when(l1Client.maxCallDataInChunk()).thenReturn(BigInteger.valueOf(1000_000));
+        when(l1Client.maxBlockInChunk()).thenReturn(BigInteger.valueOf(32));
+        when(l1Client.maxTxsInChunk()).thenReturn(BigInteger.valueOf(1000));
+        when(l1Client.maxZkCircleInChunk()).thenReturn(BigInteger.valueOf(940000));
+        when(l1Client.l1BlobNumLimit()).thenReturn(4L);
+
+        when(rollupConfig.getMaxCallDataInChunk()).thenReturn(1000_000L);
+        when(rollupConfig.getOneChunkBlocksLimit()).thenReturn(32L);
+        when(rollupConfig.getMaxTxsInChunks()).thenReturn(1000);
+    }
+
+    @Test
+    public void testGetDispatchLock() {
+        assertNotNull(scheduleRepository.getDispatchLock());
+    }
+
+    @Test
+    public void testActivate() {
+        // delete all before this test
+        activeNodeMapper.delete(null);
+
+        scheduleRepository.activate("test", "123.123.123.123");
+        ActiveNode activeNode = scheduleRepository.getActiveNodeByNodeId("test");
+        assertTrue(activeNode.getLastActiveTime() > System.currentTimeMillis() - 10_000);
+        assertEquals(ActiveNodeStatusEnum.ONLINE, activeNode.getStatus());
+        List<ActiveNode> activeNodes = scheduleRepository.getAllActiveNodes();
+        assertEquals(1, activeNodes.size());
+
+        activeNodes.get(0).setStatus(ActiveNodeStatusEnum.OFFLINE);
+        scheduleRepository.updateStatusOfActiveNodes(activeNodes);
+
+        activeNode = scheduleRepository.getActiveNodeByNodeId("test");
+        assertEquals(ActiveNodeStatusEnum.OFFLINE, activeNode.getStatus());
+    }
+
+    @Test
+    public void testBizTask() {
+        scheduleRepository.batchInsertBizDTTasks(ListUtil.toList(
+                new BizDistributedTask("test", BizTaskTypeEnum.BLOCK_POLLING_TASK, "123", System.currentTimeMillis())
+        ));
+        List<BizDistributedTask> tasks = scheduleRepository.getAllBizDistributedTasks();
+        assertEquals(1, tasks.size());
+
+        tasks = scheduleRepository.getBizDistributedTasksByNodeId("test");
+        assertEquals(1, tasks.size());
+
+        tasks.get(0).setStartTime(0);
+        scheduleRepository.batchUpdateBizDTTasks(tasks);
+
+        tasks = scheduleRepository.getBizDistributedTasksByNodeId("test");
+        assertEquals(0, tasks.get(0).getStartTime());
+    }
+}

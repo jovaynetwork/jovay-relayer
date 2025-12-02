@@ -6,5 +6,7 @@ public enum BatchProveRequestStateEnum {
 
     PROVE_READY,
 
-    COMMITTED
+    COMMITTED,
+
+    ABANDONED
 }
