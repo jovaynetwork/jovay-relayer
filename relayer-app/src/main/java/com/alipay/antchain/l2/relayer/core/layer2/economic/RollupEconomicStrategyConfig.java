@@ -44,6 +44,7 @@ public class RollupEconomicStrategyConfig extends PrefixedDynamicConfig {
                 persistInterval,
                 redisson,
                 systemConfigRepository,
+                null,
                 dynamicPersisterScheduledExecutors
         );
     }

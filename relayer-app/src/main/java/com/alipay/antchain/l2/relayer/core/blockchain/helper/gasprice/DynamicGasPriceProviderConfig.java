@@ -1,8 +1,10 @@
 package com.alipay.antchain.l2.relayer.core.blockchain.helper.gasprice;
 
 import java.math.BigInteger;
+import java.util.List;
 import java.util.concurrent.ScheduledExecutorService;
 
+import cn.hutool.core.collection.ListUtil;
 import cn.hutool.core.util.StrUtil;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.model.GasPriceProviderSupplierEnum;
 import com.alipay.antchain.l2.relayer.dal.repository.ISystemConfigRepository;
@@ -10,6 +12,8 @@ import com.alipay.antchain.l2.relayer.engine.dynamicconf.PrefixedDynamicConfig;
 import org.redisson.api.RedissonClient;
 
 public class DynamicGasPriceProviderConfig extends PrefixedDynamicConfig implements IGasPriceProviderConfig {
+
+    private static final List<String> SENSITIVE_KEYS_TO_HIDE_VALUES = ListUtil.toList(GasPriceProviderConfig.Fields.apiKey);
 
     private final GasPriceProviderConfig defaultConfig;
 
@@ -21,7 +25,7 @@ public class DynamicGasPriceProviderConfig extends PrefixedDynamicConfig impleme
             ScheduledExecutorService dynamicPersisterScheduledExecutors,
             GasPriceProviderConfig defaultConfig
     ) {
-        super(prefix, persistInterval, redisson, systemConfigRepository, dynamicPersisterScheduledExecutors);
+        super(prefix, persistInterval, redisson, systemConfigRepository, SENSITIVE_KEYS_TO_HIDE_VALUES, dynamicPersisterScheduledExecutors);
         this.defaultConfig = defaultConfig;
     }
 

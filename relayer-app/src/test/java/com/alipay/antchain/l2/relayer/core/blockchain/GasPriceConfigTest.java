@@ -5,6 +5,7 @@ import java.util.concurrent.TimeUnit;
 
 import cn.hutool.core.util.ReflectUtil;
 import cn.hutool.core.util.StrUtil;
+import com.alibaba.fastjson.JSON;
 import com.alipay.antchain.l2.relayer.TestBase;
 import com.alipay.antchain.l2.relayer.config.BlockchainConfig;
 import com.alipay.antchain.l2.relayer.config.RollupConfig;
@@ -14,6 +15,8 @@ import com.alipay.antchain.l2.relayer.core.blockchain.helper.model.GasPriceProvi
 import com.alipay.antchain.l2.relayer.dal.repository.IOracleRepository;
 import com.alipay.antchain.l2.relayer.dal.repository.ISystemConfigRepository;
 import com.alipay.antchain.l2.relayer.engine.DistributedTaskEngine;
+import com.alipay.antchain.l2.relayer.engine.dynamicconf.PrefixedDynamicConfig;
+import com.alipay.antchain.l2.relayer.engine.dynamicconf.ValueDesensitizeFilter;
 import com.alipay.antchain.l2.relayer.metrics.alarm.RollupAlarm;
 import com.alipay.antchain.l2.relayer.metrics.monitor.AccountBalanceMonitor;
 import jakarta.annotation.Resource;
@@ -179,6 +182,7 @@ public class GasPriceConfigTest extends TestBase {
 
         l1GasPriceProviderConfig.setGasProviderUrl("https://test-gas-provider.com/api/v1");
         systemConfigRepository.setSystemConfig(L1_GASPRICE_PROVIDER_CONF_PREFIX + GasPriceProviderConfig.Fields.minimumEip4844PriorityPrice, BigInteger.valueOf(100).toString());
+        systemConfigRepository.setSystemConfig(L1_GASPRICE_PROVIDER_CONF_PREFIX + GasPriceProviderConfig.Fields.apiKey, "123");
 
         var initCacheFromStorageM = ReflectUtil.getMethod(DynamicGasPriceProviderConfig.class, "initCacheFromStorage");
         initCacheFromStorageM.setAccessible(true);
@@ -186,6 +190,16 @@ public class GasPriceConfigTest extends TestBase {
 
         Assert.assertEquals("https://test-gas-provider.com/api/v1", l1GasPriceProviderConfig.getGasProviderUrl());
         Assert.assertEquals(BigInteger.valueOf(100), l1GasPriceProviderConfig.getMinimumEip4844PriorityPrice());
+
+        // test the value desensitize filter
+        var rawJsonObj = JSON.parseObject("""
+                {"l1-gasprice-provider-conf@apiKey":"abc"}""");
+        var valueDesensitizeFilterF = ReflectUtil.getField(PrefixedDynamicConfig.class, "valueDesensitizeFilter");
+        valueDesensitizeFilterF.setAccessible(true);
+        Assert.assertEquals(
+                "******",
+                ((ValueDesensitizeFilter) valueDesensitizeFilterF.get(l1GasPriceProviderConfig)).process(rawJsonObj, rawJsonObj.keySet().iterator().next(), rawJsonObj.values().iterator().next())
+        );
 
         lock.unlock();
     }

@@ -1,5 +1,6 @@
 package com.alipay.antchain.l2.relayer.engine.dynamicconf;
 
+import java.util.List;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
@@ -28,11 +29,14 @@ public class PrefixedDynamicConfig implements IDynamicConfig {
 
     private final ISystemConfigRepository systemConfigRepository;
 
+    private final ValueDesensitizeFilter valueDesensitizeFilter;
+
     public PrefixedDynamicConfig(
             String prefix,
             int persistInterval,
             RedissonClient redisson,
             ISystemConfigRepository systemConfigRepository,
+            List<String> sensitiveKeys,
             ScheduledExecutorService dynamicPersisterScheduledExecutors
     ) {
         this.prefix = prefix;
@@ -40,6 +44,8 @@ public class PrefixedDynamicConfig implements IDynamicConfig {
         this.configCacheMap = redisson.getMap(redisMapKey());
         this.persistLock = redisson.getLock(REDIS_SCHEDULED_EXECUTOR_SERVICE_LOCK_PREFIX + prefix);
         this.persistInterval = persistInterval;
+        this.valueDesensitizeFilter = new ValueDesensitizeFilter(ObjectUtil.isEmpty(sensitiveKeys) ? sensitiveKeys
+                : sensitiveKeys.stream().map(this::keyWithPrefix).toList());
         initCacheFromStorage();
         dynamicPersisterScheduledExecutors.scheduleWithFixedDelay(this::persistCurrConfig, persistInterval, persistInterval, TimeUnit.SECONDS);
     }
@@ -67,7 +73,7 @@ public class PrefixedDynamicConfig implements IDynamicConfig {
         for (var entry : configs.entrySet()) {
             configCacheMap.putIfAbsent(entry.getKey(), entry.getValue());
         }
-        log.info("Init dynamic config cache for {} from storage with: {}", prefix, JSON.toJSONString(configs));
+        log.info("Init dynamic config cache for {} from storage with: {}", prefix, JSON.toJSONString(configs, valueDesensitizeFilter));
     }
 
     private void persistCurrConfig() {
@@ -81,7 +87,7 @@ public class PrefixedDynamicConfig implements IDynamicConfig {
                     log.error("Remove null value from config cache map: {}", entry.getKey());
                     continue;
                 }
-                log.debug("Persist current config: {} - {}", entry.getKey(), entry.getValue());
+                log.debug("Persist current config: {} - {}", entry.getKey(), valueDesensitizeFilter.desensitize(entry.getValue()));
                 systemConfigRepository.setSystemConfig(entry.getKey(), entry.getValue());
             }
             log.info("Persist current config for {} with {} entries successfully", prefix, configCacheMap.size());
