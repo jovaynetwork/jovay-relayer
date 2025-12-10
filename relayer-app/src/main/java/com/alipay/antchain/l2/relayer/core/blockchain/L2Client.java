@@ -35,8 +35,8 @@ import org.springframework.retry.annotation.Retryable;
 import org.springframework.retry.support.RetrySynchronizationManager;
 import org.springframework.stereotype.Component;
 import org.web3j.abi.FunctionEncoder;
+import org.web3j.abi.datatypes.Address;
 import org.web3j.abi.datatypes.Function;
-import org.web3j.abi.datatypes.Utf8String;
 import org.web3j.abi.datatypes.generated.Uint256;
 import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.DefaultBlockParameterName;
@@ -281,10 +281,7 @@ public class L2Client extends AbstractWeb3jClient implements L2ClientInterface {
                 ObjectUtil.isNull(RetrySynchronizationManager.getContext()) ? 0 : RetrySynchronizationManager.getContext().getRetryCount());
         var function = new Function(
                 L2CoinBase.FUNC_WITHDRAW,
-                ListUtil.toList(
-                        new Utf8String(account),
-                        new Uint256(amount)
-                ),
+                Arrays.asList(new Address(account), new Uint256(amount)),
                 Collections.emptyList()
         );
         var result = sendTx(coinbaseContractAddress, FunctionEncoder.encode(function), createEthCallGasLimitProvider(coinbaseContractAddress, function), NopeChecker.INSTANCE);
