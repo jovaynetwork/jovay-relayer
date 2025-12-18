@@ -34,10 +34,13 @@ import org.web3j.crypto.TransactionEncoder;
 public class Chunk {
 
     public static Chunk deserializeFrom(byte[] raw) {
+        Assert.isTrue(raw.length >= 1, "raw chunk is empty");
         Chunk chunk = new Chunk();
 
         int offset = 0;
         chunk.setNumBlocks(BytesUtils.getUint8(raw, offset++));
+        Assert.isTrue(raw.length > chunk.getNumBlocksVal() * BlockContext.BLOCK_CONTEXT_SIZE,
+                "raw chunk is too short for block contexts");
 
         List<BlockContext> blockContexts = new ArrayList<>();
         for (int i = 0; i < chunk.getNumBlocks(); i++) {
