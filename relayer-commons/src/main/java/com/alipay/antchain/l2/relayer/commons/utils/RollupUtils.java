@@ -3,9 +3,11 @@ package com.alipay.antchain.l2.relayer.commons.utils;
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.List;
 
+import cn.hutool.core.util.ByteUtil;
 import cn.hutool.core.util.StrUtil;
 import com.alipay.antchain.l2.relayer.commons.enums.ProveTypeEnum;
 import com.alipay.antchain.l2.relayer.commons.l2basic.Chunk;
@@ -44,6 +46,15 @@ public class RollupUtils {
         var rawChunks = rawChunksStream.toByteArray();
         streamToWrite.close();
         return rawChunks;
+    }
+
+    public static byte[] appendToRawChunks(byte[] rawChunks, Chunk chunk) {
+        var raw = chunk.serialize();
+        var newRawChunks = new byte[rawChunks.length + 4 + raw.length];
+        System.arraycopy(rawChunks, 0, newRawChunks, 0, rawChunks.length);
+        System.arraycopy(ByteUtil.intToBytes(raw.length, ByteOrder.BIG_ENDIAN), 0, newRawChunks, rawChunks.length, 4);
+        System.arraycopy(raw, 0, newRawChunks, rawChunks.length + 4, raw.length);
+        return newRawChunks;
     }
 
     public static List<Chunk> deserializeChunks(byte[] rawChunks) {

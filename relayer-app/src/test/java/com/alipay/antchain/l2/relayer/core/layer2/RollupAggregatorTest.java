@@ -25,6 +25,8 @@ import com.alipay.antchain.l2.relayer.commons.specs.forks.ForkInfo;
 import com.alipay.antchain.l2.relayer.config.RollupConfig;
 import com.alipay.antchain.l2.relayer.core.blockchain.L1Client;
 import com.alipay.antchain.l2.relayer.core.blockchain.L2Client;
+import com.alipay.antchain.l2.relayer.core.layer2.cache.ChunkPointer;
+import com.alipay.antchain.l2.relayer.core.layer2.cache.GrowingBatchChunksMemCache;
 import com.alipay.antchain.l2.relayer.core.prover.ProverControllerClient;
 import com.alipay.antchain.l2.relayer.core.tracer.TraceServiceClient;
 import com.alipay.antchain.l2.relayer.dal.repository.IOracleRepository;
@@ -103,32 +105,38 @@ public class RollupAggregatorTest extends TestBase {
     @Test
     @SneakyThrows
     public void testProcessOnlyNewChunk() {
+        var rawChunk0 = RandomUtil.randomBytes(100 * 1024);
         var chunk0 = mock(Chunk.class);
         when(chunk0.getStartBlockNumber()).thenReturn(BigInteger.ONE);
         when(chunk0.getEndBlockNumber()).thenReturn(BigInteger.valueOf(10));
-        when(chunk0.serialize()).thenReturn(RandomUtil.randomBytes(100 * 1024));
+        when(chunk0.serialize()).thenReturn(rawChunk0);
         var chunkWrapper0 = mock(ChunkWrapper.class);
         when(chunkWrapper0.getChunkIndex()).thenReturn(0L);
         when(chunkWrapper0.getChunk()).thenReturn(chunk0);
         when(chunkWrapper0.getBatchIndex()).thenReturn(BigInteger.valueOf(1));
+        when(chunkWrapper0.getEndBlockNumber()).thenReturn(BigInteger.valueOf(10));
 
+        var rawChunk1 = RandomUtil.randomBytes(100 * 1024);
         var chunk1 = mock(Chunk.class);
         when(chunk1.getStartBlockNumber()).thenReturn(BigInteger.valueOf(11));
         when(chunk1.getEndBlockNumber()).thenReturn(BigInteger.valueOf(20));
-        when(chunk1.serialize()).thenReturn(RandomUtil.randomBytes(100 * 1024));
+        when(chunk1.serialize()).thenReturn(rawChunk1);
         var chunkWrapper1 = mock(ChunkWrapper.class);
         when(chunkWrapper1.getChunkIndex()).thenReturn(1L);
         when(chunkWrapper1.getChunk()).thenReturn(chunk1);
         when(chunkWrapper1.getBatchIndex()).thenReturn(BigInteger.valueOf(1));
+        when(chunkWrapper1.getEndBlockNumber()).thenReturn(BigInteger.valueOf(20));
 
+        var rawChunk2 = RandomUtil.randomBytes(500 * 1024);
         var chunk2 = mock(Chunk.class);
         when(chunk2.getStartBlockNumber()).thenReturn(BigInteger.valueOf(21));
         when(chunk2.getEndBlockNumber()).thenReturn(BigInteger.valueOf(30));
-        when(chunk2.serialize()).thenReturn(RandomUtil.randomBytes(500 * 1024));
+        when(chunk2.serialize()).thenReturn(rawChunk2);
         var chunkWrapper2 = mock(ChunkWrapper.class);
         when(chunkWrapper2.getChunkIndex()).thenReturn(2L);
         when(chunkWrapper2.getChunk()).thenReturn(chunk2);
         when(chunkWrapper2.getBatchIndex()).thenReturn(BigInteger.valueOf(1));
+        when(chunkWrapper2.getEndBlockNumber()).thenReturn(BigInteger.valueOf(30));
 
         when(rollupRepository.getChunk(eq(BigInteger.ONE), eq(0L))).thenReturn(chunkWrapper0);
         when(rollupRepository.getChunk(eq(BigInteger.ONE), eq(1L))).thenReturn(chunkWrapper1);
@@ -182,48 +190,67 @@ public class RollupAggregatorTest extends TestBase {
         verify(rollupRepository, never()).saveBatch(notNull());
         verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK), eq(BigInteger.valueOf(4)));
 
-        Assert.assertEquals(4, growingBatchChunks.copy().size());
+        var growingBatchChunkPointersF = ReflectUtil.getField(GrowingBatchChunksMemCache.class, "growingBatchChunkPointers");
+        growingBatchChunkPointersF.setAccessible(true);
+        Assert.assertEquals(4, ((List<ChunkPointer>) growingBatchChunkPointersF.get(growingBatchChunks)).size());
+
+        var growingBatchSerializedChunksF = ReflectUtil.getField(GrowingBatchChunksMemCache.class, "growingBatchSerializedChunks");
+        growingBatchSerializedChunksF.setAccessible(true);
+        Assert.assertEquals(
+                16 + rawChunk0.length + rawChunk1.length + rawChunk2.length +
+                            new Chunk(ListUtil.toList(lastBlock, currBlock), rollupConfig.getMaxTxsInChunks()).serialize().length,
+                ((byte[]) growingBatchSerializedChunksF.get(growingBatchChunks)).length
+        );
+
         growingBatchChunks.reset();
     }
 
     @Test
     @SneakyThrows
     public void testProcessDiscontinueBlocksBetweenBatches() {
+        var rawChunk0 = RandomUtil.randomBytes(100 * 1024);
         var chunk0 = mock(Chunk.class);
         when(chunk0.getStartBlockNumber()).thenReturn(BigInteger.ONE);
         when(chunk0.getEndBlockNumber()).thenReturn(BigInteger.valueOf(10));
-        when(chunk0.serialize()).thenReturn(RandomUtil.randomBytes(100 * 1024));
+        when(chunk0.serialize()).thenReturn(rawChunk0);
         var chunkWrapper0 = mock(ChunkWrapper.class);
         when(chunkWrapper0.getChunkIndex()).thenReturn(0L);
         when(chunkWrapper0.getChunk()).thenReturn(chunk0);
         when(chunkWrapper0.getBatchIndex()).thenReturn(BigInteger.valueOf(1));
+        when(chunkWrapper0.getEndBlockNumber()).thenReturn(BigInteger.valueOf(10));
 
+        var rawChunk1 = RandomUtil.randomBytes(100 * 1024);
         var chunk1 = mock(Chunk.class);
         when(chunk1.getStartBlockNumber()).thenReturn(BigInteger.valueOf(11));
         when(chunk1.getEndBlockNumber()).thenReturn(BigInteger.valueOf(20));
-        when(chunk1.serialize()).thenReturn(RandomUtil.randomBytes(100 * 1024));
+        when(chunk1.serialize()).thenReturn(rawChunk1);
         var chunkWrapper1 = mock(ChunkWrapper.class);
         when(chunkWrapper1.getChunkIndex()).thenReturn(1L);
         when(chunkWrapper1.getChunk()).thenReturn(chunk1);
         when(chunkWrapper1.getBatchIndex()).thenReturn(BigInteger.valueOf(1));
+        when(chunkWrapper1.getEndBlockNumber()).thenReturn(BigInteger.valueOf(20));
 
+        var rawChunk2 = RandomUtil.randomBytes(500 * 1024);
         var chunk2 = mock(Chunk.class);
         when(chunk2.getStartBlockNumber()).thenReturn(BigInteger.valueOf(21));
         when(chunk2.getEndBlockNumber()).thenReturn(BigInteger.valueOf(30));
-        when(chunk2.serialize()).thenReturn(RandomUtil.randomBytes(500 * 1024));
+        when(chunk2.serialize()).thenReturn(rawChunk2);
         var chunkWrapper2 = mock(ChunkWrapper.class);
         when(chunkWrapper2.getChunkIndex()).thenReturn(2L);
         when(chunkWrapper2.getChunk()).thenReturn(chunk2);
         when(chunkWrapper2.getBatchIndex()).thenReturn(BigInteger.valueOf(1));
+        when(chunkWrapper2.getEndBlockNumber()).thenReturn(BigInteger.valueOf(30));
 
+        var rawChunk3 = RandomUtil.randomBytes(41);
         var chunk3 = mock(Chunk.class);
         when(chunk3.getStartBlockNumber()).thenReturn(BigInteger.valueOf(31));
         when(chunk3.getEndBlockNumber()).thenReturn(BigInteger.valueOf(31));
-        when(chunk3.serialize()).thenReturn(RandomUtil.randomBytes(41));
+        when(chunk3.serialize()).thenReturn(rawChunk3);
         var chunkWrapper3 = mock(ChunkWrapper.class);
         when(chunkWrapper3.getChunkIndex()).thenReturn(3L);
         when(chunkWrapper3.getChunk()).thenReturn(chunk3);
         when(chunkWrapper3.getBatchIndex()).thenReturn(BigInteger.valueOf(1));
+        when(chunkWrapper3.getEndBlockNumber()).thenReturn(BigInteger.valueOf(31));
 
         when(rollupRepository.getChunk(eq(BigInteger.ONE), eq(0L))).thenReturn(chunkWrapper0);
         when(rollupRepository.getChunk(eq(BigInteger.ONE), eq(1L))).thenReturn(chunkWrapper1);
@@ -286,29 +313,45 @@ public class RollupAggregatorTest extends TestBase {
         verify(proverControllerClient, times(1)).notifyChunk(eq(BigInteger.valueOf(1)), eq(3L), eq(BigInteger.valueOf(31L)), eq(BigInteger.valueOf(31L)));
         verify(proverControllerClient, never()).proveBatch(any());
 
-        Assert.assertEquals(4, growingBatchChunks.copy().size());
+        var growingBatchChunkPointersF = ReflectUtil.getField(GrowingBatchChunksMemCache.class, "growingBatchChunkPointers");
+        growingBatchChunkPointersF.setAccessible(true);
+        Assert.assertEquals(4, ((List<ChunkPointer>) growingBatchChunkPointersF.get(growingBatchChunks)).size());
+
+        var growingBatchSerializedChunksF = ReflectUtil.getField(GrowingBatchChunksMemCache.class, "growingBatchSerializedChunks");
+        growingBatchSerializedChunksF.setAccessible(true);
+        Assert.assertEquals(
+                16 + rawChunk0.length + rawChunk1.length + rawChunk2.length +
+                new Chunk(ListUtil.toList(lastBlock), rollupConfig.getMaxTxsInChunks()).serialize().length,
+                ((byte[]) growingBatchSerializedChunksF.get(growingBatchChunks)).length
+        );
+
         growingBatchChunks.reset();
     }
 
     @Test
     @SneakyThrows
     public void testProcessWithPreviousBatchMemCache() {
+        var rawChunk0 = RandomUtil.randomBytes(100 * 1024);
         var chunk0 = mock(Chunk.class);
         when(chunk0.getStartBlockNumber()).thenReturn(BigInteger.ONE);
         when(chunk0.getEndBlockNumber()).thenReturn(BigInteger.valueOf(10));
+        when(chunk0.serialize()).thenReturn(rawChunk0);
         var chunkWrapper0 = mock(ChunkWrapper.class);
         when(chunkWrapper0.getChunkIndex()).thenReturn(0L);
         when(chunkWrapper0.getChunk()).thenReturn(chunk0);
         when(chunkWrapper0.getBatchIndex()).thenReturn(BigInteger.valueOf(1));
+        when(chunkWrapper0.getEndBlockNumber()).thenReturn(BigInteger.valueOf(10));
 
+        var rawChunk1 = RandomUtil.randomBytes(1000 * 1024);
         var chunk1 = mock(Chunk.class);
         when(chunk1.getStartBlockNumber()).thenReturn(BigInteger.valueOf(11));
         when(chunk1.getEndBlockNumber()).thenReturn(BigInteger.valueOf(20));
-        when(chunk1.serialize()).thenReturn(RandomUtil.randomBytes(1000 * 1024));
+        when(chunk1.serialize()).thenReturn(rawChunk1);
         var chunkWrapper1 = mock(ChunkWrapper.class);
         when(chunkWrapper1.getChunkIndex()).thenReturn(1L);
         when(chunkWrapper1.getChunk()).thenReturn(chunk1);
         when(chunkWrapper1.getBatchIndex()).thenReturn(BigInteger.valueOf(1));
+        when(chunkWrapper1.getEndBlockNumber()).thenReturn(BigInteger.valueOf(20));
 
         growingBatchChunks.add(chunkWrapper0);
         growingBatchChunks.add(chunkWrapper1);
@@ -386,47 +429,61 @@ public class RollupAggregatorTest extends TestBase {
         verify(rollupRepository, times(1)).saveBatch(argThat(argument -> argument.getBatchIndex().equals(BigInteger.TWO)));
         verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK), eq(BigInteger.ZERO));
 
-        Assert.assertEquals(0, growingBatchChunks.copy().size());
+        var growingBatchChunkPointersF = ReflectUtil.getField(GrowingBatchChunksMemCache.class, "growingBatchChunkPointers");
+        growingBatchChunkPointersF.setAccessible(true);
+        Assert.assertEquals(0, ((List<ChunkPointer>) growingBatchChunkPointersF.get(growingBatchChunks)).size());
+
+        var growingBatchSerializedChunksF = ReflectUtil.getField(GrowingBatchChunksMemCache.class, "growingBatchSerializedChunks");
+        growingBatchSerializedChunksF.setAccessible(true);
+        Assert.assertEquals(0, ((byte[]) growingBatchSerializedChunksF.get(growingBatchChunks)).length);
     }
 
     @Test
     @SneakyThrows
     public void testProcessBlockBelongsToNextChunk() {
+        var rawChunk0 = RandomUtil.randomBytes(100 * 1024);
         var chunk0 = mock(Chunk.class);
         when(chunk0.getStartBlockNumber()).thenReturn(BigInteger.ONE);
         when(chunk0.getEndBlockNumber()).thenReturn(BigInteger.valueOf(10));
-        when(chunk0.serialize()).thenReturn(RandomUtil.randomBytes(100 * 1024));
+        when(chunk0.serialize()).thenReturn(rawChunk0);
         var chunkWrapper0 = mock(ChunkWrapper.class);
         when(chunkWrapper0.getChunkIndex()).thenReturn(0L);
         when(chunkWrapper0.getChunk()).thenReturn(chunk0);
         when(chunkWrapper0.getBatchIndex()).thenReturn(BigInteger.valueOf(1));
+        when(chunkWrapper0.getEndBlockNumber()).thenReturn(BigInteger.valueOf(10));
 
+        var rawChunk1 = RandomUtil.randomBytes(100 * 1024);
         var chunk1 = mock(Chunk.class);
         when(chunk1.getStartBlockNumber()).thenReturn(BigInteger.valueOf(11));
         when(chunk1.getEndBlockNumber()).thenReturn(BigInteger.valueOf(20));
-        when(chunk1.serialize()).thenReturn(RandomUtil.randomBytes(100 * 1024));
+        when(chunk1.serialize()).thenReturn(rawChunk1);
         var chunkWrapper1 = mock(ChunkWrapper.class);
         when(chunkWrapper1.getChunkIndex()).thenReturn(1L);
         when(chunkWrapper1.getChunk()).thenReturn(chunk1);
         when(chunkWrapper1.getBatchIndex()).thenReturn(BigInteger.valueOf(1));
+        when(chunkWrapper1.getEndBlockNumber()).thenReturn(BigInteger.valueOf(20));
 
+        var rawChunk2 = RandomUtil.randomBytes(500 * 1024);
         var chunk2 = mock(Chunk.class);
         when(chunk2.getStartBlockNumber()).thenReturn(BigInteger.valueOf(21));
         when(chunk2.getEndBlockNumber()).thenReturn(BigInteger.valueOf(30));
-        when(chunk2.serialize()).thenReturn(RandomUtil.randomBytes(500 * 1024));
+        when(chunk2.serialize()).thenReturn(rawChunk2);
         var chunkWrapper2 = mock(ChunkWrapper.class);
         when(chunkWrapper2.getChunkIndex()).thenReturn(2L);
         when(chunkWrapper2.getChunk()).thenReturn(chunk2);
         when(chunkWrapper2.getBatchIndex()).thenReturn(BigInteger.valueOf(1));
+        when(chunkWrapper2.getEndBlockNumber()).thenReturn(BigInteger.valueOf(30));
 
+        var rawChunk3 = RandomUtil.randomBytes(41);
         var chunk3 = mock(Chunk.class);
         when(chunk3.getStartBlockNumber()).thenReturn(BigInteger.valueOf(31));
         when(chunk3.getEndBlockNumber()).thenReturn(BigInteger.valueOf(31));
-        when(chunk3.serialize()).thenReturn(RandomUtil.randomBytes(41));
+        when(chunk3.serialize()).thenReturn(rawChunk3);
         var chunkWrapper3 = mock(ChunkWrapper.class);
         when(chunkWrapper3.getChunkIndex()).thenReturn(3L);
         when(chunkWrapper3.getChunk()).thenReturn(chunk3);
         when(chunkWrapper3.getBatchIndex()).thenReturn(BigInteger.valueOf(1));
+        when(chunkWrapper3.getEndBlockNumber()).thenReturn(BigInteger.valueOf(31));
 
         when(rollupRepository.getChunk(eq(BigInteger.ONE), eq(0L))).thenReturn(chunkWrapper0);
         when(rollupRepository.getChunk(eq(BigInteger.ONE), eq(1L))).thenReturn(chunkWrapper1);
@@ -493,38 +550,50 @@ public class RollupAggregatorTest extends TestBase {
         verify(rollupRepository, times(1)).saveBatch(argThat(argument -> argument.getBatchIndex().equals(BigInteger.ONE)));
         verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK), eq(BigInteger.ZERO));
 
-        Assert.assertEquals(0, growingBatchChunks.copy().size());
+        var growingBatchChunkPointersF = ReflectUtil.getField(GrowingBatchChunksMemCache.class, "growingBatchChunkPointers");
+        growingBatchChunkPointersF.setAccessible(true);
+        Assert.assertEquals(0, ((List<ChunkPointer>) growingBatchChunkPointersF.get(growingBatchChunks)).size());
+
+        var growingBatchSerializedChunksF = ReflectUtil.getField(GrowingBatchChunksMemCache.class, "growingBatchSerializedChunks");
+        growingBatchSerializedChunksF.setAccessible(true);
+        Assert.assertEquals(0, ((byte[]) growingBatchSerializedChunksF.get(growingBatchChunks)).length);
     }
 
     @Test
     @SneakyThrows
     public void testProcessCurrChunkAbandoned() {
+        var rawChunk0 = RandomUtil.randomBytes(100 * 1024);
         var chunk0 = mock(Chunk.class);
         when(chunk0.getStartBlockNumber()).thenReturn(BigInteger.ONE);
         when(chunk0.getEndBlockNumber()).thenReturn(BigInteger.valueOf(10));
-        when(chunk0.serialize()).thenReturn(RandomUtil.randomBytes(100 * 1024));
+        when(chunk0.serialize()).thenReturn(rawChunk0);
         var chunkWrapper0 = mock(ChunkWrapper.class);
         when(chunkWrapper0.getChunkIndex()).thenReturn(0L);
         when(chunkWrapper0.getChunk()).thenReturn(chunk0);
         when(chunkWrapper0.getBatchIndex()).thenReturn(BigInteger.valueOf(1));
+        when(chunkWrapper0.getEndBlockNumber()).thenReturn(BigInteger.valueOf(10));
 
+        var rawChunk1 = RandomUtil.randomBytes(100 * 1024);
         var chunk1 = mock(Chunk.class);
         when(chunk1.getStartBlockNumber()).thenReturn(BigInteger.valueOf(11));
         when(chunk1.getEndBlockNumber()).thenReturn(BigInteger.valueOf(20));
-        when(chunk1.serialize()).thenReturn(RandomUtil.randomBytes(100 * 1024));
+        when(chunk1.serialize()).thenReturn(rawChunk1);
         var chunkWrapper1 = mock(ChunkWrapper.class);
         when(chunkWrapper1.getChunkIndex()).thenReturn(1L);
         when(chunkWrapper1.getChunk()).thenReturn(chunk1);
         when(chunkWrapper1.getBatchIndex()).thenReturn(BigInteger.valueOf(1));
+        when(chunkWrapper1.getEndBlockNumber()).thenReturn(BigInteger.valueOf(20));
 
+        var rawChunk2 = RandomUtil.randomBytes(500 * 1024);
         var chunk2 = mock(Chunk.class);
         when(chunk2.getStartBlockNumber()).thenReturn(BigInteger.valueOf(21));
         when(chunk2.getEndBlockNumber()).thenReturn(BigInteger.valueOf(30));
-        when(chunk2.serialize()).thenReturn(RandomUtil.randomBytes(500 * 1024));
+        when(chunk2.serialize()).thenReturn(rawChunk2);
         var chunkWrapper2 = mock(ChunkWrapper.class);
         when(chunkWrapper2.getChunkIndex()).thenReturn(2L);
         when(chunkWrapper2.getChunk()).thenReturn(chunk2);
         when(chunkWrapper2.getBatchIndex()).thenReturn(BigInteger.valueOf(1));
+        when(chunkWrapper2.getEndBlockNumber()).thenReturn(BigInteger.valueOf(30));
 
         when(rollupRepository.getChunk(eq(BigInteger.ONE), eq(0L))).thenReturn(chunkWrapper0);
         when(rollupRepository.getChunk(eq(BigInteger.ONE), eq(1L))).thenReturn(chunkWrapper1);
@@ -592,7 +661,13 @@ public class RollupAggregatorTest extends TestBase {
         verify(rollupRepository, times(1)).saveBatch(argThat(argument -> argument.getBatchIndex().equals(BigInteger.ONE)));
         verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK), eq(BigInteger.ZERO));
 
-        Assert.assertEquals(0, growingBatchChunks.copy().size());
+        var growingBatchChunkPointersF = ReflectUtil.getField(GrowingBatchChunksMemCache.class, "growingBatchChunkPointers");
+        growingBatchChunkPointersF.setAccessible(true);
+        Assert.assertEquals(0, ((List<ChunkPointer>) growingBatchChunkPointersF.get(growingBatchChunks)).size());
+
+        var growingBatchSerializedChunksF = ReflectUtil.getField(GrowingBatchChunksMemCache.class, "growingBatchSerializedChunks");
+        growingBatchSerializedChunksF.setAccessible(true);
+        Assert.assertEquals(0, ((byte[]) growingBatchSerializedChunksF.get(growingBatchChunks)).length);
     }
 
     @Test
@@ -610,6 +685,7 @@ public class RollupAggregatorTest extends TestBase {
         when(chunkWrapper0.getChunkIndex()).thenReturn(0L);
         when(chunkWrapper0.getChunk()).thenReturn(chunk0);
         when(chunkWrapper0.getBatchIndex()).thenReturn(BigInteger.valueOf(1));
+        when(chunkWrapper0.getEndBlockNumber()).thenReturn(BigInteger.valueOf(10));
 
         var chunk1 = mock(Chunk.class);
         when(chunk1.getStartBlockNumber()).thenReturn(BigInteger.valueOf(11));
@@ -619,6 +695,7 @@ public class RollupAggregatorTest extends TestBase {
         when(chunkWrapper1.getChunkIndex()).thenReturn(1L);
         when(chunkWrapper1.getChunk()).thenReturn(chunk1);
         when(chunkWrapper1.getBatchIndex()).thenReturn(BigInteger.valueOf(1));
+        when(chunkWrapper1.getEndBlockNumber()).thenReturn(BigInteger.valueOf(20));
 
         var chunk2 = mock(Chunk.class);
         when(chunk2.getStartBlockNumber()).thenReturn(BigInteger.valueOf(21));
@@ -628,6 +705,7 @@ public class RollupAggregatorTest extends TestBase {
         when(chunkWrapper2.getChunkIndex()).thenReturn(2L);
         when(chunkWrapper2.getChunk()).thenReturn(chunk2);
         when(chunkWrapper2.getBatchIndex()).thenReturn(BigInteger.valueOf(1));
+        when(chunkWrapper2.getEndBlockNumber()).thenReturn(BigInteger.valueOf(30));
 
         var chunk3 = mock(Chunk.class);
         when(chunk3.getStartBlockNumber()).thenReturn(BigInteger.valueOf(31));
@@ -637,6 +715,7 @@ public class RollupAggregatorTest extends TestBase {
         when(chunkWrapper3.getChunkIndex()).thenReturn(3L);
         when(chunkWrapper3.getChunk()).thenReturn(chunk3);
         when(chunkWrapper3.getBatchIndex()).thenReturn(BigInteger.valueOf(1));
+        when(chunkWrapper3.getEndBlockNumber()).thenReturn(BigInteger.valueOf(31));
 
         when(rollupRepository.getChunk(eq(BigInteger.ONE), eq(0L))).thenReturn(chunkWrapper0);
         when(rollupRepository.getChunk(eq(BigInteger.ONE), eq(1L))).thenReturn(chunkWrapper1);
@@ -695,7 +774,13 @@ public class RollupAggregatorTest extends TestBase {
         verify(rollupRepository, times(1)).saveBatch(argThat(argument -> argument.getBatchIndex().equals(BigInteger.ONE)));
         verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK), eq(BigInteger.ZERO));
 
-        Assert.assertEquals(0, growingBatchChunks.copy().size());
+        var growingBatchChunkPointersF = ReflectUtil.getField(GrowingBatchChunksMemCache.class, "growingBatchChunkPointers");
+        growingBatchChunkPointersF.setAccessible(true);
+        Assert.assertEquals(0, ((List<ChunkPointer>) growingBatchChunkPointersF.get(growingBatchChunks)).size());
+
+        var growingBatchSerializedChunksF = ReflectUtil.getField(GrowingBatchChunksMemCache.class, "growingBatchSerializedChunks");
+        growingBatchSerializedChunksF.setAccessible(true);
+        Assert.assertEquals(0, ((byte[]) growingBatchSerializedChunksF.get(growingBatchChunks)).length);
     }
 
     @Test
@@ -714,6 +799,8 @@ public class RollupAggregatorTest extends TestBase {
         when(chunkWrapper0.getChunkIndex()).thenReturn(0L);
         when(chunkWrapper0.getChunk()).thenReturn(chunk0);
         when(chunkWrapper0.getBatchIndex()).thenReturn(BigInteger.valueOf(1));
+        when(chunkWrapper0.getEndBlockNumber()).thenReturn(BigInteger.valueOf(10));
+        when(chunkWrapper0.getStartBlockNumber()).thenReturn(BigInteger.ONE);
 
         // loaded and with gap
         growingBatchChunks.add(chunkWrapper0);
@@ -726,6 +813,8 @@ public class RollupAggregatorTest extends TestBase {
         when(chunkWrapper1.getChunkIndex()).thenReturn(1L);
         when(chunkWrapper1.getChunk()).thenReturn(chunk1);
         when(chunkWrapper1.getBatchIndex()).thenReturn(BigInteger.valueOf(1));
+        when(chunkWrapper1.getEndBlockNumber()).thenReturn(BigInteger.valueOf(20));
+        when(chunkWrapper1.getStartBlockNumber()).thenReturn(BigInteger.valueOf(11));
 
         var chunk2 = mock(Chunk.class);
         when(chunk2.getStartBlockNumber()).thenReturn(BigInteger.valueOf(21));
@@ -735,6 +824,8 @@ public class RollupAggregatorTest extends TestBase {
         when(chunkWrapper2.getChunkIndex()).thenReturn(2L);
         when(chunkWrapper2.getChunk()).thenReturn(chunk2);
         when(chunkWrapper2.getBatchIndex()).thenReturn(BigInteger.valueOf(1));
+        when(chunkWrapper2.getEndBlockNumber()).thenReturn(BigInteger.valueOf(30));
+        when(chunkWrapper2.getStartBlockNumber()).thenReturn(BigInteger.valueOf(21));
 
         var chunk3 = mock(Chunk.class);
         when(chunk3.getStartBlockNumber()).thenReturn(BigInteger.valueOf(31));
@@ -744,6 +835,8 @@ public class RollupAggregatorTest extends TestBase {
         when(chunkWrapper3.getChunkIndex()).thenReturn(3L);
         when(chunkWrapper3.getChunk()).thenReturn(chunk3);
         when(chunkWrapper3.getBatchIndex()).thenReturn(BigInteger.valueOf(1));
+        when(chunkWrapper3.getEndBlockNumber()).thenReturn(BigInteger.valueOf(31));
+        when(chunkWrapper3.getStartBlockNumber()).thenReturn(BigInteger.valueOf(31));
 
         when(rollupRepository.getChunk(eq(BigInteger.ONE), eq(0L))).thenReturn(chunkWrapper0);
         when(rollupRepository.getChunk(eq(BigInteger.ONE), eq(1L))).thenReturn(chunkWrapper1);
@@ -802,7 +895,13 @@ public class RollupAggregatorTest extends TestBase {
         verify(rollupRepository, times(1)).saveBatch(argThat(argument -> argument.getBatchIndex().equals(BigInteger.ONE)));
         verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK), eq(BigInteger.ZERO));
 
-        Assert.assertEquals(0, growingBatchChunks.copy().size());
+        var growingBatchChunkPointersF = ReflectUtil.getField(GrowingBatchChunksMemCache.class, "growingBatchChunkPointers");
+        growingBatchChunkPointersF.setAccessible(true);
+        Assert.assertEquals(0, ((List<ChunkPointer>) growingBatchChunkPointersF.get(growingBatchChunks)).size());
+
+        var growingBatchSerializedChunksF = ReflectUtil.getField(GrowingBatchChunksMemCache.class, "growingBatchSerializedChunks");
+        growingBatchSerializedChunksF.setAccessible(true);
+        Assert.assertEquals(0, ((byte[]) growingBatchSerializedChunksF.get(growingBatchChunks)).length);
     }
 
     @Test
@@ -820,6 +919,7 @@ public class RollupAggregatorTest extends TestBase {
         when(chunkWrapper0.getChunkIndex()).thenReturn(0L);
         when(chunkWrapper0.getChunk()).thenReturn(chunk0);
         when(chunkWrapper0.getBatchIndex()).thenReturn(BigInteger.valueOf(1));
+        when(chunkWrapper0.getEndBlockNumber()).thenReturn(BigInteger.valueOf(10));
 
         var chunk1 = mock(Chunk.class);
         when(chunk1.getStartBlockNumber()).thenReturn(BigInteger.valueOf(11));
@@ -829,6 +929,7 @@ public class RollupAggregatorTest extends TestBase {
         when(chunkWrapper1.getChunkIndex()).thenReturn(1L);
         when(chunkWrapper1.getChunk()).thenReturn(chunk1);
         when(chunkWrapper1.getBatchIndex()).thenReturn(BigInteger.valueOf(1));
+        when(chunkWrapper1.getEndBlockNumber()).thenReturn(BigInteger.valueOf(20));
 
         var chunk2 = mock(Chunk.class);
         when(chunk2.getStartBlockNumber()).thenReturn(BigInteger.valueOf(21));
@@ -838,6 +939,7 @@ public class RollupAggregatorTest extends TestBase {
         when(chunkWrapper2.getChunkIndex()).thenReturn(2L);
         when(chunkWrapper2.getChunk()).thenReturn(chunk2);
         when(chunkWrapper2.getBatchIndex()).thenReturn(BigInteger.valueOf(1));
+        when(chunkWrapper2.getEndBlockNumber()).thenReturn(BigInteger.valueOf(30));
 
         var chunk3 = mock(Chunk.class);
         when(chunk3.getStartBlockNumber()).thenReturn(BigInteger.valueOf(31));
@@ -847,6 +949,7 @@ public class RollupAggregatorTest extends TestBase {
         when(chunkWrapper3.getChunkIndex()).thenReturn(3L);
         when(chunkWrapper3.getChunk()).thenReturn(chunk3);
         when(chunkWrapper3.getBatchIndex()).thenReturn(BigInteger.valueOf(1));
+        when(chunkWrapper3.getEndBlockNumber()).thenReturn(BigInteger.valueOf(31));
 
         when(rollupRepository.getChunk(eq(BigInteger.ONE), eq(0L))).thenReturn(chunkWrapper0);
         when(rollupRepository.getChunk(eq(BigInteger.ONE), eq(1L))).thenReturn(chunkWrapper1);
@@ -917,7 +1020,13 @@ public class RollupAggregatorTest extends TestBase {
         verify(rollupRepository, times(1)).saveBatch(argThat(argument -> argument.getBatchIndex().equals(BigInteger.ONE)));
         verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK), eq(BigInteger.ZERO));
 
-        Assert.assertEquals(0, growingBatchChunks.copy().size());
+        var growingBatchChunkPointersF = ReflectUtil.getField(GrowingBatchChunksMemCache.class, "growingBatchChunkPointers");
+        growingBatchChunkPointersF.setAccessible(true);
+        Assert.assertEquals(0, ((List<ChunkPointer>) growingBatchChunkPointersF.get(growingBatchChunks)).size());
+
+        var growingBatchSerializedChunksF = ReflectUtil.getField(GrowingBatchChunksMemCache.class, "growingBatchSerializedChunks");
+        growingBatchSerializedChunksF.setAccessible(true);
+        Assert.assertEquals(0, ((byte[]) growingBatchSerializedChunksF.get(growingBatchChunks)).length);
     }
 
     @Test
@@ -975,32 +1084,43 @@ public class RollupAggregatorTest extends TestBase {
     }
 
     @Test
+    @SneakyThrows
     public void testGrowingBatchChunksMemCache() {
         var mem = new GrowingBatchChunksMemCache(4);
 
+        var rawChunk0 = RandomUtil.randomBytes(100);
         var chunk0 = mock(Chunk.class);
         when(chunk0.getStartBlockNumber()).thenReturn(BigInteger.ONE);
         when(chunk0.getEndBlockNumber()).thenReturn(BigInteger.valueOf(10));
+        when(chunk0.serialize()).thenReturn(rawChunk0);
         var chunkWrapper0 = mock(ChunkWrapper.class);
         when(chunkWrapper0.getChunkIndex()).thenReturn(0L);
         when(chunkWrapper0.getChunk()).thenReturn(chunk0);
         when(chunkWrapper0.getBatchIndex()).thenReturn(BigInteger.valueOf(1));
+        when(chunkWrapper0.getEndBlockNumber()).thenReturn(BigInteger.valueOf(10));
 
+        var rawChunk1 = RandomUtil.randomBytes(100);
         var chunk1 = mock(Chunk.class);
         when(chunk1.getStartBlockNumber()).thenReturn(BigInteger.valueOf(11));
         when(chunk1.getEndBlockNumber()).thenReturn(BigInteger.valueOf(20));
+        when(chunk1.serialize()).thenReturn(rawChunk1);
         var chunkWrapper1 = mock(ChunkWrapper.class);
         when(chunkWrapper1.getChunkIndex()).thenReturn(1L);
         when(chunkWrapper1.getChunk()).thenReturn(chunk1);
         when(chunkWrapper1.getBatchIndex()).thenReturn(BigInteger.valueOf(1));
+        when(chunkWrapper1.getEndBlockNumber()).thenReturn(BigInteger.valueOf(20));
+        when(chunkWrapper1.getStartBlockNumber()).thenReturn(BigInteger.valueOf(11));
 
+        var rawChunk1x = RandomUtil.randomBytes(100);
         var chunk1x = mock(Chunk.class);
         when(chunk1x.getStartBlockNumber()).thenReturn(BigInteger.valueOf(11));
         when(chunk1x.getEndBlockNumber()).thenReturn(BigInteger.valueOf(30));
+        when(chunk1x.serialize()).thenReturn(rawChunk1x);
         var chunkWrapper1x = mock(ChunkWrapper.class);
         when(chunkWrapper1x.getChunkIndex()).thenReturn(1L);
         when(chunkWrapper1x.getChunk()).thenReturn(chunk1x);
         when(chunkWrapper1x.getBatchIndex()).thenReturn(BigInteger.valueOf(1));
+        when(chunkWrapper1x.getEndBlockNumber()).thenReturn(BigInteger.valueOf(30));
 
         // add
         mem.add(chunkWrapper0);
@@ -1008,19 +1128,21 @@ public class RollupAggregatorTest extends TestBase {
         mem.add(chunkWrapper1x);
 
         // copy
-        var list = mem.copy();
-        Assert.assertEquals(chunkWrapper0.getChunk(), list.get(0));
-        Assert.assertEquals(chunkWrapper1x.getChunk(), list.get(1));
+        var growingBatchChunkPointersF = ReflectUtil.getField(GrowingBatchChunksMemCache.class, "growingBatchChunkPointers");
+        growingBatchChunkPointersF.setAccessible(true);
+        var growingBatchSerializedChunksF = ReflectUtil.getField(GrowingBatchChunksMemCache.class, "growingBatchSerializedChunks");
+        growingBatchSerializedChunksF.setAccessible(true);
+        var list = (List<ChunkPointer>) growingBatchChunkPointersF.get(mem);
+        Assert.assertEquals(chunkWrapper0.getChunk().getEndBlockNumber(), list.get(0).endBlockNumber());
+        Assert.assertEquals(chunkWrapper1x.getChunk().getEndBlockNumber(), list.get(1).endBlockNumber());
         Assert.assertEquals(2, list.size());
-        Assert.assertEquals(chunk1x.getEndBlockNumber(), list.get(list.size() - 1).getEndBlockNumber());
-        var list2 = mem.copy();
-        list.clear();
-        Assert.assertEquals(2, list2.size());
+        Assert.assertEquals(8 + rawChunk0.length + rawChunk1x.length, ((byte[]) growingBatchSerializedChunksF.get(mem)).length);
 
         // reset
         mem.reset();
-        list = mem.copy();
+        list = (List<ChunkPointer>) growingBatchChunkPointersF.get(mem);
         Assert.assertEquals(0, list.size());
+        Assert.assertEquals(0, ((byte[]) growingBatchSerializedChunksF.get(mem)).length);
 
         // checkAndFill
         // from zero
@@ -1031,25 +1153,28 @@ public class RollupAggregatorTest extends TestBase {
         when(chunkWrapper2.getChunkIndex()).thenReturn(2L);
         when(chunkWrapper2.getChunk()).thenReturn(chunk2);
         when(chunkWrapper2.getBatchIndex()).thenReturn(BigInteger.valueOf(1));
+        when(chunkWrapper2.getEndBlockNumber()).thenReturn(BigInteger.valueOf(30));
 
         when(rollupRepository.getChunk(eq(BigInteger.ONE), eq(0L))).thenReturn(chunkWrapper0);
         when(rollupRepository.getChunk(eq(BigInteger.ONE), eq(1L))).thenReturn(chunkWrapper1);
 
         mem.checkAndFill(chunkWrapper2, rollupRepository);
-        list = mem.copy();
+        list = (List<ChunkPointer>) growingBatchChunkPointersF.get(mem);
         Assert.assertEquals(2, list.size());
-        Assert.assertEquals(chunkWrapper0.getChunk(), list.get(0));
-        Assert.assertEquals(chunkWrapper1.getChunk(), list.get(1));
+        Assert.assertEquals(chunkWrapper0.getChunk().getEndBlockNumber(), list.get(0).endBlockNumber());
+        Assert.assertEquals(chunkWrapper1.getChunk().getEndBlockNumber(), list.get(1).endBlockNumber());
+        Assert.assertEquals(8 + rawChunk0.length + rawChunk1.length, ((byte[]) growingBatchSerializedChunksF.get(mem)).length);
 
         // from non-zero
         mem.reset();
         mem.add(chunkWrapper0);
 
         mem.checkAndFill(chunkWrapper2, rollupRepository);
-        list = mem.copy();
+        list = (List<ChunkPointer>) growingBatchChunkPointersF.get(mem);
         Assert.assertEquals(2, list.size());
-        Assert.assertEquals(chunkWrapper0.getChunk(), list.get(0));
-        Assert.assertEquals(chunkWrapper1.getChunk(), list.get(1));
+        Assert.assertEquals(chunkWrapper0.getChunk().getEndBlockNumber(), list.get(0).endBlockNumber());
+        Assert.assertEquals(chunkWrapper1.getChunk().getEndBlockNumber(), list.get(1).endBlockNumber());
+        Assert.assertEquals(8 + rawChunk0.length + rawChunk1.length, ((byte[]) growingBatchSerializedChunksF.get(mem)).length);
 
         // new batch
         var chunkNewBatch = mock(Chunk.class);
@@ -1059,10 +1184,12 @@ public class RollupAggregatorTest extends TestBase {
         when(chunkWrapperNewBatch.getChunkIndex()).thenReturn(0L);
         when(chunkWrapperNewBatch.getChunk()).thenReturn(chunk2);
         when(chunkWrapperNewBatch.getBatchIndex()).thenReturn(BigInteger.valueOf(2));
+        when(chunkWrapperNewBatch.getEndBlockNumber()).thenReturn(BigInteger.valueOf(40));
 
         mem.checkAndFill(chunkWrapperNewBatch, rollupRepository);
-        list = mem.copy();
+        list = (List<ChunkPointer>) growingBatchChunkPointersF.get(mem);
         Assert.assertEquals(0, list.size());
+        Assert.assertEquals(0, ((byte[]) growingBatchSerializedChunksF.get(mem)).length);
 
         // reprocess the block and constructing chunk already added
         mem.reset();
@@ -1070,8 +1197,9 @@ public class RollupAggregatorTest extends TestBase {
         mem.add(chunkWrapper1);
 
         mem.checkAndFill(chunkWrapper1x, rollupRepository);
-        list = mem.copy();
+        list = (List<ChunkPointer>) growingBatchChunkPointersF.get(mem);
         Assert.assertEquals(1, list.size());
+        Assert.assertEquals(4 + rawChunk0.length, ((byte[]) growingBatchSerializedChunksF.get(mem)).length);
     }
 
     @SneakyThrows
