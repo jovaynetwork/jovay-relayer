@@ -78,7 +78,10 @@ public class RollupAggregator implements IRollupAggregator {
         // Growing batch info contains the uncompressed batch data.
         // And capable to calc the actual eip4844 blobs size if rollup the building batch now.
         var growingBatchInfo = getGrowingBatchInfo(buildingChunk);
-        var overBatchBlobLimitFlag = growingBatchInfo.getOverBatchBlobLimitFlag(rollupConfig.getBatchCommitBlobSizeLimit());
+        var overBatchBlobLimitFlag = growingBatchInfo.getOverBatchBlobLimitFlag(
+                rollupConfig.getBatchCommitBlobSizeLimit(),
+                rollupConfig.getMaxChunksMemoryUsed()
+        );
         log.debug("add this block and then commit batch, the growing batch info is {}", growingBatchInfo.toJson());
 
         long zkAccumulator = getChunkZkCycleAccumulator();
@@ -400,10 +403,15 @@ public class RollupAggregator implements IRollupAggregator {
             return rawPayload.length;
         }
 
-        public int getOverBatchBlobLimitFlag(int batchCommitBlobSizeLimit) {
+        public int getOverBatchBlobLimitFlag(int batchCommitBlobSizeLimit, int maxChunksMemoryUsed) {
+            var res = getPayloadSize() - maxChunksMemoryUsed;
+            if (res >= 0) {
+                log.warn("raw chunks is over or equal to the max memory used");
+                return res;
+            }
             // Only batch version ge 1 use new layout for DA data
             if (batchVersion == BatchVersionEnum.BATCH_V1) {
-                var res = getPayloadSize() + BlobsDaData.DA_DATA_META_LEN_SIZE - batchCommitBlobSizeLimit * BlobsDaData.CAPACITY_BYTE_PER_BLOB;
+                res = getPayloadSize() + BlobsDaData.DA_DATA_META_LEN_SIZE - batchCommitBlobSizeLimit * BlobsDaData.CAPACITY_BYTE_PER_BLOB;
                 if (res >= 0) {
                     // only when uncompressed data size over the limit, we do the compression
                     // to cut down the cost

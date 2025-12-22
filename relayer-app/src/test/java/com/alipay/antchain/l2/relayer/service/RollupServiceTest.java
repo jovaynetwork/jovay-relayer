@@ -102,6 +102,7 @@ public class RollupServiceTest extends TestBase {
         when(rollupConfig.getChunkZkCycleSumLimit()).thenReturn(940_000L);
         when(rollupConfig.getMaxTimeIntervalBetweenBatches()).thenReturn(3600_000L);
         when(rollupConfig.getZkVerificationStartBatch()).thenReturn(BigInteger.valueOf(0));
+        when(rollupConfig.getMaxChunksMemoryUsed()).thenReturn(1073741824);
 
         when(l1Client.queryTxCount(notNull(), notNull())).thenReturn(BigInteger.ONE);
         var blobTxManager = mock(BaseRawTransactionManager.class);
