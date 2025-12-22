@@ -31,8 +31,6 @@ import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.TransactionStatus;
-import org.springframework.transaction.support.TransactionCallbackWithoutResult;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.web3j.crypto.transaction.type.Transaction4844;
 import org.web3j.crypto.transaction.type.TransactionType;
@@ -100,14 +98,7 @@ public class ReliableTxServiceImpl implements IReliableTxService {
 
         for (ReliableTransactionDO tx : reliableTransactions) {
             try {
-                transactionTemplate.execute(
-                        new TransactionCallbackWithoutResult() {
-                            @Override
-                            protected void doInTransactionWithoutResult(TransactionStatus status) {
-                                processL1PendingTx(tx);
-                            }
-                        }
-                );
+                processL1PendingTx(tx);
             } catch (RollupEconomicStrategyNotAllowedException e) {
                 log.warn("l1 gas price too high, skip this tx {}-{}-{}: {}", tx.getChainType(), tx.getTransactionType(), tx.getBatchIndex(), e.getMessage());
             } catch (Exception e) {
@@ -126,14 +117,7 @@ public class ReliableTxServiceImpl implements IReliableTxService {
 
         for (ReliableTransactionDO tx : reliableTransactions) {
             try {
-                transactionTemplate.execute(
-                        new TransactionCallbackWithoutResult() {
-                            @Override
-                            protected void doInTransactionWithoutResult(TransactionStatus status) {
-                                processL2PendingTx(tx);
-                            }
-                        }
-                );
+                processL2PendingTx(tx);
             } catch (RollupEconomicStrategyNotAllowedException e) {
                 log.warn("gas price too high, skip this tx {}-{}-{}: {}", tx.getChainType(), tx.getTransactionType(), tx.getBatchIndex(), e.getMessage());
             } catch (Exception e) {
