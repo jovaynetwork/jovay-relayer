@@ -43,7 +43,12 @@ public class RollupConfig {
     @Value("${l2-relayer.rollup.config.zk-verification-start-batch:9223372036854775807}")
     private BigInteger zkVerificationStartBatch;
 
-    @Getter
+    /**
+     * Limit that the serialized chunks for the growing batch should not exceed. Default is 1GB.
+     */
+    @Value("${l2-relayer.rollup.config.max-chunks-memory-used:1073741824}")
+    private int maxChunksMemoryUsed;
+
     @Value("${l2-relayer.rollup.specs.network}")
     private RollupSpecsNetwork rollupSpecsNetwork;
 
