@@ -21,6 +21,7 @@ import com.alipay.antchain.l2.relayer.commons.specs.forks.ForkInfo;
 import com.alipay.antchain.l2.relayer.commons.utils.Utils;
 import com.alipay.antchain.l2.relayer.config.RollupConfig;
 import com.alipay.antchain.l2.relayer.core.blockchain.L1Client;
+import com.alipay.antchain.l2.relayer.core.layer2.cache.GrowingBatchChunksMemCache;
 import com.alipay.antchain.l2.relayer.core.prover.ProverControllerClient;
 import com.alipay.antchain.l2.relayer.dal.repository.IRollupRepository;
 import com.alipay.antchain.l2.relayer.metrics.otel.IOtelMetric;
@@ -228,11 +229,9 @@ public class RollupAggregator implements IRollupAggregator {
 
     private GrowingBatchInfo getGrowingBatchInfo(ChunkWrapper currChunk) {
         growingBatchChunks.checkAndFill(currChunk, rollupRepository);
-        var chunkList = growingBatchChunks.copy();
-        chunkList.add(currChunk.getChunk());
         return new GrowingBatchInfo(
                 getCurrBatchVersion(getStartBlockTimestampForBatch(currChunk.getBatchIndex())),
-                new ChunksPayload(chunkList).serialize()
+                growingBatchChunks.copyAndAppend(currChunk)
         );
     }
 

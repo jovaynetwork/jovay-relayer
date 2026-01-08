@@ -118,4 +118,21 @@ public class EthBlobsTest {
         var obj = BlobsDaData.buildFrom(ethBlobs.getBlobs());
         Assert.assertEquals(obj.toBatchPayload(), obj.toBatchPayload());
     }
+
+    @Test
+    public void testRollupUtilsAppendToRawChunks() {
+        var inFile = FileUtil.readString("batch-heavy", Charset.defaultCharset());
+        var jObj = JSON.parseObject(inFile);
+        var chunkJsonArr = jObj.getJSONArray("chunks");
+        var chunks = chunkJsonArr.stream().map(x -> Chunk.fromJson(x.toString())).toList();
+
+        var rawChunks = RollupUtils.appendToRawChunks(RollupUtils.serializeChunks(chunks.subList(0, chunks.size() - 1)), chunks.get(chunks.size() - 1));
+        var actual= RollupUtils.deserializeChunks(rawChunks);
+        Assert.assertEquals(chunks.size(), actual.size());
+        for (int i = 0; i < chunks.size(); i++) {
+            Assert.assertEquals(chunks.get(i).getStartBlockNumber(), actual.get(i).getStartBlockNumber());
+            Assert.assertEquals(chunks.get(i).getEndBlockNumber(), actual.get(i).getEndBlockNumber());
+            Assert.assertArrayEquals(chunks.get(i).getL2Transactions(), actual.get(i).getL2Transactions());
+        }
+    }
 }
