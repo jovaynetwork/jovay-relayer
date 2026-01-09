@@ -208,6 +208,16 @@
                 <version>${grpc-starter.version}</version>
             </dependency>
             <dependency>
+                <groupId>net.devh</groupId>
+                <artifactId>grpc-server-spring-boot-starter</artifactId>
+                <version>${grpc-starter.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>net.devh</groupId>
+                <artifactId>grpc-server-spring-boot-autoconfigure</artifactId>
+                <version>${grpc-starter.version}</version>
+            </dependency>
+            <dependency>
                 <groupId>com.alipay.antchain.l2</groupId>
                 <artifactId>relayer-commons</artifactId>
                 <version>${project.version}</version>

@@ -54,6 +54,9 @@ l2-relayer:
     schedule:
       duty:
         period: ${DUTY_PERIOD:100}
+  server:
+    admin:
+      password: ${ADMIN_PASSWORD:admin}
   l1-client:
     eth-network-fork:
       unknown-network-config-file: ${ETH_NETWORK_FORK_UNKNOWN_NETWORK_CONFIG_FILE:null}
@@ -123,6 +126,9 @@ grpc:
     tracer-client:
       address: "static://${TRACER_IP}:${TRACER_PORT:5000}"
       negotiation-type: plaintext
+  server:
+    address: ${ADMIN_HOST:127.0.0.1}
+    port: ${ADMIN_PORT:7088}
 jovay:
   sign-service:
     l1LegacyPoolTxSignService:
