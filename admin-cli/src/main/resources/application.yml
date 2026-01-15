@@ -11,3 +11,6 @@ grpc:
   client:
     admin:
       negotiation-type: plaintext
+auth:
+  username: ${AUTH_USERNAME:admin}
+  password: ${AUTH_PASSWORD:admin}

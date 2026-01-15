@@ -32,13 +32,15 @@ import com.google.protobuf.ByteString;
 import io.grpc.stub.StreamObserver;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
+import net.devh.boot.grpc.server.service.GrpcService;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
+import org.springframework.security.access.annotation.Secured;
 import org.springframework.transaction.annotation.Transactional;
 import org.web3j.abi.datatypes.generated.Bytes32;
 import org.web3j.utils.Numeric;
 
-@Component
+@GrpcService
+@Secured("ROLE_ADMIN")
 @Slf4j
 public class AdminGrpcService extends AdminServiceGrpc.AdminServiceImplBase {
 
