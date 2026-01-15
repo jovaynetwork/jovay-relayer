@@ -3,7 +3,6 @@ package com.alipay.antchain.l2.relayer.commons.l2basic;
 import cn.hutool.core.util.ObjectUtil;
 import com.alibaba.fastjson.annotation.JSONCreator;
 import com.alibaba.fastjson.annotation.JSONField;
-import com.github.luben.zstd.Zstd;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 
@@ -22,17 +21,7 @@ public enum BatchVersionEnum {
      *     <li>Batch data compression in zstd algo with default parameters </li>
      * </ol>
      */
-    BATCH_V1((byte) 1, new IDaCompressor() {
-        @Override
-        public byte[] compress(byte[] payload) {
-            return Zstd.compress(payload);
-        }
-
-        @Override
-        public byte[] decompress(byte[] payload) {
-            return Zstd.decompress(payload);
-        }
-    });
+    BATCH_V1((byte) 1, IDaCompressor.ZSTD_DEFAULT_COMPRESSOR);
 
     @JSONField
     private final byte value;
