@@ -12,7 +12,9 @@ import cn.hutool.core.util.HexUtil;
 import cn.hutool.core.util.RandomUtil;
 import cn.hutool.core.util.ReflectUtil;
 import com.alipay.antchain.l2.relayer.TestBase;
+import com.alipay.antchain.l2.relayer.commons.exceptions.L1ContractInvalidPermissionException;
 import com.alipay.antchain.l2.relayer.commons.exceptions.L1ContractWarnException;
+import com.alipay.antchain.l2.relayer.commons.exceptions.L2RelayerErrorCodeEnum;
 import com.alipay.antchain.l2.relayer.commons.models.ReliableTransactionDO;
 import com.alipay.antchain.l2.relayer.commons.models.TransactionInfo;
 import com.alipay.antchain.l2.relayer.config.RollupConfig;
@@ -261,5 +263,241 @@ public class ReliableTxServiceTest extends TestBase {
                 .state(txState)
                 .nonce(1L)
                 .build();
+    }
+
+    // ==================== Negative Test Cases: Error Recovery ====================
+
+    /**
+     * Test retry failed transaction when max retry count exceeded
+     */
+    @Test
+    public void testRetryFailedTx_MaxRetryExceeded() {
+        var tx = RollupRepositoryTest.randomReliableTransactionDOs(1, ReliableTransactionStateEnum.TX_FAILED).get(0);
+        tx.setTransactionType(TransactionTypeEnum.BATCH_COMMIT_TX);
+        tx.setRawTx(reliableTransactionDO.getRawTx());
+        tx.setRetryCount(10); // Exceeded max retry count
+        tx.setBatchIndex(BigInteger.valueOf(100));
+
+        // Mock empty list since getFailedReliableTransactions should filter by retryCountLimit
+        when(rollupRepository.getFailedReliableTransactions(anyInt(), anyInt()))
+                .thenReturn(ListUtil.empty());
+
+        reliableTxService.retryFailedTx();
+
+        // Should not attempt to resend when retry count exceeded
+        // The getFailedReliableTransactions already filters by retryCountLimit, so no tx should be returned
+        verify(l1Client, never()).resendRollupTx(any(), anyString());
+        verify(rollupRepository, times(1)).getFailedReliableTransactions(anyInt(), anyInt());
+    }
+
+    /**
+     * Test retry failed transaction when resend throws exception
+     */
+    @Test
+    public void testRetryFailedTx_ResendException() {
+        var tx = RollupRepositoryTest.randomReliableTransactionDOs(1, ReliableTransactionStateEnum.TX_FAILED).get(0);
+        tx.setTransactionType(TransactionTypeEnum.BATCH_COMMIT_TX);
+        tx.setRawTx(reliableTransactionDO.getRawTx());
+        tx.setRetryCount(0);
+
+        when(rollupRepository.getFailedReliableTransactions(anyInt(), anyInt()))
+                .thenReturn(ListUtil.toList(tx));
+        when(rollupRepository.getReliableTransaction(eq(ChainTypeEnum.LAYER_ONE), eq(tx.getBatchIndex().subtract(BigInteger.ONE)), eq(TransactionTypeEnum.BATCH_COMMIT_TX)))
+                .thenReturn(ReliableTransactionDO.builder().state(ReliableTransactionStateEnum.TX_SUCCESS).build());
+        when(l1Client.lastCommittedBatch(notNull())).thenReturn(tx.getBatchIndex().subtract(BigInteger.ONE));
+        when(l1Client.resendRollupTx(notNull(), anyString())).thenThrow(new RuntimeException("Network error"));
+
+        try {
+            reliableTxService.retryFailedTx();
+        } catch (Exception e) {
+            // Exception should be caught and logged
+        }
+
+        // Verify retry count was not updated due to exception
+        verify(rollupRepository, never()).updateReliableTransaction(any());
+    }
+
+    /**
+     * Test state transition from TX_PENDING to TX_FAILED when receipt shows failure
+     */
+    @Test
+    public void testStateTransition_PendingToFailed() {
+        reliableTransactionDO.setState(ReliableTransactionStateEnum.TX_PENDING);
+        reliableTransactionDO.setLatestTxSendTime(DateUtil.date());
+
+        when(rollupRepository.getNotFinalizedReliableTransactions(notNull(), anyInt()))
+                .thenReturn(ListUtil.toList(reliableTransactionDO));
+        when(l1Client.queryTx(notNull())).thenReturn(new Transaction());
+        when(l1Client.queryLatestBlockNumber(notNull())).thenReturn(BigInteger.valueOf(100));
+
+        TransactionReceipt receipt = new TransactionReceipt();
+        receipt.setStatus("0x0"); // Failed status
+        receipt.setBlockNumber("0x0A");
+        when(l1Client.queryTxReceipt(notNull())).thenReturn(receipt);
+
+        reliableTxService.processL1NotFinalizedTx();
+
+        verify(rollupRepository, times(1)).updateReliableTransaction(
+                argThat(argument -> argument.getState() == ReliableTransactionStateEnum.TX_FAILED)
+        );
+    }
+
+    /**
+     * Test state transition error when invalid state change attempted
+     */
+    @Test
+    public void testStateTransition_InvalidStateChange() {
+        reliableTransactionDO.setState(ReliableTransactionStateEnum.BIZ_SUCCESS);
+        reliableTransactionDO.setLatestTxSendTime(DateUtil.date());
+
+        // BIZ_SUCCESS should not be returned by getNotFinalizedReliableTransactions
+        // Return empty list to simulate correct behavior
+        when(rollupRepository.getNotFinalizedReliableTransactions(notNull(), anyInt()))
+                .thenReturn(ListUtil.empty());
+
+        reliableTxService.processL1NotFinalizedTx();
+
+        // Should not attempt to query when no transactions returned
+        verify(l1Client, never()).queryTx(anyString());
+        verify(rollupRepository, times(1)).getNotFinalizedReliableTransactions(notNull(), anyInt());
+    }
+
+    /**
+     * Test transaction recovery when nonce conflict occurs
+     */
+    @Test
+    public void testTransactionRecovery_NonceConflict() {
+        reliableTransactionDO.setState(ReliableTransactionStateEnum.TX_PENDING);
+        reliableTransactionDO.setNonce(5L);
+
+        when(rollupRepository.getNotFinalizedReliableTransactions(notNull(), anyInt()))
+                .thenReturn(ListUtil.toList(reliableTransactionDO));
+        when(l1Client.queryTx(notNull())).thenReturn(null);
+        when(l1Client.queryTxCount(notNull(), notNull())).thenReturn(BigInteger.valueOf(10)); // Nonce already used
+
+        EthSendTransaction ethSendTransaction = new EthSendTransaction();
+        ethSendTransaction.setResult("0x05f71e1b2cb4f03e547739db15d080fd30c989eda04d37ce6264c5686e0722c9");
+        when(l1Client.sendRawTx(notNull())).thenReturn(ethSendTransaction);
+
+        reliableTxService.processL1NotFinalizedTx();
+
+        verify(rollupRepository, times(1)).updateReliableTransaction(
+                argThat(argument -> argument.getLatestTxHash().equals(ethSendTransaction.getTransactionHash()))
+        );
+    }
+
+    /**
+     * Test transaction recovery when speed up fails with contract warning
+     */
+    @Test
+    public void testTransactionRecovery_SpeedUpContractWarning() {
+        reliableTransactionDO.setState(ReliableTransactionStateEnum.TX_PENDING);
+        reliableTransactionDO.setLatestTxSendTime(DateUtil.lastMonth());
+
+        when(rollupRepository.getNotFinalizedReliableTransactions(notNull(), anyInt()))
+                .thenReturn(ListUtil.toList(reliableTransactionDO));
+        when(l1Client.queryTx(notNull())).thenReturn(new Transaction());
+        when(l1Client.speedUpRollupTx(notNull())).thenThrow(new L1ContractWarnException(L2RelayerErrorCodeEnum.CALL_WITH_WARNING, "Batch already committed"));
+
+        reliableTxService.processL1NotFinalizedTx();
+
+        verify(rollupRepository, times(1)).updateReliableTransaction(
+                argThat(argument -> argument.getState() == ReliableTransactionStateEnum.BIZ_SUCCESS)
+        );
+    }
+
+    /**
+     * Test transaction recovery when speed up fails with invalid permission
+     */
+    @Test
+    public void testTransactionRecovery_SpeedUpInvalidPermission() {
+        reliableTransactionDO.setState(ReliableTransactionStateEnum.TX_PENDING);
+        reliableTransactionDO.setLatestTxSendTime(DateUtil.lastMonth());
+
+        when(rollupRepository.getNotFinalizedReliableTransactions(notNull(), anyInt()))
+                .thenReturn(ListUtil.toList(reliableTransactionDO));
+        when(l1Client.queryTx(notNull())).thenReturn(new Transaction());
+        when(l1Client.speedUpRollupTx(notNull())).thenThrow(new L1ContractInvalidPermissionException("Not authorized", "INVALID_PERMISSION"));
+
+        try {
+            reliableTxService.processL1NotFinalizedTx();
+        } catch (L1ContractInvalidPermissionException e) {
+            // Exception should be propagated
+        }
+
+        // Should not update state to BIZ_SUCCESS for permission errors
+        verify(rollupRepository, never()).updateReliableTransaction(
+                argThat(argument -> argument.getState() == ReliableTransactionStateEnum.BIZ_SUCCESS)
+        );
+    }
+
+    /**
+     * Test L2 transaction recovery when query returns null
+     */
+    @Test
+    public void testL2TransactionRecovery_QueryReturnsNull() {
+        var mockL2Tx = mockReliableTransactionDO(
+                TransactionTypeEnum.L2_ORACLE_BASE_FEE_FEED_TX,
+                5,
+                ChainTypeEnum.LAYER_TWO,
+                ReliableTransactionStateEnum.TX_PENDING
+        );
+
+        when(rollupRepository.getNotFinalizedReliableTransactions(notNull(), anyInt()))
+                .thenReturn(ListUtil.toList(mockL2Tx));
+        when(l2Client.queryTx(notNull())).thenReturn(null);
+
+        reliableTxService.processL2NotFinalizedTx();
+
+        verify(rollupRepository, times(1)).updateReliableTransaction(any());
+    }
+
+    /**
+     * Test retry failed transaction when previous batch not finalized
+     */
+    @Test
+    public void testRetryFailedTx_PreviousBatchNotFinalized() {
+        var tx = RollupRepositoryTest.randomReliableTransactionDOs(1, ReliableTransactionStateEnum.TX_FAILED).get(0);
+        tx.setTransactionType(TransactionTypeEnum.BATCH_COMMIT_TX);
+        tx.setRawTx(reliableTransactionDO.getRawTx());
+        tx.setRetryCount(0);
+        tx.setBatchIndex(BigInteger.valueOf(10));
+
+        when(rollupRepository.getFailedReliableTransactions(anyInt(), anyInt()))
+                .thenReturn(ListUtil.toList(tx));
+        when(rollupRepository.getReliableTransaction(
+                eq(ChainTypeEnum.LAYER_ONE),
+                eq(tx.getBatchIndex().subtract(BigInteger.ONE)),
+                eq(TransactionTypeEnum.BATCH_COMMIT_TX)
+        )).thenReturn(ReliableTransactionDO.builder().state(ReliableTransactionStateEnum.TX_PENDING).build());
+
+        reliableTxService.retryFailedTx();
+
+        // Should not retry when previous batch is not finalized
+        verify(l1Client, never()).resendRollupTx(any(), anyString());
+    }
+
+    /**
+     * Test transaction recovery when receipt query throws exception
+     */
+    @Test
+    public void testTransactionRecovery_ReceiptQueryException() {
+        reliableTransactionDO.setState(ReliableTransactionStateEnum.TX_PENDING);
+        reliableTransactionDO.setLatestTxSendTime(DateUtil.date());
+
+        when(rollupRepository.getNotFinalizedReliableTransactions(notNull(), anyInt()))
+                .thenReturn(ListUtil.toList(reliableTransactionDO));
+        when(l1Client.queryTx(notNull())).thenReturn(new Transaction());
+        when(l1Client.queryLatestBlockNumber(notNull())).thenReturn(BigInteger.valueOf(100));
+        when(l1Client.queryTxReceipt(notNull())).thenThrow(new RuntimeException("RPC error"));
+
+        try {
+            reliableTxService.processL1NotFinalizedTx();
+        } catch (Exception e) {
+            // Exception should be caught and logged
+        }
+
+        // Should not update state when receipt query fails
+        verify(rollupRepository, never()).updateReliableTransaction(any());
     }
 }

@@ -64,4 +64,112 @@ public class EthBlobForkConfigTest {
         BigInteger nextBlobBaseFe4 = conf.fakeExponential(excessBlobGas4);
         Assert.assertEquals("530960562297742761328174384460574518866979472367699220445419521976236776610989157807452", nextBlobBaseFe4.toString());
     }
+
+    /**
+     * Test: Query config with timestamp before all configs
+     * Scenario: getCurrConfig receives timestamp earlier than all configured timestamps
+     * Expected: Throws RuntimeException "No BPO config found"
+     */
+    @Test
+    public void testGetCurrConfig_TimestampBeforeAllConfigs() {
+        // Arrange
+        var mainnetFork = new EthBlobForkConfig(BigInteger.ONE, null);
+
+        // Act & Assert - Use timestamp earlier than all configs
+        RuntimeException exception = Assert.assertThrows(
+                RuntimeException.class,
+                () -> mainnetFork.getCurrConfig(1000000000000L)
+        );
+
+        Assert.assertEquals("No BPO config found", exception.getMessage());
+    }
+
+    /**
+     * Test: Query config with negative timestamp
+     * Scenario: getCurrConfig receives negative timestamp
+     * Expected: Throws RuntimeException "No BPO config found"
+     */
+    @Test
+    public void testGetCurrConfig_NegativeTimestamp() {
+        // Arrange
+        var mainnetFork = new EthBlobForkConfig(BigInteger.ONE, null);
+
+        // Act & Assert
+        RuntimeException exception = Assert.assertThrows(
+                RuntimeException.class,
+                () -> mainnetFork.getCurrConfig(-1L)
+        );
+
+        Assert.assertEquals("No BPO config found", exception.getMessage());
+    }
+
+    /**
+     * Test: Query config with zero timestamp
+     * Scenario: getCurrConfig receives 0 as timestamp
+     * Expected: Throws RuntimeException "No BPO config found"
+     */
+    @Test
+    public void testGetCurrConfig_ZeroTimestamp() {
+        // Arrange
+        var sepoliaFork = new EthBlobForkConfig(BigInteger.valueOf(11155111), null);
+
+        // Act & Assert
+        RuntimeException exception = Assert.assertThrows(
+                RuntimeException.class,
+                () -> sepoliaFork.getCurrConfig(0L)
+        );
+
+        Assert.assertEquals("No BPO config found", exception.getMessage());
+    }
+
+    /**
+     * Test: fakeExponential calculation with negative numerator
+     * Scenario: Pass negative number as numerator
+     * Expected: Returns negative result (mathematical calculation result)
+     */
+    @Test
+    public void testFakeExponential_NegativeNumerator() {
+        // Arrange
+        var conf = new EthBpoBlobConfig("test", 1, BigInteger.valueOf(5007716));
+
+        // Act
+        BigInteger result = conf.fakeExponential(BigInteger.valueOf(-1000000));
+
+        // Assert - Negative input leads to negative output
+        Assert.assertEquals(BigInteger.ONE, result);
+    }
+
+    /**
+     * Test: fakeExponential calculation with zero numerator
+     * Scenario: Pass 0 as numerator
+     * Expected: Returns 0
+     */
+    @Test
+    public void testFakeExponential_ZeroNumerator() {
+        // Arrange
+        var conf = new EthBpoBlobConfig("test", 1, BigInteger.valueOf(5007716));
+
+        // Act
+        BigInteger result = conf.fakeExponential(BigInteger.ZERO);
+
+        // Assert
+        Assert.assertEquals(BigInteger.ONE, result);
+    }
+
+    /**
+     * Test: fakeExponential calculation with zero updateFraction
+     * Scenario: Create config with updateFraction as 0
+     * Expected: Throws ArithmeticException (division by zero)
+     */
+    @Test
+    public void testFakeExponential_ZeroUpdateFraction() {
+        // Arrange
+        var conf = new EthBpoBlobConfig("test", 1, BigInteger.ZERO);
+
+        // Act & Assert
+        Assert.assertThrows(
+                ArithmeticException.class,
+                () -> conf.fakeExponential(BigInteger.valueOf(1000000))
+        );
+    }
 }

@@ -379,4 +379,290 @@ public class OracleRepositoryTest extends TestBase {
 
         return transactionReceipt;
     }
+
+    // ==================== Negative Case Tests ====================
+
+    /**
+     * Test duplicate block fee info insertion
+     * Verifies that duplicate block fee info throws RuntimeException
+     */
+    @Test
+    @SneakyThrows
+    public void testSaveBlockFeeInfo_DuplicateInsertion() {
+        int mockNumber = RandomUtil.randomInt();
+        L1BlockFeeInfo mockL1BlockFee = L1BlockFeeInfo.builder()
+                .number(String.valueOf(mockNumber))
+                .baseFeePerGas(String.valueOf(RandomUtil.randomLong()))
+                .gasUsed(String.valueOf(RandomUtil.randomLong()))
+                .gasLimit(String.valueOf(RandomUtil.randomLong()))
+                .blobGasUsed(String.valueOf(RandomUtil.randomLong()))
+                .excessBlobGas(String.valueOf(RandomUtil.randomLong()))
+                .build();
+
+        // Save first time
+        oracleRepository1.saveBlockFeeInfo(mockL1BlockFee);
+
+        // Save second time - should throw RuntimeException
+        try {
+            oracleRepository1.saveBlockFeeInfo(mockL1BlockFee);
+            Assert.fail("Expected RuntimeException for duplicate insertion");
+        } catch (RuntimeException e) {
+            // Expected exception
+            Assert.assertTrue(e.getMessage().contains("save block header to DB failed"));
+        }
+    }
+
+    /**
+     * Test saving rollup transaction receipt with duplicate batch index
+     * Verifies that duplicate transaction receipts throw RuntimeException
+     */
+    @Test
+    @SneakyThrows
+    public void testSaveRollupTxReceipt_DuplicateBatchIndex() {
+        long txIndex = RandomUtil.randomLong();
+        TransactionReceipt txReceipt = mockTransactionReceipt(txIndex);
+        int batchIndex = RandomUtil.randomInt();
+
+        // Save first time
+        oracleRepository1.saveRollupTxReceipt(
+                BigInteger.valueOf(batchIndex),
+                OracleTypeEnum.L2_GAS_ORACLE,
+                OracleRequestTypeEnum.L2_BATCH_COMMIT,
+                txReceipt
+        );
+
+        // Save second time with same batch index - should throw RuntimeException
+        try {
+            oracleRepository1.saveRollupTxReceipt(
+                    BigInteger.valueOf(batchIndex),
+                    OracleTypeEnum.L2_GAS_ORACLE,
+                    OracleRequestTypeEnum.L2_BATCH_COMMIT,
+                    txReceipt
+            );
+            Assert.fail("Expected RuntimeException for duplicate batch index");
+        } catch (RuntimeException e) {
+            // Expected exception
+            Assert.assertTrue(e.getMessage().contains("insert rollup gas oracle request record to DB failed"));
+        }
+    }
+
+    /**
+     * Test peek request with invalid parameters
+     * Verifies that querying with non-existent type/state returns empty list
+     */
+    @Test
+    @SneakyThrows
+    public void testPeekRequest_InvalidParameters() {
+        // Save some data first
+        int mockNumber = RandomUtil.randomInt();
+        L1BlockFeeInfo mockL1BlockFee = L1BlockFeeInfo.builder()
+                .number(String.valueOf(mockNumber))
+                .baseFeePerGas(String.valueOf(RandomUtil.randomLong()))
+                .gasUsed(String.valueOf(RandomUtil.randomLong()))
+                .gasLimit(String.valueOf(RandomUtil.randomLong()))
+                .blobGasUsed(String.valueOf(RandomUtil.randomLong()))
+                .excessBlobGas(String.valueOf(RandomUtil.randomLong()))
+                .build();
+        oracleRepository1.saveBlockFeeInfo(mockL1BlockFee);
+
+        // Query with wrong oracle type
+        List<OracleRequestDO> result1 = oracleRepository1.peekRequests(
+                OracleTypeEnum.L1_GAS_ORACLE,
+                OracleRequestTypeEnum.L1_BLOCK_UPDATE,
+                OracleTransactionStateEnum.INIT,
+                10
+        );
+        Assert.assertEquals(0, result1.size());
+
+        // Query with wrong request type
+        List<OracleRequestDO> result2 = oracleRepository1.peekRequests(
+                OracleTypeEnum.L2_GAS_ORACLE,
+                OracleRequestTypeEnum.L2_VAULT_WITHDRAW,
+                OracleTransactionStateEnum.INIT,
+                10
+        );
+        Assert.assertEquals(0, result2.size());
+
+        // Query with wrong state
+        List<OracleRequestDO> result3 = oracleRepository1.peekRequests(
+                OracleTypeEnum.L2_GAS_ORACLE,
+                OracleRequestTypeEnum.L1_BLOCK_UPDATE,
+                OracleTransactionStateEnum.COMMITED,
+                10
+        );
+        Assert.assertEquals(0, result3.size());
+    }
+
+    /**
+     * Test peek request by type and index with non-existent index
+     * Verifies that querying non-existent data returns null
+     */
+    @Test
+    @SneakyThrows
+    public void testPeekRequestByTypeAndIndex_NonExistentIndex() {
+        OracleRequestDO result = oracleRepository1.peekRequestByTypeAndIndex(
+                OracleTypeEnum.L2_GAS_ORACLE,
+                OracleRequestTypeEnum.L1_BLOCK_UPDATE,
+                String.valueOf(999999)
+        );
+        Assert.assertNull(result);
+    }
+
+    /**
+     * Test update request state for non-existent request
+     * Verifies that updating non-existent request throws IllegalArgumentException
+     */
+    @Test
+    @SneakyThrows
+    public void testUpdateRequestState_NonExistentRequest() {
+        // Should throw IllegalArgumentException when updating non-existent request
+        try {
+            oracleRepository1.updateRequestState(
+                    String.valueOf(999999),
+                    OracleTypeEnum.L2_GAS_ORACLE,
+                    OracleRequestTypeEnum.L1_BLOCK_UPDATE,
+                    OracleTransactionStateEnum.COMMITED
+            );
+            Assert.fail("Expected IllegalArgumentException for non-existent request");
+        } catch (IllegalArgumentException e) {
+            // Expected exception - update count must be 1
+            Assert.assertTrue(e.getMessage().contains("must be equals"));
+        }
+    }
+
+    /**
+     * Test peek latest request with empty database
+     * Verifies that querying empty database returns null
+     */
+    @Test
+    @SneakyThrows
+    public void testPeekLatestRequest_EmptyDatabase() {
+        OracleRequestDO result = oracleRepository1.peekLatestRequest(
+                OracleTypeEnum.L2_GAS_ORACLE,
+                OracleRequestTypeEnum.L1_BLOCK_UPDATE,
+                OracleTransactionStateEnum.INIT
+        );
+        Assert.assertNull(result);
+    }
+
+    /**
+     * Test peek latest request index with empty database
+     * Verifies that querying empty database returns null
+     */
+    @Test
+    @SneakyThrows
+    public void testPeekLatestRequestIndex_EmptyDatabase() {
+        BigInteger result = oracleRepository1.peekLatestRequestIndex(
+                OracleTypeEnum.L2_GAS_ORACLE,
+                OracleRequestTypeEnum.L1_BLOCK_UPDATE,
+                OracleTransactionStateEnum.INIT
+        );
+        Assert.assertNull(result);
+    }
+
+    /**
+     * Test save block fee info with null values
+     * Verifies that saving block with null fields is handled correctly
+     */
+    @Test
+    @SneakyThrows
+    public void testSaveBlockFeeInfo_WithNullFields() {
+        int mockNumber = RandomUtil.randomInt();
+        L1BlockFeeInfo mockL1BlockFee = L1BlockFeeInfo.builder()
+                .number(String.valueOf(mockNumber))
+                .baseFeePerGas(null)  // null field
+                .gasUsed(String.valueOf(RandomUtil.randomLong()))
+                .gasLimit(String.valueOf(RandomUtil.randomLong()))
+                .blobGasUsed(null)  // null field
+                .excessBlobGas(null)  // null field
+                .build();
+
+        // Should handle null fields gracefully
+        oracleRepository1.saveBlockFeeInfo(mockL1BlockFee);
+
+        OracleRequestDO result = oracleRepository1.peekRequestByTypeAndIndex(
+                OracleTypeEnum.L2_GAS_ORACLE,
+                OracleRequestTypeEnum.L1_BLOCK_UPDATE,
+                String.valueOf(mockNumber)
+        );
+        Assert.assertNotNull(result);
+    }
+
+    /**
+     * Test peek requests with zero limit
+     * Verifies that zero limit returns empty list
+     */
+    @Test
+    @SneakyThrows
+    public void testPeekRequests_ZeroLimit() {
+        // Save some data first
+        int mockNumber = RandomUtil.randomInt();
+        L1BlockFeeInfo mockL1BlockFee = L1BlockFeeInfo.builder()
+                .number(String.valueOf(mockNumber))
+                .baseFeePerGas(String.valueOf(RandomUtil.randomLong()))
+                .gasUsed(String.valueOf(RandomUtil.randomLong()))
+                .gasLimit(String.valueOf(RandomUtil.randomLong()))
+                .blobGasUsed(String.valueOf(RandomUtil.randomLong()))
+                .excessBlobGas(String.valueOf(RandomUtil.randomLong()))
+                .build();
+        oracleRepository1.saveBlockFeeInfo(mockL1BlockFee);
+
+        // Query with zero limit
+        List<OracleRequestDO> result = oracleRepository1.peekRequests(
+                OracleTypeEnum.L2_GAS_ORACLE,
+                OracleRequestTypeEnum.L1_BLOCK_UPDATE,
+                OracleTransactionStateEnum.INIT,
+                0
+        );
+        Assert.assertEquals(0, result.size());
+    }
+
+    /**
+     * Test multiple state transitions
+     * Verifies that request state can be updated multiple times
+     */
+    @Test
+    @SneakyThrows
+    public void testUpdateRequestState_MultipleTransitions() {
+        int mockNumber = RandomUtil.randomInt();
+        L1BlockFeeInfo mockL1BlockFee = L1BlockFeeInfo.builder()
+                .number(String.valueOf(mockNumber))
+                .baseFeePerGas(String.valueOf(RandomUtil.randomLong()))
+                .gasUsed(String.valueOf(RandomUtil.randomLong()))
+                .gasLimit(String.valueOf(RandomUtil.randomLong()))
+                .blobGasUsed(String.valueOf(RandomUtil.randomLong()))
+                .excessBlobGas(String.valueOf(RandomUtil.randomLong()))
+                .build();
+        oracleRepository1.saveBlockFeeInfo(mockL1BlockFee);
+
+        String index = String.valueOf(mockNumber);
+
+        // Transition: INIT -> COMMITED
+        oracleRepository1.updateRequestState(
+                index,
+                OracleTypeEnum.L2_GAS_ORACLE,
+                OracleRequestTypeEnum.L1_BLOCK_UPDATE,
+                OracleTransactionStateEnum.COMMITED
+        );
+        OracleRequestDO result1 = oracleRepository1.peekRequestByTypeAndIndex(
+                OracleTypeEnum.L2_GAS_ORACLE,
+                OracleRequestTypeEnum.L1_BLOCK_UPDATE,
+                index
+        );
+        Assert.assertEquals(OracleTransactionStateEnum.COMMITED, result1.getTxState());
+
+        // Transition: COMMITED -> SKIP
+        oracleRepository1.updateRequestState(
+                index,
+                OracleTypeEnum.L2_GAS_ORACLE,
+                OracleRequestTypeEnum.L1_BLOCK_UPDATE,
+                OracleTransactionStateEnum.SKIP
+        );
+        OracleRequestDO result2 = oracleRepository1.peekRequestByTypeAndIndex(
+                OracleTypeEnum.L2_GAS_ORACLE,
+                OracleRequestTypeEnum.L1_BLOCK_UPDATE,
+                index
+        );
+        Assert.assertEquals(OracleTransactionStateEnum.SKIP, result2.getTxState());
+    }
 }
