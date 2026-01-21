@@ -599,4 +599,184 @@ public class AdminGrpcServiceTest extends TestBase {
         Assert.assertTrue(results.get(0).hasGetRollupEconomicConfigResp());
         Assert.assertEquals("10", results.get(0).getGetRollupEconomicConfigResp().getConfigValue());
     }
+
+    // ==================== Negative Case Tests ====================
+
+    @Test
+    @SneakyThrows
+    public void testInitAnchorBatch_InvalidBatchIndex() {
+        var req = InitAnchorBatchReq.newBuilder()
+                .setAnchorBatchIndex(999)
+                .build();
+        StreamRecorder<Response> responseObserver = StreamRecorder.create();
+
+        doThrow(new IllegalArgumentException("Invalid batch index")).when(rollupService).setAnchorBatch(any(BigInteger.class));
+
+        adminGrpcService.initAnchorBatch(req, responseObserver);
+
+        Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
+        Assert.assertNull(responseObserver.getError());
+        List<Response> results = responseObserver.getValues();
+        Assert.assertEquals(1, results.size());
+        Assert.assertEquals(-1, results.get(0).getCode());
+    }
+
+    @Test
+    @SneakyThrows
+    public void testGetBatch_BatchNotFound() {
+        var req = GetBatchReq.newBuilder()
+                .setBatchIndex("999")
+                .build();
+        StreamRecorder<Response> responseObserver = StreamRecorder.create();
+
+        when(rollupRepository.getBatch(any())).thenReturn(null);
+
+        adminGrpcService.getBatch(req, responseObserver);
+
+        Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
+        Assert.assertNull(responseObserver.getError());
+        List<Response> results = responseObserver.getValues();
+        Assert.assertEquals(1, results.size());
+        Assert.assertEquals(-1, results.get(0).getCode());
+    }
+
+    @Test
+    @SneakyThrows
+    public void testRetryBatchTx_InvalidTransactionType() {
+        var req = RetryBatchTxReq.newBuilder()
+                .setType("INVALID_TYPE")
+                .setFromBatchIndex(1)
+                .setToBatchIndex(3)
+                .build();
+        StreamRecorder<Response> responseObserver = StreamRecorder.create();
+
+        adminGrpcService.retryBatchTx(req, responseObserver);
+
+        Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
+        Assert.assertNull(responseObserver.getError());
+        List<Response> results = responseObserver.getValues();
+        Assert.assertEquals(1, results.size());
+        Assert.assertEquals(-1, results.get(0).getCode());
+    }
+
+    @Test
+    @SneakyThrows
+    public void testQueryBatchTxInfo_TransactionNotFound() {
+        var req = QueryBatchTxInfoReq.newBuilder()
+                .setType(TransactionTypeEnum.BATCH_TEE_PROOF_COMMIT_TX.name())
+                .setBatchIndex(999)
+                .build();
+        StreamRecorder<Response> responseObserver = StreamRecorder.create();
+
+        when(rollupRepository.getReliableTransaction(any(), any(), any())).thenReturn(null);
+
+        adminGrpcService.queryBatchTxInfo(req, responseObserver);
+
+        Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
+        Assert.assertNull(responseObserver.getError());
+        List<Response> results = responseObserver.getValues();
+        Assert.assertEquals(1, results.size());
+        Assert.assertEquals(-1, results.get(0).getCode());
+    }
+
+    @Test
+    @SneakyThrows
+    public void testWithdrawFromVault_InvalidAddress() {
+        var req = WithdrawFromVaultReq.newBuilder()
+                .setTo("invalid_address")
+                .setAmount(100)
+                .build();
+        StreamRecorder<Response> responseObserver = StreamRecorder.create();
+
+        when(oracleService.withdrawVault(anyString(), any())).thenThrow(new IllegalArgumentException("Invalid address format"));
+
+        adminGrpcService.withdrawFromVault(req, responseObserver);
+
+        Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
+        Assert.assertNull(responseObserver.getError());
+        List<Response> results = responseObserver.getValues();
+        Assert.assertEquals(1, results.size());
+        Assert.assertEquals(-1, results.get(0).getCode());
+    }
+
+    @Test
+    @SneakyThrows
+    public void testUpdateFixedProfit_InvalidValue() {
+        var req = UpdateFixedProfitReq.newBuilder()
+                .setProfit("-100")
+                .build();
+        StreamRecorder<Response> responseObserver = StreamRecorder.create();
+
+        when(oracleService.updateFixedProfit(any())).thenThrow(new IllegalArgumentException("Invalid profit value"));
+
+        adminGrpcService.updateFixedProfit(req, responseObserver);
+
+        Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
+        Assert.assertNull(responseObserver.getError());
+        List<Response> results = responseObserver.getValues();
+        Assert.assertEquals(1, results.size());
+        Assert.assertEquals(-1, results.get(0).getCode());
+    }
+
+    @Test
+    @SneakyThrows
+    public void testSpeedupTx_TransactionNotPending() {
+        var req = SpeedupTxReq.newBuilder()
+                .setChainType(ChainTypeEnum.LAYER_ONE.name())
+                .setType(TransactionTypeEnum.BATCH_COMMIT_TX.name())
+                .setBatchIndex(1)
+                .build();
+        StreamRecorder<Response> responseObserver = StreamRecorder.create();
+
+        when(rollupRepository.getReliableTransaction(any(), any(), any())).thenReturn(
+                ReliableTransactionDO.builder()
+                        .state(ReliableTransactionStateEnum.TX_SUCCESS)
+                        .build()
+        );
+
+        adminGrpcService.speedupTx(req, responseObserver);
+
+        Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
+        Assert.assertNull(responseObserver.getError());
+        List<Response> results = responseObserver.getValues();
+        Assert.assertEquals(1, results.size());
+        Assert.assertEquals(-1, results.get(0).getCode());
+    }
+
+    @Test
+    @SneakyThrows
+    public void testUpdateGasPriceConfig_InvalidConfigValue() {
+        var req = UpdateGasPriceConfigReq.newBuilder()
+                .setChainType("ethereum")
+                .setConfigKey("gasPriceIncreasedPercentage")
+                .setConfigValue("invalid_number")
+                .build();
+        StreamRecorder<Response> responseObserver = StreamRecorder.create();
+
+        adminGrpcService.updateGasPriceConfig(req, responseObserver);
+
+        Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
+        Assert.assertNull(responseObserver.getError());
+        List<Response> results = responseObserver.getValues();
+        Assert.assertEquals(1, results.size());
+        Assert.assertEquals(-1, results.get(0).getCode());
+    }
+
+    @Test
+    @SneakyThrows
+    public void testGetGasPriceConfig_UnknownConfigKey() {
+        var req = GetGasPriceConfigReq.newBuilder()
+                .setChainType("ethereum")
+                .setConfigKey("unknownKey")
+                .build();
+        StreamRecorder<Response> responseObserver = StreamRecorder.create();
+
+        adminGrpcService.getGasPriceConfig(req, responseObserver);
+
+        Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
+        Assert.assertNull(responseObserver.getError());
+        List<Response> results = responseObserver.getValues();
+        Assert.assertEquals(1, results.size());
+        Assert.assertEquals(-1, results.get(0).getCode());
+    }
 }

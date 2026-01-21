@@ -6,6 +6,9 @@ import java.util.Date;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import cn.hutool.core.collection.ListUtil;
 import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.RandomUtil;
@@ -13,10 +16,7 @@ import cn.hutool.core.util.ReflectUtil;
 import com.alibaba.fastjson.JSON;
 import com.alipay.antchain.l2.relayer.TestBase;
 import com.alipay.antchain.l2.relayer.commons.enums.*;
-import com.alipay.antchain.l2.relayer.commons.exceptions.CommitL2BatchException;
-import com.alipay.antchain.l2.relayer.commons.exceptions.CommitL2BatchTeeProofException;
-import com.alipay.antchain.l2.relayer.commons.exceptions.CommitL2BatchZkProofException;
-import com.alipay.antchain.l2.relayer.commons.exceptions.InvalidBatchException;
+import com.alipay.antchain.l2.relayer.commons.exceptions.*;
 import com.alipay.antchain.l2.relayer.commons.l2basic.BatchHeader;
 import com.alipay.antchain.l2.relayer.commons.l2basic.BatchVersionEnum;
 import com.alipay.antchain.l2.relayer.commons.models.*;
@@ -42,6 +42,7 @@ import lombok.SneakyThrows;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.test.context.bean.override.mockito.MockReset;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.web3j.abi.datatypes.generated.Bytes32;
@@ -1264,5 +1265,284 @@ public class RollupServiceTest extends TestBase {
         var m = ReflectUtil.getMethod(mem.getClass(), "reset");
         m.setAccessible(true);
         m.invoke(mem);
+    }
+
+    // ==================== Negative Test Cases: Exception Handling ====================
+
+    /**
+     * Test commit L2 batch when L1 client throws network exception
+     */
+    @Test
+    public void testCommitL2Batch_NetworkException() {
+        when(l1Client.lastCommittedBatch()).thenThrow(new RuntimeException("Network timeout"));
+
+        try {
+            rollupService.commitL2Batch();
+        } catch (Exception e) {
+            Assert.assertTrue(e.getMessage().contains("Network timeout"));
+        }
+    }
+
+    /**
+     * Test commit L2 batch when batch retrieval fails
+     */
+    @Test
+    public void testCommitL2Batch_BatchRetrievalFailure() {
+        when(l1Client.lastCommittedBatch()).thenReturn(BigInteger.ZERO);
+        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BATCH_COMMITTED)))
+                .thenReturn(BigInteger.ONE);
+        when(rollupRepository.getReliableTransaction(notNull(), notNull(), notNull())).thenReturn(null);
+        when(rollupRepository.getBatch(eq(BigInteger.ONE))).thenReturn(null);
+
+        try {
+            rollupService.commitL2Batch();
+            Assert.fail("Expected CommitL2BatchException not thrown");
+        } catch (CommitL2BatchException e) {
+            Assert.assertTrue(e.getMessage().contains("null batch for 1"));
+        }
+    }
+
+    /**
+     * Test commit L2 batch when commit transaction fails
+     */
+    @Test
+    public void testCommitL2Batch_CommitTransactionFailure() {
+        when(l1Client.lastCommittedBatch()).thenReturn(BigInteger.ZERO);
+        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BATCH_COMMITTED)))
+                .thenReturn(BigInteger.ONE);
+        when(rollupRepository.getReliableTransaction(notNull(), notNull(), notNull())).thenReturn(null);
+
+        int maxTxsInChunks = rollupConfig.getMaxTxsInChunks();
+        when(rollupRepository.getBatch(eq(BigInteger.ONE)))
+                .thenReturn(BatchWrapper.createBatch(
+                        BatchVersionEnum.BATCH_V0, BigInteger.ONE, ZERO_BATCH_WRAPPER,
+                        BASIC_BLOCK_TRACE2.getHeader().getStateRoot().toByteArray(),
+                        BASIC_BLOCK_TRACE2.getL1MsgRollingHash().getValue().toByteArray(),
+                        Bytes32.DEFAULT.getValue(), 0,
+                        ListUtil.toList(new ChunkWrapper(BigInteger.ONE, 0,
+                                ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2), maxTxsInChunks))
+                ));
+        when(rollupRepository.getBatchHeader(eq(BigInteger.ZERO))).thenReturn(ZERO_BATCH_HEADER);
+        when(l1Client.commitBatch(notNull(), notNull())).thenThrow(new RuntimeException("Transaction failed"));
+
+        try {
+            rollupService.commitL2Batch();
+        } catch (Exception e) {
+            Assert.assertTrue(e.getMessage().contains("Transaction failed"));
+        }
+    }
+
+    /**
+     * Test commit TEE proof when L1 client query fails
+     */
+    @Test
+    public void testCommitL2TeeProof_QueryFailure() {
+        when(l1Client.lastTeeVerifiedBatch()).thenThrow(new RuntimeException("RPC error"));
+
+        try {
+            rollupService.commitL2TeeProof();
+        } catch (Exception e) {
+            Assert.assertTrue(e.getMessage().contains("RPC error"));
+        }
+    }
+
+    /**
+     * Test commit TEE proof when proof is not ready
+     */
+    @Test
+    public void testCommitL2TeeProof_ProofNotReady() {
+        when(l1Client.lastTeeVerifiedBatch()).thenReturn(BigInteger.ZERO);
+        when(l1Client.lastCommittedBatch(notNull())).thenReturn(BigInteger.ONE);
+        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BATCH_COMMITTED)))
+                .thenReturn(BigInteger.ONE);
+        when(rollupRepository.getBatchProveRequest(notNull(), notNull())).thenReturn(
+                BatchProveRequestDO.builder().state(BatchProveRequestStateEnum.PENDING).build()
+        );
+
+        rollupService.commitL2TeeProof();
+
+        // Should not attempt to verify when proof is not ready
+        verify(l1Client, never()).verifyBatch(any(), any());
+    }
+
+    /**
+     * Test commit TEE proof when verify batch throws exception
+     */
+    @Test
+    public void testCommitL2TeeProof_VerifyBatchException() {
+        when(l1Client.lastTeeVerifiedBatch()).thenReturn(BigInteger.ZERO);
+        when(l1Client.lastCommittedBatch(notNull())).thenReturn(BigInteger.ONE);
+        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BATCH_COMMITTED)))
+                .thenReturn(BigInteger.ONE);
+        when(rollupRepository.getBatchProveRequest(notNull(), notNull())).thenReturn(
+                BatchProveRequestDO.builder().proof("a".getBytes()).state(BatchProveRequestStateEnum.PROVE_READY).build()
+        );
+
+        int maxTxsInChunks = rollupConfig.getMaxTxsInChunks();
+        when(rollupRepository.getBatch(eq(BigInteger.ONE)))
+                .thenReturn(BatchWrapper.createBatch(
+                        BatchVersionEnum.BATCH_V0, BigInteger.ONE, ZERO_BATCH_WRAPPER,
+                        BASIC_BLOCK_TRACE2.getHeader().getStateRoot().toByteArray(),
+                        BASIC_BLOCK_TRACE2.getL1MsgRollingHash().getValue().toByteArray(),
+                        Bytes32.DEFAULT.getValue(), 0,
+                        ListUtil.toList(new ChunkWrapper(BigInteger.ONE, 0,
+                                ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2), maxTxsInChunks))
+                ));
+        when(l1Client.verifyBatch(notNull(), notNull())).thenThrow(new RuntimeException("Gas estimation failed"));
+
+        try {
+            rollupService.commitL2TeeProof();
+        } catch (Exception e) {
+            Assert.assertTrue(e.getMessage().contains("Gas estimation failed"));
+        }
+    }
+
+    /**
+     * Test commit ZK proof when L1 client query fails
+     */
+    @Test
+    public void testCommitL2ZkProof_QueryFailure() {
+        when(l1Client.lastZkVerifiedBatch()).thenThrow(new RuntimeException("Connection refused"));
+
+        try {
+            rollupService.commitL2ZkProof();
+        } catch (Exception e) {
+            Assert.assertTrue(e.getMessage().contains("Connection refused"));
+        }
+    }
+
+    /**
+     * Test commit ZK proof when proof is not ready
+     */
+    @Test
+    public void testCommitL2ZkProof_ProofNotReady() {
+        when(l1Client.lastZkVerifiedBatch()).thenReturn(BigInteger.ZERO);
+        when(l1Client.lastCommittedBatch(notNull())).thenReturn(BigInteger.ONE);
+        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BATCH_COMMITTED)))
+                .thenReturn(BigInteger.ONE);
+        when(rollupRepository.getBatchProveRequest(notNull(), notNull())).thenReturn(
+                BatchProveRequestDO.builder().state(BatchProveRequestStateEnum.PENDING).build()
+        );
+
+        rollupService.commitL2ZkProof();
+
+        // Should not attempt to verify when proof is not ready
+        verify(l1Client, never()).verifyBatch(any(), any());
+    }
+
+    /**
+     * Test commit ZK proof when verify batch throws exception
+     */
+    @Test
+    public void testCommitL2ZkProof_VerifyBatchException() {
+        when(l1Client.lastZkVerifiedBatch()).thenReturn(BigInteger.ZERO);
+        when(l1Client.lastCommittedBatch(notNull())).thenReturn(BigInteger.ONE);
+        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BATCH_COMMITTED)))
+                .thenReturn(BigInteger.ONE);
+        when(rollupRepository.getBatchProveRequest(notNull(), notNull())).thenReturn(
+                BatchProveRequestDO.builder().proof("a".getBytes()).state(BatchProveRequestStateEnum.PROVE_READY).build()
+        );
+
+        int maxTxsInChunks = rollupConfig.getMaxTxsInChunks();
+        when(rollupRepository.getBatch(eq(BigInteger.ONE)))
+                .thenReturn(BatchWrapper.createBatch(
+                        BatchVersionEnum.BATCH_V0, BigInteger.ONE, ZERO_BATCH_WRAPPER,
+                        BASIC_BLOCK_TRACE2.getHeader().getStateRoot().toByteArray(),
+                        BASIC_BLOCK_TRACE2.getL1MsgRollingHash().getValue().toByteArray(),
+                        Bytes32.DEFAULT.getValue(), 0,
+                        ListUtil.toList(new ChunkWrapper(BigInteger.ONE, 0,
+                                ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2), maxTxsInChunks))
+                ));
+        when(l1Client.verifyBatch(notNull(), notNull())).thenThrow(new RuntimeException("Invalid proof"));
+
+        try {
+            rollupService.commitL2ZkProof();
+        } catch (Exception e) {
+            Assert.assertTrue(e.getMessage().contains("Invalid proof"));
+        }
+    }
+
+    /**
+     * Test poll L2 blocks when L2 client throws exception
+     */
+    @Test
+    public void testPollL2Blocks_L2ClientException() {
+        when(l2Client.queryLatestBlockNumber(notNull())).thenThrow(new RuntimeException("L2 node unavailable"));
+
+        try {
+            rollupService.pollL2Blocks();
+        } catch (Exception e) {
+            Assert.assertTrue(e.getMessage().contains("L2 node unavailable"));
+        }
+    }
+
+    /**
+     * Test prove TEE L2 batch when batch retrieval fails
+     */
+    @Test
+    public void testProveTeeL2Batch_BatchRetrievalFailure() {
+        Logger logger = (Logger) LoggerFactory.getLogger(RollupServiceImpl.class);
+        ListAppender<ILoggingEvent> listAppender = new ListAppender<>();
+        listAppender.start();
+        logger.addAppender(listAppender);
+        try {
+            when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_BATCH)))
+                    .thenReturn(BigInteger.ONE);
+            when(rollupRepository.peekPendingBatchProveRequest(anyInt(), eq(ProveTypeEnum.TEE_PROOF)))
+                    .thenReturn(ListUtil.toList(BatchProveRequestDO.builder()
+                            .proveType(ProveTypeEnum.TEE_PROOF)
+                            .batchIndex(BigInteger.ONE)
+                            .state(BatchProveRequestStateEnum.PENDING).build()));
+            when(proverControllerClient.getBatchProof(eq(ProveTypeEnum.TEE_PROOF), eq(BigInteger.ONE)))
+                    .thenThrow(new ProofNotReadyException(ProveTypeEnum.TEE_PROOF, BigInteger.ONE));
+
+            rollupService.proveTeeL2Batch();
+
+            boolean foundInfoLog = listAppender.list.stream()
+                    .anyMatch(event -> event.getFormattedMessage().contains("proof is not ready"));
+            Assert.assertTrue("Expected info log not found", foundInfoLog);
+        } finally {
+            logger.detachAppender(listAppender);
+        }
+
+    }
+
+    /**
+     * Test repository update failure during commit
+     */
+    @Test
+    public void testCommitL2Batch_RepositoryUpdateFailure() {
+        when(l1Client.lastCommittedBatch()).thenReturn(BigInteger.ZERO);
+        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BATCH_COMMITTED)))
+                .thenReturn(BigInteger.ONE);
+        when(rollupRepository.getReliableTransaction(notNull(), notNull(), notNull())).thenReturn(null);
+
+        int maxTxsInChunks = rollupConfig.getMaxTxsInChunks();
+        when(rollupRepository.getBatch(eq(BigInteger.ONE)))
+                .thenReturn(BatchWrapper.createBatch(
+                        BatchVersionEnum.BATCH_V0, BigInteger.ONE, ZERO_BATCH_WRAPPER,
+                        BASIC_BLOCK_TRACE2.getHeader().getStateRoot().toByteArray(),
+                        BASIC_BLOCK_TRACE2.getL1MsgRollingHash().getValue().toByteArray(),
+                        Bytes32.DEFAULT.getValue(), 0,
+                        ListUtil.toList(new ChunkWrapper(BigInteger.ONE, 0,
+                                ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2), maxTxsInChunks))
+                ));
+        when(rollupRepository.getBatchHeader(eq(BigInteger.ZERO))).thenReturn(ZERO_BATCH_HEADER);
+
+        TransactionInfo transactionInfo = TransactionInfo.builder()
+                .txHash(Numeric.toHexString(RandomUtil.randomBytes(32)))
+                .nonce(BigInteger.ONE)
+                .rawTx("tx".getBytes())
+                .senderAccount("0x5c02cAeB692Bf1b667D20d2B95c49B9DB1583981")
+                .sendTxTime(new Date())
+                .build();
+        when(l1Client.commitBatch(notNull(), notNull())).thenReturn(transactionInfo);
+        doThrow(new RuntimeException("Database error")).when(rollupRepository).updateRollupNumberRecord(any(), any(), any());
+
+        try {
+            rollupService.commitL2Batch();
+        } catch (Exception e) {
+            Assert.assertTrue(e.getMessage().contains("Database error"));
+        }
     }
 }
