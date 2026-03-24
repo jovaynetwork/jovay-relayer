@@ -1,0 +1,18 @@
+FROM eclipse-temurin:21-jre AS base
+
+ENV TZ=Asia/Shanghai
+ENV LANG=en_US.UTF-8
+ENV RELAYER_HOME=/query-service
+
+RUN ln -fs /usr/share/zoneinfo/${TZ} /etc/localtime \
+    && echo ${TZ} > /etc/timezone \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+       tini haveged openssl gettext-base jq supervisor netcat-openbsd \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /query-service /etc/supervisord.d
+
+ADD query-service.tar.gz /
+
+ENTRYPOINT ["tini", "--", "/query-service/bin/entrypoint.sh"]

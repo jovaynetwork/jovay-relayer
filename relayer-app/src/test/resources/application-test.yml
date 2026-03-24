@@ -1,0 +1,101 @@
+spring:
+  application:
+    name: l2-relayer
+  datasource:
+    driver-class-name: org.h2.Driver
+    url: jdbc:h2:mem:l2relayer-${random.uuid};DB_CLOSE_DELAY=-1;MODE=MySQL;IGNORECASE=TRUE;LOCK_TIMEOUT=10000
+    password: 123
+    username: root
+  data:
+    redis:
+      host: localhost
+      port: 16379
+  flyway:
+    locations: classpath:migration
+logging:
+  file:
+    path: log
+l2-relayer:
+  rollup:
+    specs:
+      network: ${ROLLUP_SPECS_NETWORK:mainnet}
+      private-net:
+        specs-file: ${ROLLUP_SPECS_PRIVATE_NET_FILE:null}
+  l1-client:
+    gas-price-provider-conf:
+      persist-interval: 3
+    rpc-url: "http://localhost:18100"
+    rollup-contract: "0x430269768825168b3ca3f4f0283595b7ab00bcee"
+    mailbox-contract: "0x430269768825168b3ca3f4f0283595b7ab00bcee"
+    nonce-policy: FAST
+  l2-client:
+    rpc-url: "http://localhost:18100"
+    coinbase-contract: "0x0"
+    gas-oracle-contract: "0x0"
+  server:
+    admin:
+      port: ${random.int(7088,17088)}
+  metrics:
+    blockchain:
+      acc-balance-monitor:
+        switch: true
+  alarm:
+    rollup:
+      switch: true
+  tasks:
+    batch-commit:
+      batch-commit-windows-length: 4
+    reliable-tx:
+      retry-limit: 1
+grpc:
+  client:
+    prover-client:
+      address: "static://localhost:9090"
+      negotiation-type: plaintext
+    tracer-client:
+      address: "static://localhost:5000"
+      negotiation-type: plaintext
+jovay:
+  sign-service:
+    l1LegacyPoolTxSignService:
+      type: ${L1_LEGACY_POOL_TX_SIGN_SERVICE_TYPE:web3j_native}
+      web3j-native:
+        private-key: ${L1_CLIENT_LEGACY_POOL_TX_PRIVATE_KEY:${random.value}${random.value}}
+      kms:
+        endpoint: ${L1_CLIENT_LEGACY_POOL_KMS_ENDPOINT:}
+        access-key-id: ${L1_CLIENT_LEGACY_POOL_KMS_ACCESS_KEY_ID:}
+        access-key-secret: ${L1_CLIENT_LEGACY_POOL_KMS_ACCESS_KEY_SECRET:}
+        private-key-id: ${L1_CLIENT_LEGACY_POOL_KMS_PRIVATE_KEY_ID:}
+        public-key: ${L1_CLIENT_LEGACY_POOL_KMS_PUBLIC_KEY:}
+        private-key-version-id: ${L1_CLIENT_LEGACY_POOL_KMS_PRIVATE_KEY_VERSION_ID:}
+        ca: | 
+          ${L1_CLIENT_LEGACY_POOL_KMS_CA:}
+    l1BlobPoolTxSignService:
+      type: ${L1_BLOB_POOL_TX_SIGN_SERVICE_TYPE:web3j_native}
+      web3j-native:
+        private-key: ${L1_CLIENT_BLOB_POOL_TX_PRIVATE_KEY:${random.value}${random.value}}
+      kms:
+        endpoint: ${L1_CLIENT_BLOB_POOL_KMS_ENDPOINT:}
+        access-key-id: ${L1_CLIENT_BLOB_POOL_KMS_ACCESS_KEY_ID:}
+        access-key-secret: ${L1_CLIENT_BLOB_POOL_KMS_ACCESS_KEY_SECRET:}
+        private-key-id: ${L1_CLIENT_BLOB_POOL_KMS_PRIVATE_KEY_ID:}
+        public-key: ${L1_CLIENT_BLOB_POOL_KMS_PUBLIC_KEY:}
+        private-key-version-id: ${L1_CLIENT_BLOB_POOL_KMS_PRIVATE_KEY_VERSION_ID:}
+        ca: |
+          ${L1_CLIENT_BLOB_POOL_KMS_CA:}
+    l2TxSignService:
+      type: ${L2_TX_SIGN_SERVICE_TYPE:web3j_native}
+      web3j-native:
+        private-key: ${L2_CLIENT_PRIVATE_KEY:${random.value}${random.value}}
+      kms:
+        endpoint: ${L2_CLIENT_KMS_ENDPOINT:}
+        access-key-id: ${L2_CLIENT_KMS_ACCESS_KEY_ID:}
+        access-key-secret: ${L2_CLIENT_KMS_ACCESS_KEY_SECRET:}
+        private-key-id: ${L2_CLIENT_KMS_PRIVATE_KEY_ID:}
+        private-key-version-id: ${L2_CLIENT_KMS_PRIVATE_KEY_VERSION_ID:}
+        public-key: ${L2_CLIENT_KMS_PUBLIC_KEY:}
+        ca: |
+          ${L2_CLIENT_KMS_CA:}
+jasypt:
+  encryptor:
+    password: ${JASYPT_PASSWD:}

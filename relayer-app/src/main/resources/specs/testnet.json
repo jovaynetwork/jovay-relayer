@@ -1,0 +1,16 @@
+{
+  "network": "testnet",
+  "layer2_chain_id": "2019775",
+  "layer1_chain_id": "11155111",
+  "forks": {
+    "1": {
+      "batch_version": 0
+    },
+    "1758327170000": {
+      "batch_version": 1
+    },
+    "1767153600000": {
+      "batch_version": 2
+    }
+  }
+}

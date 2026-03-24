@@ -1,19 +1,57 @@
+/*
+ * Copyright 2026 Ant Group
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.alipay.antchain.l2.relayer.commons.utils;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
+import java.security.KeyFactory;
+import java.security.KeyPair;
+import java.security.Security;
+import java.security.interfaces.ECPublicKey;
+import java.security.spec.ECPublicKeySpec;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import cn.hutool.core.lang.Assert;
 import cn.hutool.core.util.HexUtil;
 import cn.hutool.core.util.StrUtil;
+import cn.hutool.crypto.KeyUtil;
+import cn.hutool.crypto.PemUtil;
+import cn.hutool.jwt.signers.AlgorithmUtil;
 import com.alipay.antchain.l2.relayer.commons.l2basic.BlockContext;
 import com.alipay.antchain.l2.trace.*;
-import org.web3j.crypto.AccessListObject;
+import ethereum.ckzg4844.CKZG4844JNI;
+import lombok.NonNull;
+import lombok.SneakyThrows;
+import org.apache.tuweni.bytes.Bytes;
+import org.apache.tuweni.bytes.Bytes48;
+import org.bouncycastle.asn1.x509.SubjectPublicKeyInfo;
+import org.bouncycastle.jcajce.provider.asymmetric.ec.BCECPrivateKey;
+import org.bouncycastle.jcajce.provider.asymmetric.util.EC5Util;
+import org.bouncycastle.jce.ECNamedCurveTable;
+import org.bouncycastle.jce.provider.BouncyCastleProvider;
+import org.bouncycastle.jce.spec.ECParameterSpec;
+import org.bouncycastle.math.ec.ECCurve;
+import org.web3j.crypto.*;
 import org.web3j.crypto.Hash;
-import org.web3j.crypto.Sign;
-import org.web3j.crypto.SignedRawTransaction;
 import org.web3j.crypto.transaction.type.Transaction1559;
 import org.web3j.crypto.transaction.type.Transaction2930;
 import org.web3j.crypto.transaction.type.Transaction4844;
@@ -150,6 +188,53 @@ public class Utils {
         ));
     }
 
+    /**
+     * EOA钱包地址私钥转KeyPair
+     *
+     *
+     * @param privateKey
+     * @return
+     * @throws Exception
+     */
+    @SneakyThrows
+    public static KeyPair convertKeyPair(String privateKey) {
+        Security.addProvider(new BouncyCastleProvider());
+        // 获取 secp256k1 曲线参数
+        ECParameterSpec ecSpec = ECNamedCurveTable.getParameterSpec("secp256k1");
+
+        ECCurve ecCurve = ecSpec.getCurve();
+
+        var d = Numeric.toBigInt(privateKey);
+
+        var ecPrivateKeySpec = new java.security.spec.ECPrivateKeySpec(d, EC5Util.convertSpec(EC5Util.convertCurve(ecCurve, null), ecSpec));
+
+        KeyFactory keyFactory = KeyFactory.getInstance("ECDSA", "BC");
+
+        var priKey = keyFactory.generatePrivate(ecPrivateKeySpec);
+
+        var publicKeyPoint = Sign.publicPointFromPrivate(((BCECPrivateKey) priKey).getD());
+        java.security.spec.ECPublicKeySpec publicKeySpec = new ECPublicKeySpec(EC5Util.convertPoint(publicKeyPoint), ecPrivateKeySpec.getParams());
+        var pubKey = keyFactory.generatePublic(publicKeySpec);
+
+        return new KeyPair(pubKey, priKey);
+    }
+
+    @SneakyThrows
+    public static String convertPublicKeyToEthAddress(String pemStr) {
+        return Numeric.prependHexPrefix(Keys.getAddress(getECPubkeyPoint(pemStr)));
+    }
+
+    public static BigInteger getECPubkeyPoint(@NonNull String pubkeyPem) throws IOException {
+        var subjectPublicKeyInfo = SubjectPublicKeyInfo.getInstance(PemUtil.readPem(new ByteArrayInputStream(pubkeyPem.getBytes())));
+        var pubKey = KeyUtil.generatePublicKey(
+                AlgorithmUtil.getAlgorithm(subjectPublicKeyInfo.getAlgorithm().getAlgorithm().getId()),
+                subjectPublicKeyInfo.getEncoded()
+        );
+        var x = ((ECPublicKey) pubKey).getW().getAffineX();
+        var y = ((ECPublicKey) pubKey).getW().getAffineY();
+        return x.shiftLeft(256).add(y);
+    }
+
     private static Sign.SignatureData getSignatureData(long v, U256 r, U256 s) {
         Sign.SignatureData signatureData;
         if (v == 0) {
@@ -163,5 +248,15 @@ public class Utils {
             signatureData = new Sign.SignatureData(BigInteger.valueOf(v).toByteArray(), r.getValue().toByteArray(), s.getValue().toByteArray());
         }
         return signatureData;
+    }
+
+    public static List<Bytes> getCellProofs(Blob blobData) {
+        var cellProofs = CKZG4844JNI.computeCellsAndKzgProofs(blobData.getData().toArray()).getProofs();
+        Assert.isTrue(cellProofs.length == 128 * 48);
+        var result = new ArrayList<Bytes>();
+        for (int i = 0; i < cellProofs.length; i += 48) {
+            result.add(Bytes48.wrap(Arrays.copyOfRange(cellProofs, i, i + 48)));
+        }
+        return result;
     }
 }

@@ -1,0 +1,432 @@
+# ============================================================================
+# Spring Boot Application Configuration - Production Profile
+# ============================================================================
+# This configuration file contains production settings for the L2 Relayer application.
+# Environment variables can be used to override default values using ${VAR_NAME:default_value} syntax.
+
+# ----------------------------------------------------------------------------
+# Spring Framework Configuration
+# ----------------------------------------------------------------------------
+spring:
+  application:
+    # Application name identifier
+    name: l2-relayer
+
+  # Database configuration (MySQL)
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    # MySQL connection URL with timezone and batch statement optimization
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DB_NAME:l2relayer}?serverTimezone=Asia/Shanghai&rewriteBatchedStatements=true&createDatabaseIfNotExist=true
+    password: ${MYSQL_USER_PASSWORD:YOUR_PWD}
+    username: ${MYSQL_USER_NAME:root}
+
+  # Redis configuration for caching and distributed locking
+  data:
+    redis:
+      host: ${REDIS_URL:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_USER_PASSWORD:YOUR_PWD}
+      database: ${REDIS_DATABASE:0}
+# ----------------------------------------------------------------------------
+# Logging Configuration
+# ----------------------------------------------------------------------------
+logging:
+  file:
+    # Log file output directory
+    path: ./log
+
+# ============================================================================
+# L2 Relayer Application Configuration
+# ============================================================================
+l2-relayer:
+  # ----------------------------------------------------------------------------
+  # Cache Configuration
+  # ----------------------------------------------------------------------------
+  cache:
+    # L2 block trace cache for current chunk processing
+    l2-block-trace-for-curr-chunk:
+      # Maximum number of block traces to cache (default: 1300)
+      capacity: ${L2_BLOCK_TRACE_CACHE_FOR_CURR_CHUNK_CAPACITY:1300}
+
+  # ----------------------------------------------------------------------------
+  # Rollup Configuration
+  # ----------------------------------------------------------------------------
+  rollup:
+    # Basic rollup parameters
+    config:
+      # Recommended gas limit per chunk (default: 23M gas)
+      gas-per-chunk-recommended: ${ROLLUP_CONFIG_GAS_PER_CHUNK_RECOMMENDED:23000000}
+      # Maximum memory for serialized chunks in growing batch (default: 1GB)
+      max-chunks-memory-used: ${ROLLUP_CONFIG_MAX_CHUNKS_MEMORY_USED:1073741824}
+
+    # Network specifications
+    specs:
+      # Network type: mainnet, testnet, or PRIVATE_NET
+      network: ${ROLLUP_SPECS_NETWORK:mainnet}
+      # Private network configuration (only used when network=PRIVATE_NET)
+      private-net:
+        specs-file: ${ROLLUP_SPECS_PRIVATE_NET_FILE:null}
+    # Economic strategy configuration for cost optimization
+    economic-strategy-conf:
+      # Enable/disable economic strategy (default: true)
+      switch: ${ROLLUP_ECONOMIC_STRATEGY_CONF_SWITCH:true}
+      # Mid-level EIP-1559 gas price limit in wei (default: 3 Gwei)
+      default-mid-eip1559-price-limit: ${ROLLUP_ECONOMIC_STRATEGY_CONF_DEFAULT_MID_EIP1559_PRICE_LIMIT:3000000000}
+      # High-level EIP-1559 gas price limit in wei (default: 8 Gwei)
+      default-high-eip1559-price-limit: ${ROLLUP_ECONOMIC_STRATEGY_CONF_DEFAULT_HIGH_EIP1559_PRICE_LIMIT:8000000000}
+      # Maximum number of pending batches before throttling (default: 12)
+      default-max-pending-batch-count: ${ROLLUP_ECONOMIC_STRATEGY_CONF_DEFAULT_MAX_PENDING_BATCH_COUNT:12}
+      # Maximum number of pending proofs before throttling (default: 12)
+      default-max-pending-proof-count: ${ROLLUP_ECONOMIC_STRATEGY_CONF_DEFAULT_MAX_PENDING_PROOF_COUNT:12}
+      # Maximum batch waiting time in seconds (default: 43200s = 12 hours)
+      default-max-batch-waiting-time: ${ROLLUP_ECONOMIC_STRATEGY_CONF_DEFAULT_MAX_BATCH_WAITING_TIME:43200}
+      # Maximum proof waiting time in seconds (default: 43200s = 12 hours)
+      default-max-proof-waiting-time: ${ROLLUP_ECONOMIC_STRATEGY_CONF_DEFAULT_MAX_PROOF_WAITING_TIME:43200}
+  # ----------------------------------------------------------------------------
+  # Alarm Configuration
+  # ----------------------------------------------------------------------------
+  alarm:
+    # Rollup process monitoring and alerting thresholds
+    rollup:
+      # Batch delay alarm threshold in milliseconds (default: 10800000ms = 3 hours)
+      batch-delayed-threshold: ${ROLLUP_ALARM_BATCH_DELAYED_THRESHOLD:10800000}
+      # Chunk delay alarm threshold in milliseconds (default: 3600000ms = 1 hour and 1 minute)
+      chunk-delayed-threshold: ${ROLLUP_ALARM_CHUNK_DELAYED_THRESHOLD:3660000}
+      # TEE proof delay alarm threshold in milliseconds (default: 300000ms = 5 minutes)
+      tee-proof-delayed-threshold: ${ROLLUP_ALARM_TEE_PROOF_DELAYED_THRESHOLD:300000}
+      # ZK proof delay alarm threshold in milliseconds (default: 1800000ms = 30 minutes)
+      zk-proof-delayed-threshold: ${ROLLUP_ALARM_ZK_PROOF_DELAYED_THRESHOLD:1800000}
+      # L2 block delay alarm threshold in milliseconds (default: 300000ms = 5 minutes)
+      l2-block-delayed-threshold: ${ROLLUP_ALARM_L2_BLOCK_DELAYED_THRESHOLD:300000}
+      # Transaction pending time alarm threshold in milliseconds (default: 1800000ms = 30 minutes)
+      tx-over-pending-threshold: ${ROLLUP_ALARM_TX_OVER_PENDING_THRESHOLD:1800000}
+      # Maximum allowed gap between batch and proof commit (default: 20 batches)
+      max-gap-between-batch-and-proof-commit: ${ROLLUP_ALARM_MAX_GAP_BETWEEN_BATCH_AND_PROOF_COMMIT:20}
+      # Circuit breaker threshold in milliseconds (default: 18000000ms = 5 hours)
+      circuit-breaker-threshold: ${ROLLUP_ALARM_CIRCUIT_BREAKER_THRESHOLD:18000000}
+      # Maximum block gap between tracer and sequencer (default: 10 blocks)
+      max-block-gap-between-tracer-and-seq: ${ROLLUP_ALARM_MAX_BLOCK_GAP_BETWEEN_TRACER_AND_SEQ:10}
+      # Enable/disable alarm system (default: true)
+      switch: ${ROLLUP_ALARM_SWITCH:true}
+  # ----------------------------------------------------------------------------
+  # Metrics and Monitoring Configuration
+  # ----------------------------------------------------------------------------
+  metrics:
+    # Self-reporting metrics configuration
+    self-report:
+      # Metrics reporting endpoint URL
+      url: ${SELF_REPORT_URL:}
+      # Enable/disable self-reporting (default: false)
+      switch: ${SELF_REPORT_SWITCH:false}
+
+    # Blockchain metrics monitoring
+    blockchain:
+      # Account balance monitoring
+      acc-balance-monitor:
+        # Enable/disable balance monitoring (default: false)
+        switch: ${ACC_BALANCE_MONITOR_SWITCH:false}
+        # L1 balance check interval in milliseconds (default: 10000ms = 10 seconds)
+        l1-interval: ${ACC_BALANCE_MONITOR_INTERVAL:10000}
+        # L1 balance alarm threshold in ETH (default: 3.0 ETH)
+        l1-balance-threshold: ${ACC_BALANCE_MONITOR_BALANCE_THRESHOLD:3.0}
+
+  # ----------------------------------------------------------------------------
+  # Engine Configuration
+  # ----------------------------------------------------------------------------
+  engine:
+    # Graceful shutdown configuration
+    shutdown:
+      # Maximum time to wait for tasks to complete during shutdown in milliseconds (default: 60000ms = 1 minute)
+      await-terminate-time: ${ENGINE_SHUTDOWN_AWAIT_TERMINATE_TIME:60000}
+      batch-commit:
+        await-terminate-time: ${ENGINE_SHUTDOWN_BATCH_COMMIT_AWAIT_TERMINATE_TIME:-1}
+      proof-commit:
+        await-terminate-time: ${ENGINE_SHUTDOWN_PROOF_COMMIT_AWAIT_TERMINATE_TIME:-1}
+      reliable-tx:
+        await-terminate-time: ${ENGINE_SHUTDOWN_RELIABLE_TX_AWAIT_TERMINATE_TIME:-1}
+    # Task scheduling configuration
+    schedule:
+      # Duty cycle scheduling
+      duty:
+        # Duty cycle period in milliseconds (default: 100ms)
+        period: ${DUTY_PERIOD:100}
+  # ----------------------------------------------------------------------------
+  # Layer 1 Client Configuration
+  # ----------------------------------------------------------------------------
+  l1-client:
+    # Ethereum network fork configuration
+    eth-network-fork:
+      # Configuration file for unknown/custom networks
+      unknown-network-config-file: ${ETH_NETWORK_FORK_UNKNOWN_NETWORK_CONFIG_FILE:null}
+
+    # HTTP client settings
+    http-client:
+      # HTTP protocols to use (default: HTTP_1_1)
+      protocols: ${L1_CLIENT_HTTP_CLIENT_PROTOCOLS:HTTP_1_1}
+      # Write timeout in seconds (default: 60s)
+      write-timeout: ${L1_CLIENT_HTTP_CLIENT_WRITE_TIMEOUT:60}
+      # Read timeout in seconds (default: 60s)
+      read-timeout: ${L1_CLIENT_HTTP_CLIENT_READ_TIMEOUT:60}
+
+    # Gas price configuration
+    # Gas price policy: FROM_API (dynamic) or STATIC (fixed)
+    gas-price-policy: ${L1_CLIENT_GAS_PRICE_POLICY:FROM_API}
+    # Static gas price in wei (default: 4.1 Gwei) - used when policy is STATIC
+    static-gas-price: ${L1_CLIENT_STATIC_GAS_PRICE:4100000000}
+
+    # Gas limit configuration
+    # Gas limit policy: STATIC (fixed) or dynamic
+    gas-limit-policy: ${L1_CLIENT_GAS_LIMIT_POLICY:STATIC}
+    # Static gas limit (default: 7.2M gas) - used when policy is STATIC
+    static-gas-limit: ${L1_CLIENT_STATIC_GAS_LIMIT:7200000}
+
+    # Transaction speed-up configuration
+    # Maximum blob fee for transaction speed-up in wei (default: 1000 Gwei)
+    tx-speedup-blob-fee-limit: ${L1_CLIENT_TX_SPEEDUP_BLOB_FEE_LIMIT:1000000000000}
+    # Maximum priority fee for transaction speed-up in wei (default: 100 Gwei)
+    tx-speedup-priority-fee-limit: ${L1_CLIENT_TX_SPEEDUP_PRIORITY_FEE_LIMIT:100000000000}
+    # Blob price bump multiplier for speed-up (default: 1)
+    tx-speedup-blob-price-bump: ${L1_CLIENT_TX_SPEEDUP_BLOB_PRICE_BUMP:1}
+    # Force transaction speed-up time limit in milliseconds (default: 900000ms = 15 minutes)
+    force-tx-speedup-time-limit: ${L1_CLIENT_FORCE_TX_SPEEDUP_TIME_LIMIT:900000}
+
+    # Extra gas buffer to add to gas estimates (default: 400000 gas)
+    extra-gas: ${L1_CLIENT_EXTRA_GAS:400000}
+
+    # L1 network connection and contract addresses
+    # L1 RPC endpoint URL (required)
+    rpc-url: ${L1_RPC_URL}
+    # Rollup contract address on L1 (required)
+    rollup-contract: ${L1_ROLLUP_CONTRACT}
+    # Mailbox contract address on L1 (required)
+    mailbox-contract: ${L1_MAILBOX_CONTRACT}
+
+    # Nonce management policy: NORMAL (sequential) or FAST (optimized)
+    nonce-policy: FAST
+
+    # Transaction traffic limits
+    # Maximum concurrent blob pool transactions (default: 16, -1 for unlimited)
+    blob-pool-tx-traffic-limit: ${L1_BLOB_POOL_TX_TRAFFIC_LIMIT:16}
+    # Maximum concurrent legacy pool transactions (default: -1 for unlimited)
+    legacy-pool-tx-traffic-limit: ${L1_LEGACY_POOL_TX_TRAFFIC_LIMIT:-1}
+  # ----------------------------------------------------------------------------
+  # Layer 2 Client Configuration
+  # ----------------------------------------------------------------------------
+  l2-client:
+    # L2 RPC endpoint URL (required)
+    rpc-url: ${L2_RPC_URL}
+    # Coinbase proxy contract address on L2 (default: 0x7100...0000)
+    coinbase-contract: ${L2_COINBASE_PROXY_CONTRACT:0x7100000000000000000000000000000000000000}
+    # Gas oracle contract address on L2 (default: 0x8100...0000)
+    gas-oracle-contract: ${L2_GAS_ORACLE_CONTRACT:0x8100000000000000000000000000000000000000}
+    # Extra gas buffer to add to L2 gas estimates (default: 500000 gas)
+    extra-gas: ${L2_CLIENT_EXTRA_GAS:500000}
+
+  # ----------------------------------------------------------------------------
+  # Tracer Client Configuration
+  # ----------------------------------------------------------------------------
+  tracer-client:
+    # Request retry configuration with exponential backoff
+    req-retry:
+      # Maximum number of retry attempts (default: 10)
+      max-attempts: ${TRACER_CLIENT_REQ_RETRY_MAX_ATTEMPTS:10}
+      # Initial backoff delay in milliseconds (default: 5ms)
+      backoff-delay: ${TRACER_CLIENT_REQ_RETRY_BACKOFF_DELAY:5}
+      # Backoff multiplier for exponential backoff (default: 10x)
+      backoff-multiplier: ${TRACER_CLIENT_REQ_RETRY_BACKOFF_MULTIPLIER:10}
+      # Maximum backoff delay in milliseconds (default: 500ms)
+      backoff-max-delay: ${TRACER_CLIENT_REQ_RETRY_BACKOFF_MAX_DELAY:500}
+  # ----------------------------------------------------------------------------
+  # Task Configuration
+  # ----------------------------------------------------------------------------
+  tasks:
+    # Cache TTL (Time-To-Live) settings
+    cache:
+      # L2 block trace cache TTL in milliseconds (default: 4200000ms = 70 minutes)
+      l2-block-trace-ttl: ${L2_BLOCK_TRACE_CACHE_TTL:4200000}
+      # L2 chunk cache TTL in milliseconds (default: 4200000ms = 70 minutes)
+      l2-chunk-ttl: ${L2_CHUNK_CACHE_TTL:4200000}
+      # L2 batch ETH blobs cache TTL in milliseconds (default: 300000ms = 5 minutes)
+      l2-batch-eth-blobs-ttl: ${L2_BATCH_ETH_BLOBS_CACHE_TTL:300000}
+
+    # Batch commit task configuration
+    batch-commit:
+      # Batch commit sliding window length (default: 12 batches)
+      batch-commit-windows-length: ${BATCH_COMMIT_WINDOWS_LENGTH:12}
+
+    # Block polling task configuration
+    block-polling:
+      # L2 block polling settings
+      l2:
+        # Growing batch chunks memory cache configuration
+        growing-batch-chunks-mem-cache:
+          # Async thread pool core size (default: 4 threads)
+          async-core-size: ${L2_BLOCK_POLLING_GROWING_BATCH_CHUNKS_MEM_CACHE_ASYNC_CORE_SIZE:4}
+        # Block retrieval timeout in seconds (default: 10s)
+        get-block-timeout: ${L2_BLOCK_POLLING_GET_BLOCK_TIMEOUT:10}
+        # Block consistency level: FINALIZED, SAFE, or LATEST (default: FINALIZED)
+        policy: ${L2_CONSISTENCY_LEVEL:FINALIZED}
+
+      # L1 block polling settings
+      l1:
+        # Maximum number of blocks to poll at once (default: 32 blocks)
+        max-poling-block-size: ${L1_MAX_POLLING_BLOCK_SIZE:32}
+        # Block consistency level: FINALIZED, SAFE, or LATEST (default: FINALIZED)
+        policy: ${L1_CONSISTENCY_LEVEL:FINALIZED}
+
+    # Proof commit task configuration
+    proof-commit:
+      # Rollup query level: LATEST, FINALIZED, or SAFE (default: LATEST)
+      rollup-query-level: ${PROOF_COMMIT_ROLLUP_QUERY_LEVEL:LATEST}
+      # Height backoff for rollup queries in blocks (default: 0)
+      rollup-query-height-backoff: ${PROOF_COMMIT_ROLLUP_QUERY_HEIGHT_BACKOFF:0}
+
+    # Batch prove task configuration
+    batch-prove:
+      # Proof request types: ALL, TEE_ONLY, ZK_ONLY (default: ALL)
+      req-types: ${BATCH_PROVE_REQ_TYPES:ALL}
+
+    # Reliable transaction task configuration
+    reliable-tx:
+      # Transaction timeout limit in seconds (default: 600s = 10 minutes)
+      tx-timeout-limit: ${RELIABLE_TX_TX_TIMEOUT_LIMIT:600}
+      # Number of transactions to process per batch (default: 32)
+      process-batch-size: ${RELIABLE_TX_PROCESS_BATCH_SIZE:32}
+      # Maximum number of retries for failed transactions (default: 1)
+      retry-limit: ${RELIABLE_TX_RETRY_LIMIT:1}
+
+    # Oracle gas feed task configuration
+    oracle-gas-feed:
+      # Maximum number of oracle requests per round (default: 10)
+      oracle-req-number-per-round-limit: ${ORACLE_GAS_FEED_ORACLE_REQ_NUMBER_PER_ROUND_LIMIT:10}
+      # Base fee update threshold (default: 0 - always update)
+      oracle-base-fee-update-threshold: ${ORACLE_GAS_FEED_ORACLE_BASE_FEE_UPDATE_THRESHOLD:0}
+      # Base proof type: TEE_PROOF or ZK_PROOF (default: TEE_PROOF)
+      base-proof: ${ORACLE_GAS_FEED_ORACLE_BASE_PROOF:TEE_PROOF}
+# ============================================================================
+# gRPC Client Configuration
+# ============================================================================
+grpc:
+  client:
+    # Prover controller client configuration
+    prover-client:
+      # Prover controller endpoints (comma-separated if multiple)
+      address: "static://${PROVER_CONTROLLER_ENDPOINTS}"
+      # Connection negotiation type: plaintext (no TLS) or tls
+      negotiation-type: plaintext
+
+    # Tracer client configuration
+    tracer-client:
+      # Tracer service endpoint
+      address: "static://${TRACER_IP}:${TRACER_PORT:5000}"
+      # Connection negotiation type: plaintext (no TLS) or tls
+      negotiation-type: plaintext
+# ============================================================================
+# Jovay Transaction Signing Service Configuration
+# ============================================================================
+# Supports two signing methods:
+# 1. web3j_native: Direct private key signing (for development/testing)
+# 2. kms: Key Management Service signing (for production - more secure)
+jovay:
+  sign-service:
+    # ----------------------------------------------------------------------------
+    # L1 Legacy Pool Transaction Signing Service
+    # Used for non-blob transactions on L1 (e.g., finalization transactions)
+    # ----------------------------------------------------------------------------
+    l1LegacyPoolTxSignService:
+      # Signing service type: web3j_native or kms (default: web3j_native)
+      type: ${L1_LEGACY_POOL_TX_SIGN_SERVICE_TYPE:web3j_native}
+
+      # Web3j native signing configuration (direct private key)
+      web3j-native:
+        # Private key in hex format (without 0x prefix)
+        private-key: ${L1_CLIENT_LEGACY_POOL_TX_PRIVATE_KEY:}
+
+      # KMS signing configuration (recommended for production)
+      kms:
+        # KMS service endpoint
+        endpoint: ${L1_CLIENT_LEGACY_POOL_KMS_ENDPOINT:}
+        # KMS access key ID
+        access-key-id: ${L1_CLIENT_LEGACY_POOL_KMS_ACCESS_KEY_ID:}
+        # KMS access key secret
+        access-key-secret: ${L1_CLIENT_LEGACY_POOL_KMS_ACCESS_KEY_SECRET:}
+        # KMS private key identifier
+        private-key-id: ${L1_CLIENT_LEGACY_POOL_KMS_PRIVATE_KEY_ID:}
+        # KMS private key version identifier
+        private-key-version-id: ${L1_CLIENT_LEGACY_POOL_KMS_PRIVATE_KEY_VERSION_ID:}
+        # Public key corresponding to the private key
+        public-key: ${L1_CLIENT_LEGACY_POOL_KMS_PUBLIC_KEY:}
+        # Certificate authority for KMS connection
+        ca: |
+          ${L1_CLIENT_LEGACY_POOL_KMS_CA:}
+
+    # ----------------------------------------------------------------------------
+    # L1 Blob Pool Transaction Signing Service
+    # Used for EIP-4844 blob transactions on L1 (batch commitments)
+    # ----------------------------------------------------------------------------
+    l1BlobPoolTxSignService:
+      # Signing service type: web3j_native or kms (default: web3j_native)
+      type: ${L1_BLOB_POOL_TX_SIGN_SERVICE_TYPE:web3j_native}
+
+      # Web3j native signing configuration (direct private key)
+      web3j-native:
+        # Private key in hex format (without 0x prefix)
+        private-key: ${L1_CLIENT_BLOB_POOL_TX_PRIVATE_KEY:}
+
+      # KMS signing configuration (recommended for production)
+      kms:
+        # KMS service endpoint
+        endpoint: ${L1_CLIENT_BLOB_POOL_KMS_ENDPOINT:}
+        # KMS access key ID
+        access-key-id: ${L1_CLIENT_BLOB_POOL_KMS_ACCESS_KEY_ID:}
+        # KMS access key secret
+        access-key-secret: ${L1_CLIENT_BLOB_POOL_KMS_ACCESS_KEY_SECRET:}
+        # KMS private key identifier
+        private-key-id: ${L1_CLIENT_BLOB_POOL_KMS_PRIVATE_KEY_ID:}
+        # KMS private key version identifier
+        private-key-version-id: ${L1_CLIENT_BLOB_POOL_KMS_PRIVATE_KEY_VERSION_ID:}
+        # Public key corresponding to the private key
+        public-key: ${L1_CLIENT_BLOB_POOL_KMS_PUBLIC_KEY:}
+        # Certificate authority for KMS connection
+        ca: |
+          ${L1_CLIENT_BLOB_POOL_KMS_CA:}
+
+    # ----------------------------------------------------------------------------
+    # L2 Transaction Signing Service
+    # Used for transactions on L2 (if needed)
+    # ----------------------------------------------------------------------------
+    l2TxSignService:
+      # Signing service type: web3j_native or kms (default: web3j_native)
+      type: ${L2_TX_SIGN_SERVICE_TYPE:web3j_native}
+
+      # Web3j native signing configuration (direct private key)
+      web3j-native:
+        # Private key in hex format (without 0x prefix)
+        private-key: ${L2_CLIENT_PRIVATE_KEY:}
+
+      # KMS signing configuration (recommended for production)
+      kms:
+        # KMS service endpoint
+        endpoint: ${L2_CLIENT_KMS_ENDPOINT:}
+        # KMS access key ID
+        access-key-id: ${L2_CLIENT_KMS_ACCESS_KEY_ID:}
+        # KMS access key secret
+        access-key-secret: ${L2_CLIENT_KMS_ACCESS_KEY_SECRET:}
+        # KMS private key identifier
+        private-key-id: ${L2_CLIENT_KMS_PRIVATE_KEY_ID:}
+        # KMS private key version identifier
+        private-key-version-id: ${L2_CLIENT_KMS_PRIVATE_KEY_VERSION_ID:}
+        # Public key corresponding to the private key
+        public-key: ${L2_CLIENT_KMS_PUBLIC_KEY:}
+        # Certificate authority for KMS connection
+        ca: |
+          ${L2_CLIENT_KMS_CA:}
+
+# ============================================================================
+# Jasypt Encryption Configuration
+# ============================================================================
+# Used for encrypting sensitive configuration values
+jasypt:
+  encryptor:
+    # Encryption password (keep this secure!)
+    password: ${JASYPT_PASSWD:}

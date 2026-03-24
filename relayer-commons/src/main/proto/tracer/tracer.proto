@@ -18,23 +18,33 @@ service TraceService {
   // basic traces stream rpc
   rpc FetchBasicTrace (BlockRange) returns (stream l2.trace.BasicBlockTrace) {}
 
+  // balance traces stream rpc
+  rpc FetchBalanceTrace (BlockRange) returns (stream l2.trace.BlockAddressBalances) {}
+
   // exec traces stream rpc
   rpc FetchExecTrace (BlockRange) returns (stream l2.trace.ExecBlockTrace) {}
 
   // get a basic traces
   rpc GetBasicTrace (GetBasicTraceRequest) returns (GetBasicTraceResponse) {}
 
+  // get a balance traces
+  rpc GetBalanceTrace (GetBalanceTraceRequest) returns (GetBalanceTraceResponse) {}
+
   // get a exec traces
   rpc GetExecTrace (GetExecTraceRequest) returns (GetExecTraceResponse) {}
 
   // notify proof commited
   rpc NotifyProofCommitted (NotifyProofCommittedRequest) returns (NotifyProofCommittedResponse) {}
+
+  // get latest traced(basic&balance) bn
+  rpc GetLatestProcessedBlock(GetLatestProcessedBlockRequest) returns (GetLatestProcessedBlockResponse) {}
 }
 
 // grpc define for admin service
 service AdminService {
   rpc GetInputTrace (GetInputTraceRequest) returns (GetInputTraceResponse) {}
   rpc GetBasicTrace (GetBasicTraceRequest) returns (GetBasicTraceResponse) {}
+  rpc GetBalanceTrace (GetBalanceTraceRequest) returns (GetBalanceTraceResponse) {}
   rpc GetExecTrace (GetExecTraceRequest) returns (GetExecTraceResponse) {}
   rpc GetMeta (GetMetaRequest) returns (GetMetaResponse) {}
 }
@@ -42,6 +52,7 @@ service AdminService {
 message SendBasicTraceRequest {
   l2.trace.BasicBlockTrace basic_trace = 1;
   uint64 block_number = 2;
+  bool init_flag  = 3;
 }
 
 message SendBasicTraceResponse {
@@ -82,6 +93,16 @@ message GetBasicTraceResponse {
   uint64 stable_block_number = 3;
 }
 
+message GetBalanceTraceRequest {
+  uint64 block_number = 1;
+}
+
+message GetBalanceTraceResponse {
+  l2.status.L2Status status = 1;
+  l2.trace.BlockAddressBalances balance_trace = 2;
+  uint64 stable_block_number = 3;
+}
+
 message GetExecTraceRequest {
   uint64 block_number = 1;
 }
@@ -115,4 +136,11 @@ message GetMetaResponse {
   uint64 stable_number = 3;
   uint64 basic_traced_number = 4;
   uint64 exec_traced_number = 5;
+}
+
+message GetLatestProcessedBlockRequest {
+}
+
+message GetLatestProcessedBlockResponse {
+  uint64 block_number = 1;
 }

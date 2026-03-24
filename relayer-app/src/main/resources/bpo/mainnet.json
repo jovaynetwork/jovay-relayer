@@ -1,0 +1,22 @@
+{
+  "1746612311000": {
+    "name": "Prague",
+    "blob_sidecar_version": 0,
+    "base_fee_update_fraction": 5007716
+  },
+  "1764798551000": {
+    "name": "Osaka",
+    "blob_sidecar_version": 1,
+    "base_fee_update_fraction": 5007716
+  },
+  "1765290071000": {
+    "name": "BPO1",
+    "blob_sidecar_version": 1,
+    "base_fee_update_fraction": 8346193
+  },
+  "1767747671000": {
+    "name": "BPO2",
+    "blob_sidecar_version": 1,
+    "base_fee_update_fraction": 11684671
+  }
+}

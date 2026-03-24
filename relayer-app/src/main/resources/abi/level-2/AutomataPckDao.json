@@ -1,0 +1,613 @@
+[
+  {
+    "type": "constructor",
+    "inputs": [
+      {
+        "name": "_storage",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "_p256",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "_pcs",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "_x509",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "_crl",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "P256_VERIFIER",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "PCK_KEY",
+    "inputs": [
+      {
+        "name": "qeidBytes",
+        "type": "bytes16",
+        "internalType": "bytes16"
+      },
+      {
+        "name": "pceidBytes",
+        "type": "bytes2",
+        "internalType": "bytes2"
+      },
+      {
+        "name": "tcbmBytes",
+        "type": "bytes18",
+        "internalType": "bytes18"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "key",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "pure"
+  },
+  {
+    "type": "function",
+    "name": "Pcs",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract PcsDao"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "TCB_MAPPING_KEY",
+    "inputs": [
+      {
+        "name": "qeid",
+        "type": "bytes16",
+        "internalType": "bytes16"
+      },
+      {
+        "name": "pceid",
+        "type": "bytes2",
+        "internalType": "bytes2"
+      },
+      {
+        "name": "platformCpuSvn",
+        "type": "bytes16",
+        "internalType": "bytes16"
+      },
+      {
+        "name": "platformPceSvn",
+        "type": "bytes2",
+        "internalType": "bytes2"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "key",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "pure"
+  },
+  {
+    "type": "function",
+    "name": "crlLib",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract X509CRLHelper"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getAttestedData",
+    "inputs": [
+      {
+        "name": "key",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "attestationData",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getCert",
+    "inputs": [
+      {
+        "name": "qeid",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "platformCpuSvn",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "platformPceSvn",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "pceid",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "pckCert",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getCerts",
+    "inputs": [
+      {
+        "name": "qeid",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "pceid",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "tcbms",
+        "type": "string[]",
+        "internalType": "string[]"
+      },
+      {
+        "name": "pckCerts",
+        "type": "bytes[]",
+        "internalType": "bytes[]"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getCollateralHash",
+    "inputs": [
+      {
+        "name": "key",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "collateralHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getCollateralValidity",
+    "inputs": [
+      {
+        "name": "key",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "notValidBefore",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "notValidAfter",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getPckCertChain",
+    "inputs": [
+      {
+        "name": "ca",
+        "type": "uint8",
+        "internalType": "enum CA"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "intermediateCert",
+        "type": "bytes",
+        "internalType": "bytes"
+      },
+      {
+        "name": "rootCert",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getPlatformTcbByIdAndSvns",
+    "inputs": [
+      {
+        "name": "qeid",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "pceid",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "platformCpuSvn",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "platformPceSvn",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "tcbm",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "pckLib",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract PCKHelper"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "resolver",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IDaoAttestationResolver"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "upsertPckCert",
+    "inputs": [
+      {
+        "name": "ca",
+        "type": "uint8",
+        "internalType": "enum CA"
+      },
+      {
+        "name": "qeid",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "pceid",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "tcbm",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "cert",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "attestationId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "upsertPlatformTcbs",
+    "inputs": [
+      {
+        "name": "qeid",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "pceid",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "platformCpuSvn",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "platformPceSvn",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "tcbm",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "x509",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "event",
+    "name": "UpsertPlatformTcb",
+    "inputs": [
+      {
+        "name": "qeid",
+        "type": "bytes16",
+        "indexed": true,
+        "internalType": "bytes16"
+      },
+      {
+        "name": "pceid",
+        "type": "bytes2",
+        "indexed": true,
+        "internalType": "bytes2"
+      },
+      {
+        "name": "platformCpuSvn",
+        "type": "bytes16",
+        "indexed": false,
+        "internalType": "bytes16"
+      },
+      {
+        "name": "platformPceSvn",
+        "type": "bytes2",
+        "indexed": false,
+        "internalType": "bytes2"
+      },
+      {
+        "name": "tcbm",
+        "type": "bytes18",
+        "indexed": false,
+        "internalType": "bytes18"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "UpsertedPckCollateral",
+    "inputs": [
+      {
+        "name": "ca",
+        "type": "uint8",
+        "indexed": true,
+        "internalType": "enum CA"
+      },
+      {
+        "name": "qeid",
+        "type": "bytes16",
+        "indexed": true,
+        "internalType": "bytes16"
+      },
+      {
+        "name": "pceid",
+        "type": "bytes2",
+        "indexed": true,
+        "internalType": "bytes2"
+      },
+      {
+        "name": "tcbm",
+        "type": "bytes18",
+        "indexed": false,
+        "internalType": "bytes18"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "Certificate_Expired",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "Certificate_Revoked",
+    "inputs": [
+      {
+        "name": "serialNum",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "Duplicate_Collateral",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "Expired_Certificates",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "Invalid_Issuer_Name",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "Invalid_PCK_CA",
+    "inputs": [
+      {
+        "name": "ca",
+        "type": "uint8",
+        "internalType": "enum CA"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "Invalid_Signature",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "Invalid_Subject_Name",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "Issuer_Expired",
+    "inputs": [
+      {
+        "name": "ca",
+        "type": "uint8",
+        "internalType": "enum CA"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "Issuer_Revoked",
+    "inputs": [
+      {
+        "name": "ca",
+        "type": "uint8",
+        "internalType": "enum CA"
+      },
+      {
+        "name": "serialNum",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "Missing_Issuer",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "Pck_Not_Found",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "Pck_Out_Of_Date",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "TCB_Mismatch",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "Unauthorized_Caller",
+    "inputs": [
+      {
+        "name": "caller",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  }
+]

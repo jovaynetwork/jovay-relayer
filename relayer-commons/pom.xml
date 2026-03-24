@@ -6,14 +6,14 @@
     <parent>
         <groupId>com.alipay.antchain.l2</groupId>
         <artifactId>l2-relayer</artifactId>
-        <version>0.7.0</version>
+        <version>0.11.0</version>
     </parent>
 
     <artifactId>relayer-commons</artifactId>
 
     <properties>
-        <maven.compiler.source>17</maven.compiler.source>
-        <maven.compiler.target>17</maven.compiler.target>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
@@ -42,6 +42,10 @@
                 <exclusion>
                     <groupId>commons-logging</groupId>
                     <artifactId>commons-logging</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.squareup.okhttp3</groupId>
+                    <artifactId>okhttp</artifactId>
                 </exclusion>
             </exclusions>
         </dependency>
@@ -77,6 +81,24 @@
         <dependency>
             <groupId>javax.annotation</groupId>
             <artifactId>javax.annotation-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>jakarta.annotation</groupId>
+            <artifactId>jakarta.annotation-api</artifactId>
+            <scope>compile</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.github.luben</groupId>
+            <artifactId>zstd-jni</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.esaulpaugh</groupId>
+            <artifactId>headlong</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 
@@ -119,6 +141,32 @@
                         </goals>
                     </execution>
                 </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.web3j</groupId>
+                <artifactId>web3j-maven-plugin</artifactId>
+                <version>4.13.0</version>
+                <configuration>
+                    <packageName>com.alipay.antchain.l2.relayer.commons.abi</packageName>
+                    <sourceDestination>src/main/java</sourceDestination>
+                    <nativeJavaType>true</nativeJavaType>
+                    <outputFormat>java</outputFormat>
+                    <abiSourceFiles>
+                        <directory>../relayer-app/src/main/resources/abi/level-1</directory>
+                        <includes>
+                            <include>IMailBoxBase.json</include>
+                            <include>Rollup.json</include>
+                            <include>L1GasOracle.json</include>
+                            <include>L2CoinBase.json</include>
+                        </includes>
+                    </abiSourceFiles>
+                    <outputDirectory>
+                        <java>src/main/java</java>
+                    </outputDirectory>
+                    <pathPrefixes>
+                        <pathPrefix>dep=../dependencies</pathPrefix>
+                    </pathPrefixes>
+                </configuration>
             </plugin>
         </plugins>
     </build>

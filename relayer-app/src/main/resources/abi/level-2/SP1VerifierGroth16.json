@@ -1,0 +1,156 @@
+[
+  {
+    "type": "function",
+    "name": "VERIFIER_HASH",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "pure"
+  },
+  {
+    "type": "function",
+    "name": "VERSION",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "stateMutability": "pure"
+  },
+  {
+    "type": "function",
+    "name": "Verify",
+    "inputs": [
+      {
+        "name": "proof",
+        "type": "uint256[8]",
+        "internalType": "uint256[8]"
+      },
+      {
+        "name": "input",
+        "type": "uint256[2]",
+        "internalType": "uint256[2]"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "compressProof",
+    "inputs": [
+      {
+        "name": "proof",
+        "type": "uint256[8]",
+        "internalType": "uint256[8]"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "compressed",
+        "type": "uint256[4]",
+        "internalType": "uint256[4]"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "hashPublicValues",
+    "inputs": [
+      {
+        "name": "publicValues",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "pure"
+  },
+  {
+    "type": "function",
+    "name": "verifyCompressedProof",
+    "inputs": [
+      {
+        "name": "compressedProof",
+        "type": "uint256[4]",
+        "internalType": "uint256[4]"
+      },
+      {
+        "name": "input",
+        "type": "uint256[2]",
+        "internalType": "uint256[2]"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "verifyProof",
+    "inputs": [
+      {
+        "name": "programVKey",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "publicValues",
+        "type": "bytes",
+        "internalType": "bytes"
+      },
+      {
+        "name": "proofBytes",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "view"
+  },
+  {
+    "type": "error",
+    "name": "InvalidProof",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ProofInvalid",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "PublicInputNotInField",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "WrongVerifierSelector",
+    "inputs": [
+      {
+        "name": "received",
+        "type": "bytes4",
+        "internalType": "bytes4"
+      },
+      {
+        "name": "expected",
+        "type": "bytes4",
+        "internalType": "bytes4"
+      }
+    ]
+  }
+]

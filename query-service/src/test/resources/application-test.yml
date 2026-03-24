@@ -9,3 +9,7 @@ spring:
 logging:
   file:
     path: log
+
+jasypt:
+  encryptor:
+    password: ${JASYPT_PASSWD:}

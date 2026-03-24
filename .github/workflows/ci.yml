@@ -1,0 +1,160 @@
+name: CI
+
+on:
+  push:
+    branches: [ master, main ]
+    tags: [ '[0-9]+.[0-9]+.[0-9]+', '[0-9]+.[0-9]+.[0-9]+-**' ]
+  pull_request:
+    branches: [ master, main ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  test:
+    name: Unit Tests & Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Run tests with JaCoCo coverage
+        run: mvn verify -Pcoverage -B
+
+      - name: Upload JaCoCo reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports
+          path: '**/target/site/jacoco/'
+          retention-days: 14
+
+      - name: Add coverage comment to PR
+        if: github.event_name == 'pull_request'
+        uses: madrapps/jacoco-report@v1.7.1
+        with:
+          paths: |
+            ${{ github.workspace }}/**/target/site/jacoco/jacoco.xml
+          token: ${{ secrets.GITHUB_TOKEN }}
+          min-coverage-overall: 80
+          title: 'Code Coverage Report'
+          update-comment: true
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Compile and package
+        run: mvn clean package -DskipTests -B
+
+      - name: Upload Relayer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: l2-relayer-tar
+          path: relayer-app/target/l2-relayer-*.tar.gz
+          retention-days: 7
+
+      - name: Upload Query Service artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: query-service-tar
+          path: query-service/target/query-service-*.tar.gz
+          retention-days: 7
+
+  docker:
+    name: Build & Push Docker Images
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      REGISTRY: ghcr.io
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Relayer artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: l2-relayer-tar
+          path: docker/
+
+      - name: Download Query Service artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: query-service-tar
+          path: docker/
+
+      - name: Prepare build context
+        run: |
+          cd docker
+          mv l2-relayer-*.tar.gz l2-relayer.tar.gz
+          mv query-service-*.tar.gz query-service.tar.gz
+
+      - name: Determine image tags
+        id: meta
+        run: |
+          REPO_OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          RELAYER_IMAGE="${REGISTRY}/${REPO_OWNER}/jovay-relayer"
+          QS_IMAGE="${REGISTRY}/${REPO_OWNER}/jovay-relayer-query-service"
+
+          TAGS_RELAYER="${RELAYER_IMAGE}:${{ github.sha }}"
+          TAGS_QS="${QS_IMAGE}:${{ github.sha }}"
+
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            TAGS_RELAYER="${TAGS_RELAYER},${RELAYER_IMAGE}:${{ github.ref_name }},${RELAYER_IMAGE}:latest"
+            TAGS_QS="${TAGS_QS},${QS_IMAGE}:${{ github.ref_name }},${QS_IMAGE}:latest"
+          fi
+
+          echo "relayer_tags=${TAGS_RELAYER}" >> "$GITHUB_OUTPUT"
+          echo "qs_tags=${TAGS_QS}" >> "$GITHUB_OUTPUT"
+          echo "push=${{ github.ref_type == 'tag' }}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        if: steps.meta.outputs.push == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & push Relayer image
+        uses: docker/build-push-action@v6
+        with:
+          context: docker
+          file: docker/Dockerfile-Relayer-Open
+          platforms: linux/amd64,linux/arm64
+          push: ${{ steps.meta.outputs.push }}
+          tags: ${{ steps.meta.outputs.relayer_tags }}
+
+      - name: Build & push Query Service image
+        uses: docker/build-push-action@v6
+        with:
+          context: docker
+          file: docker/Dockerfile-QS-Open
+          platforms: linux/amd64,linux/arm64
+          push: ${{ steps.meta.outputs.push }}
+          tags: ${{ steps.meta.outputs.qs_tags }}

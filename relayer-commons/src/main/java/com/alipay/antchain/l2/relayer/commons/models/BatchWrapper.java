@@ -1,14 +1,29 @@
+/*
+ * Copyright 2026 Ant Group
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.alipay.antchain.l2.relayer.commons.models;
 
 import java.math.BigInteger;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import cn.hutool.core.lang.Assert;
 import cn.hutool.core.util.ObjectUtil;
 import cn.hutool.core.util.StrUtil;
-import com.alipay.antchain.l2.relayer.commons.l2basic.Batch;
-import com.alipay.antchain.l2.relayer.commons.l2basic.BatchHeader;
-import com.alipay.antchain.l2.relayer.commons.l2basic.BlockContext;
+import com.alipay.antchain.l2.relayer.commons.l2basic.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.NonNull;
@@ -19,25 +34,15 @@ import lombok.Setter;
 @NoArgsConstructor
 public class BatchWrapper {
 
-    public static BatchWrapper createBatchV0(
+    public static BatchWrapper createBatch(
+            BatchVersionEnum batchVersion,
             BigInteger batchIndex,
             BatchWrapper parentBatchWrapper,
             byte[] postStateRoot,
             byte[] l1MsgRollingHash,
             byte[] l2MsgRoot,
+            long finalizedL1MsgIndex,
             @NonNull List<ChunkWrapper> chunks
-    ) {
-        return createBatchV0(batchIndex, parentBatchWrapper, postStateRoot, l1MsgRollingHash, l2MsgRoot, chunks, null);
-    }
-
-    public static BatchWrapper createBatchV0(
-            BigInteger batchIndex,
-            BatchWrapper parentBatchWrapper,
-            byte[] postStateRoot,
-            byte[] l1MsgRollingHash,
-            byte[] l2MsgRoot,
-            @NonNull List<ChunkWrapper> chunks,
-            EthBlobs blobs
     ) {
         var wrapper = new BatchWrapper();
         for (int i = 0; i < chunks.size(); i++) {
@@ -45,19 +50,19 @@ public class BatchWrapper {
                 throw new RuntimeException(StrUtil.format("chunk index {} not equal to the array index {}", chunks.get(i).getChunkIndex(), i));
             }
         }
-        var l1MessagePopped = chunks.stream()
-                .map(x -> x.getChunk().getBlocks().stream().mapToLong(BlockContext::getNumL1Messages).sum())
-                .mapToLong(value -> value).sum();
-        wrapper.setBatch(Batch.createBatchV0(
+        var l1MessagePopped = finalizedL1MsgIndex - parentBatchWrapper.getTotalL1MessagePopped();
+        Assert.isTrue(l1MessagePopped >= 0, "finalizedL1MsgIndex becoming smaller than the one from previous batch");
+        wrapper.setBatch(Batch.createBatch(
+                batchVersion,
                 batchIndex,
                 parentBatchWrapper.getBatchHeader(),
                 l1MsgRollingHash,
                 chunks.stream().map(ChunkWrapper::getChunk).collect(Collectors.toList()),
-                blobs
+                null
         ));
         wrapper.setPostStateRoot(postStateRoot);
         wrapper.setL2MsgRoot(l2MsgRoot);
-        wrapper.setTotalL1MessagePopped(parentBatchWrapper.getTotalL1MessagePopped() + l1MessagePopped);
+        wrapper.setTotalL1MessagePopped(finalizedL1MsgIndex);
         wrapper.setL1MessagePopped(l1MessagePopped);
         return wrapper;
     }
@@ -75,6 +80,8 @@ public class BatchWrapper {
     private long totalL1MessagePopped;
 
     private long l1MessagePopped;
+
+    private long gmtCreate;
 
     public BigInteger getBatchIndex() {
         return batch.getBatchIndex();
@@ -96,5 +103,9 @@ public class BatchWrapper {
 
     public BatchHeader getBatchHeader() {
         return batch.getBatchHeader();
+    }
+
+    public List<Chunk> getChunks() {
+        return ((ChunksPayload) this.getBatch().getPayload()).chunks();
     }
 }

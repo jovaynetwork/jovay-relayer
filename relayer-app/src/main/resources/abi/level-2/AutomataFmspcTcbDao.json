@@ -1,0 +1,393 @@
+[
+  {
+    "type": "constructor",
+    "inputs": [
+      {
+        "name": "_storage",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "_p256",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "_pcs",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "_fmspcHelper",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "_x509Helper",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "_crl",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "FMSPC_TCB_KEY",
+    "inputs": [
+      {
+        "name": "tcbType",
+        "type": "uint8",
+        "internalType": "uint8"
+      },
+      {
+        "name": "fmspc",
+        "type": "bytes6",
+        "internalType": "bytes6"
+      },
+      {
+        "name": "version",
+        "type": "uint32",
+        "internalType": "uint32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "key",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "pure"
+  },
+  {
+    "type": "function",
+    "name": "FmspcTcbLib",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract FmspcTcbHelper"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "P256_VERIFIER",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "Pcs",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract PcsDao"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "crlLibAddr",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getAttestedData",
+    "inputs": [
+      {
+        "name": "key",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "attestationData",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getCollateralHash",
+    "inputs": [
+      {
+        "name": "key",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "collateralHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getCollateralValidity",
+    "inputs": [
+      {
+        "name": "key",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "issueDateTimestamp",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "nextUpdateTimestamp",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getTcbInfo",
+    "inputs": [
+      {
+        "name": "tcbType",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "fmspc",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "version",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "tcbObj",
+        "type": "tuple",
+        "internalType": "struct TcbInfoJsonObj",
+        "components": [
+          {
+            "name": "tcbInfoStr",
+            "type": "string",
+            "internalType": "string"
+          },
+          {
+            "name": "signature",
+            "type": "bytes",
+            "internalType": "bytes"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getTcbInfoContentHash",
+    "inputs": [
+      {
+        "name": "key",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getTcbIssuerChain",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "signingCert",
+        "type": "bytes",
+        "internalType": "bytes"
+      },
+      {
+        "name": "rootCert",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "resolver",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IDaoAttestationResolver"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "upsertFmspcTcb",
+    "inputs": [
+      {
+        "name": "tcbInfoObj",
+        "type": "tuple",
+        "internalType": "struct TcbInfoJsonObj",
+        "components": [
+          {
+            "name": "tcbInfoStr",
+            "type": "string",
+            "internalType": "string"
+          },
+          {
+            "name": "signature",
+            "type": "bytes",
+            "internalType": "bytes"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "attestationId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "x509",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "event",
+    "name": "UpsertedFmpscTcb",
+    "inputs": [
+      {
+        "name": "tcbType",
+        "type": "uint8",
+        "indexed": true,
+        "internalType": "uint8"
+      },
+      {
+        "name": "fmspcTcbBytes",
+        "type": "bytes6",
+        "indexed": true,
+        "internalType": "bytes6"
+      },
+      {
+        "name": "version",
+        "type": "uint32",
+        "indexed": true,
+        "internalType": "uint32"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "Duplicate_Collateral",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "Invalid_TCB_Cert_Signature",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "Missing_TCB_Cert",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "TCB_Cert_Expired",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "TCB_Cert_Revoked",
+    "inputs": [
+      {
+        "name": "serialNum",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TCB_Expired",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "TCB_Out_Of_Date",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "Unauthorized_Caller",
+    "inputs": [
+      {
+        "name": "caller",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  }
+]
