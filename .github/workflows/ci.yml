@@ -31,7 +31,7 @@ jobs:
 
       - name: Upload JaCoCo reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-reports
           path: '**/target/site/jacoco/'
@@ -65,14 +65,14 @@ jobs:
         run: mvn clean package -DskipTests -B
 
       - name: Upload Relayer artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: l2-relayer-tar
           path: relayer-app/target/l2-relayer-*.tar.gz
           retention-days: 7
 
       - name: Upload Query Service artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: query-service-tar
           path: query-service/target/query-service-*.tar.gz
