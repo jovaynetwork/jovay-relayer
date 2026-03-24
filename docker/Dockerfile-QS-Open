@@ -1,4 +1,4 @@
-FROM eclipse-temurin:21-jre AS base
+FROM eclipse-temurin:25-jre AS base
 
 ENV TZ=Asia/Shanghai
 ENV LANG=en_US.UTF-8
