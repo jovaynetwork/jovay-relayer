@@ -1,3 +1,19 @@
+/*
+ * Copyright 2026 Ant Group
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.alipay.antchain.l2.relayer.utils;
 
 import java.math.BigInteger;
@@ -6,7 +22,6 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import cn.hutool.core.util.HexUtil;
-import cn.hutool.core.util.StrUtil;
 import com.alibaba.fastjson.JSON;
 import com.alipay.antchain.l2.relayer.commons.enums.OracleRequestTypeEnum;
 import com.alipay.antchain.l2.relayer.commons.enums.OracleTransactionStateEnum;
@@ -21,14 +36,6 @@ import org.web3j.protocol.core.methods.response.TransactionReceipt;
 import org.web3j.utils.Numeric;
 
 public class ConvertUtil {
-
-    public static String listToString(List<String> list) {
-        return list.stream().reduce((s1, s2) -> StrUtil.join("^", s1, s2)).orElse("");
-    }
-
-    public static List<String> stringToList(String str) {
-        return StrUtil.split(str, "^");
-    }
 
     public static BizDistributedTask convertFromBizDTTaskEntity(BizTaskEntity entity) {
         BizDistributedTask bizDistributedTask = new BizDistributedTask();
@@ -57,30 +64,32 @@ public class ConvertUtil {
 
     public static ChunksEntity convertFromChunkWrapper(final ChunkWrapper chunkWrapper) {
         ChunksEntity entity = new ChunksEntity();
+        entity.setBatchVersion(chunkWrapper.getBatchVersion().getValueAsUint8());
         entity.setBatchIndex(chunkWrapper.getBatchIndex().toString());
         entity.setChunkIndex(chunkWrapper.getChunkIndex());
-        entity.setZkCycleSum(chunkWrapper.getZkCycleSum());
+        entity.setZkCycleSum(0L);
+        entity.setGasSum(chunkWrapper.getGasSum());
         entity.setStartNumber(chunkWrapper.getChunk().getStartBlockNumber().toString());
         entity.setEndNumber(chunkWrapper.getChunk().getEndBlockNumber().toString());
-        entity.setNumBlocks(chunkWrapper.getChunk().getNumBlocksVal());
-        entity.setRawChunk(chunkWrapper.getChunk().serialize());
-        entity.setChunkHash(HexUtil.encodeHexStr(chunkWrapper.getChunk().getHash()));
+        entity.setNumBlocks(chunkWrapper.getChunk().getNumBlocks());
+        entity.setRawChunk(chunkWrapper.serializeChunk());
+        entity.setChunkHash("");
         return entity;
     }
 
     public static ChunkWrapper convertFromChunksEntity(ChunksEntity entity) {
         return new ChunkWrapper(
+                BatchVersionEnum.from(entity.getBatchVersion()),
                 new BigInteger(entity.getBatchIndex()),
                 entity.getChunkIndex(),
-                HexUtil.decodeHex(entity.getChunkHash()),
-                entity.getZkCycleSum(),
+                entity.getGasSum(),
                 entity.getRawChunk()
         );
     }
 
     public static BatchesEntity convertFromBatch(BatchWrapper batchWrapper) {
         BatchesEntity entity = new BatchesEntity();
-        entity.setVersion((int) batchWrapper.getBatchHeader().getVersion().getValue());
+        entity.setVersion(batchWrapper.getBatchHeader().getVersion().getValueAsUint8());
         entity.setBatchHeaderHash(HexUtil.encodeHexStr(batchWrapper.getBatchHeader().getHash()));
         entity.setBatchIndex(batchWrapper.getBatchHeader().getBatchIndex().toString());
         entity.setL1MsgRollingHash(HexUtil.encodeHexStr(batchWrapper.getBatchHeader().getL1MsgRollingHash()));
@@ -104,7 +113,7 @@ public class ConvertUtil {
             BigInteger endBlockNum
     ) {
         BatchesEntity entity = new BatchesEntity();
-        entity.setVersion((int) batchHeader.getVersion().getValue());
+        entity.setVersion(batchHeader.getVersion().getValueAsUint8());
         entity.setBatchHeaderHash(HexUtil.encodeHexStr(batchHeader.getHash()));
         entity.setBatchIndex(batchHeader.getBatchIndex().toString());
         entity.setL1MsgRollingHash(HexUtil.encodeHexStr(batchHeader.getL1MsgRollingHash()));
@@ -122,18 +131,19 @@ public class ConvertUtil {
     public static BatchWrapper convertFromBatchEntityAndChunks(BatchesEntity entity, @NonNull List<ChunkWrapper> chunks, EthBlobs blobs) {
         BatchWrapper wrapper = new BatchWrapper();
         var blobsDaData = ObjectUtils.isEmpty(blobs) ? null : BlobsDaData.lazyBuildFrom(blobs);
+        var batchVersion = BatchVersionEnum.from(entity.getVersion());
         wrapper.setBatch(
                 Batch.builder()
                         .batchHeader(
                                 BatchHeader.builder()
-                                        .version(BatchVersionEnum.from(entity.getVersion()))
+                                        .version(batchVersion)
                                         .batchIndex(new BigInteger(entity.getBatchIndex()))
                                         .l1MsgRollingHash(Numeric.hexStringToByteArray(entity.getL1MsgRollingHash()))
                                         .dataHash(HexUtil.decodeHex(entity.getDataHash()))
                                         .parentBatchHash(HexUtil.decodeHex(entity.getParentBatchHash()))
                                         .hash(HexUtil.decodeHex(entity.getBatchHeaderHash()))
                                         .build()
-                        ).payload(new ChunksPayload(chunks.stream().map(ChunkWrapper::getChunk).collect(Collectors.toList())))
+                        ).payload(new ChunksPayload(batchVersion, chunks.stream().map(ChunkWrapper::getChunk).collect(Collectors.toList())))
                         .daData(blobsDaData)
                         .build()
         );

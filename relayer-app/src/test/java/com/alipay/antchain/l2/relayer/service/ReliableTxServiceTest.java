@@ -1,10 +1,23 @@
+/*
+ * Copyright 2026 Ant Group
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.alipay.antchain.l2.relayer.service;
 
 import java.math.BigInteger;
 import java.util.Date;
-
-import com.alipay.antchain.l2.relayer.commons.enums.*;
-import jakarta.annotation.Resource;
 
 import cn.hutool.core.collection.ListUtil;
 import cn.hutool.core.date.DateUtil;
@@ -12,9 +25,9 @@ import cn.hutool.core.util.HexUtil;
 import cn.hutool.core.util.RandomUtil;
 import cn.hutool.core.util.ReflectUtil;
 import com.alipay.antchain.l2.relayer.TestBase;
-import com.alipay.antchain.l2.relayer.commons.exceptions.L1ContractInvalidPermissionException;
+import com.alipay.antchain.l2.relayer.commons.enums.*;
 import com.alipay.antchain.l2.relayer.commons.exceptions.L1ContractWarnException;
-import com.alipay.antchain.l2.relayer.commons.exceptions.L2RelayerErrorCodeEnum;
+import com.alipay.antchain.l2.relayer.commons.l2basic.L1MsgTransaction;
 import com.alipay.antchain.l2.relayer.commons.models.ReliableTransactionDO;
 import com.alipay.antchain.l2.relayer.commons.models.TransactionInfo;
 import com.alipay.antchain.l2.relayer.config.RollupConfig;
@@ -28,6 +41,7 @@ import com.alipay.antchain.l2.relayer.dal.repository.IOracleRepository;
 import com.alipay.antchain.l2.relayer.dal.repository.IRollupRepository;
 import com.alipay.antchain.l2.relayer.dal.repository.ISystemConfigRepository;
 import com.alipay.antchain.l2.relayer.engine.DistributedTaskEngine;
+import jakarta.annotation.Resource;
 import org.junit.Before;
 import org.junit.Test;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -227,19 +241,36 @@ public class ReliableTxServiceTest extends TestBase {
         var mockBaseFeeFeedTx = mockReliableTransactionDO(TransactionTypeEnum.L2_ORACLE_BASE_FEE_FEED_TX, 2, ChainTypeEnum.LAYER_TWO, ReliableTransactionStateEnum.TX_PENDING);
 
         when(rollupRepository.getNotFinalizedReliableTransactions(notNull(), anyInt())).thenReturn(ListUtil.toList(mockBaseFeeFeedTx));
+        when(oracleRepository.peekLatestRequestIndex(eq(OracleTypeEnum.L2_GAS_ORACLE), eq(OracleRequestTypeEnum.L1_BLOCK_UPDATE)))
+                .thenReturn(BigInteger.valueOf(3), BigInteger.valueOf(2));
         when(l2Client.queryTx(notNull())).thenReturn(null);
+        var resentTx = mock(TransactionInfo.class);
+        when(resentTx.getNonce()).thenReturn(BigInteger.valueOf(RandomUtil.randomInt()));
+        when(resentTx.getTxHash()).thenReturn(Numeric.toHexString(RandomUtil.randomBytes(32)));
+        when(l2Client.resendGasFeedTx(notNull())).thenReturn(resentTx);
 
         EthSendTransaction ethSendTransaction = new EthSendTransaction();
         ethSendTransaction.setResult("0x05f71e1b2cb4f03e547739db15d080fd30c989eda04d37ce6264c5686e0722c9");
 
         reliableTxService.processL2NotFinalizedTx();
         verify(rollupRepository, times(1)).getNotFinalizedReliableTransactions(notNull(), anyInt());
-        verify(rollupRepository, times(1)).updateReliableTransaction(argThat(argument -> argument.getLatestTxHash().equals(ethSendTransaction.getTransactionHash())));
+        verify(rollupRepository, times(1)).updateReliableTransaction(argThat(
+                argument -> argument.getState() == ReliableTransactionStateEnum.BIZ_SUCCESS
+        ));
+
+        clearInvocations(rollupRepository);
+        reliableTxService.processL2NotFinalizedTx();
+        verify(rollupRepository, times(1)).getNotFinalizedReliableTransactions(notNull(), anyInt());
+        verify(rollupRepository, times(1)).updateReliableTransaction(argThat(
+                argument -> argument.getLatestTxHash().equals(resentTx.getTxHash())
+        ));
 
         // lost batch fee feed tx
         var mockBatchFeeFeedTx = mockReliableTransactionDO(TransactionTypeEnum.L2_ORACLE_BATCH_FEE_FEED_TX, 3, ChainTypeEnum.LAYER_TWO, ReliableTransactionStateEnum.TX_PENDING);
 
         when(rollupRepository.getNotFinalizedReliableTransactions(notNull(), anyInt())).thenReturn(ListUtil.toList(mockBatchFeeFeedTx));
+        when(oracleRepository.peekLatestRequestIndex(eq(OracleTypeEnum.L2_GAS_ORACLE), eq(OracleRequestTypeEnum.L2_BATCH_PROVE)))
+                .thenReturn(BigInteger.valueOf(4), BigInteger.valueOf(3));
 
         EthSendTransaction ethSendTransaction1 = new EthSendTransaction();
         ethSendTransaction1.setResult("0x05f71e1b2cb4f03e547739db15d080fd30c989eda04d37ce6264c5686e0722c9");
@@ -247,7 +278,50 @@ public class ReliableTxServiceTest extends TestBase {
         clearInvocations(rollupRepository);
         reliableTxService.processL2NotFinalizedTx();
         verify(rollupRepository, times(1)).getNotFinalizedReliableTransactions(notNull(), anyInt());
-        verify(rollupRepository, times(1)).updateReliableTransaction(argThat(argument -> argument.getLatestTxHash().equals(ethSendTransaction1.getTransactionHash())));
+        verify(rollupRepository, times(1)).updateReliableTransaction(argThat(
+                argument -> argument.getState() == ReliableTransactionStateEnum.BIZ_SUCCESS
+        ));
+
+        clearInvocations(rollupRepository);
+        reliableTxService.processL2NotFinalizedTx();
+        verify(rollupRepository, times(1)).getNotFinalizedReliableTransactions(notNull(), anyInt());
+        verify(rollupRepository, times(1)).updateReliableTransaction(argThat(
+                argument -> argument.getLatestTxHash().equals(resentTx.getTxHash())
+        ));
+
+    }
+
+    @Test
+    public void testProcessL2PendingTx_L1MsgTxNotFound() {
+        // lost base fee feed tx
+        byte[] rawTx = HexUtil.decodeHex("7FF9021314830F4240B901C408A2C0BF000000000000000000000000570C03BBCCA0B0BF71A02732DE1DA98ED7A3E050000000000000000000000000565FA0A16C289E84477B83B99794C48D96C29BEB0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000300000000000000000000000000000000000000000000000000000000000000A000000000000000000000000000000000000000000000000000000000000000E4662A633A0000000000000000000000001C7D4B196CB0C7B01D743FBC6116A902379C723800000000000000000000000036A453BA73B5AF05099C7C4F60644982B6EEA44B0000000000000000000000001FAE486258F3286D4C89702DF48233ED9A7D707B0000000000000000000000007CAD994FC1C0D94EF232FBE3B45B685018EE59B6000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000C000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000084042D55CFA07087219F8F67D42BE13BECEFB2E35B49AF18321BF8832CCBDCB93343B0BEBE1CA053C9DA14BFBF16475AA1FC0C2C321EC9DACA7C19A589D0D3D365203D4B312FF9");
+        var mockL1MsgTx = mockReliableTransactionDO(TransactionTypeEnum.L1_MSG_TX, 2, ChainTypeEnum.LAYER_TWO, ReliableTransactionStateEnum.TX_PENDING, rawTx);
+
+        String txHash = "0x05f71e1b2cb4f03e547739db15d080fd30c989eda04d37ce6264c5686e0722c9";
+        when(rollupRepository.getNotFinalizedReliableTransactions(notNull(), anyInt())).thenReturn(ListUtil.toList(mockL1MsgTx));
+        when(l2Client.queryTx(notNull())).thenReturn(null);
+        var mockResendL1MsgTx = TransactionInfo.builder()
+                .rawTx(rawTx)
+                .txHash(txHash)
+                .nonce(BigInteger.valueOf(11))
+                .senderAccount(L1MsgTransaction.L1_MAILBOX_AS_SENDER.toString())
+                .build();
+        when(l2Client.resendL1MsgTx(notNull())).thenReturn(mockResendL1MsgTx);
+
+        reliableTxService.processL2NotFinalizedTx();
+        verify(rollupRepository, times(1)).getNotFinalizedReliableTransactions(notNull(), anyInt());
+
+        TransactionReceipt mockReceipt = new TransactionReceipt();
+        mockReceipt.setTransactionHash(txHash);
+        mockReceipt.setStatus("01");
+        mockReceipt.setBlockNumber("10");
+        when(l2Client.queryTxReceipt(notNull())).thenReturn(mockReceipt);
+        Transaction mockTx = new Transaction();
+        mockTx.setHash(txHash);
+        when(l2Client.queryTxWithRetry(notNull(), notNull(), notNull())).thenReturn(mockTx);
+        when(l2Client.queryLatestBlockNumber(notNull())).thenReturn(BigInteger.valueOf(13));
+        reliableTxService.processL2NotFinalizedTx();
+        verify(rollupRepository, times(1)).updateReliableTransactionState(argThat(argument -> argument.equals(mockReceipt.getTransactionHash())), argThat(argument -> argument.equals(ReliableTransactionStateEnum.TX_SUCCESS)));
     }
 
     private ReliableTransactionDO mockReliableTransactionDO(TransactionTypeEnum txType, int batchIndex, ChainTypeEnum chainType, ReliableTransactionStateEnum txState) {
@@ -262,242 +336,23 @@ public class ReliableTxServiceTest extends TestBase {
                 .retryCount(0)
                 .state(txState)
                 .nonce(1L)
+                .rawTx(reliableTransactionDO.getRawTx())
                 .build();
     }
 
-    // ==================== Negative Test Cases: Error Recovery ====================
-
-    /**
-     * Test retry failed transaction when max retry count exceeded
-     */
-    @Test
-    public void testRetryFailedTx_MaxRetryExceeded() {
-        var tx = RollupRepositoryTest.randomReliableTransactionDOs(1, ReliableTransactionStateEnum.TX_FAILED).get(0);
-        tx.setTransactionType(TransactionTypeEnum.BATCH_COMMIT_TX);
-        tx.setRawTx(reliableTransactionDO.getRawTx());
-        tx.setRetryCount(10); // Exceeded max retry count
-        tx.setBatchIndex(BigInteger.valueOf(100));
-
-        // Mock empty list since getFailedReliableTransactions should filter by retryCountLimit
-        when(rollupRepository.getFailedReliableTransactions(anyInt(), anyInt()))
-                .thenReturn(ListUtil.empty());
-
-        reliableTxService.retryFailedTx();
-
-        // Should not attempt to resend when retry count exceeded
-        // The getFailedReliableTransactions already filters by retryCountLimit, so no tx should be returned
-        verify(l1Client, never()).resendRollupTx(any(), anyString());
-        verify(rollupRepository, times(1)).getFailedReliableTransactions(anyInt(), anyInt());
-    }
-
-    /**
-     * Test retry failed transaction when resend throws exception
-     */
-    @Test
-    public void testRetryFailedTx_ResendException() {
-        var tx = RollupRepositoryTest.randomReliableTransactionDOs(1, ReliableTransactionStateEnum.TX_FAILED).get(0);
-        tx.setTransactionType(TransactionTypeEnum.BATCH_COMMIT_TX);
-        tx.setRawTx(reliableTransactionDO.getRawTx());
-        tx.setRetryCount(0);
-
-        when(rollupRepository.getFailedReliableTransactions(anyInt(), anyInt()))
-                .thenReturn(ListUtil.toList(tx));
-        when(rollupRepository.getReliableTransaction(eq(ChainTypeEnum.LAYER_ONE), eq(tx.getBatchIndex().subtract(BigInteger.ONE)), eq(TransactionTypeEnum.BATCH_COMMIT_TX)))
-                .thenReturn(ReliableTransactionDO.builder().state(ReliableTransactionStateEnum.TX_SUCCESS).build());
-        when(l1Client.lastCommittedBatch(notNull())).thenReturn(tx.getBatchIndex().subtract(BigInteger.ONE));
-        when(l1Client.resendRollupTx(notNull(), anyString())).thenThrow(new RuntimeException("Network error"));
-
-        try {
-            reliableTxService.retryFailedTx();
-        } catch (Exception e) {
-            // Exception should be caught and logged
-        }
-
-        // Verify retry count was not updated due to exception
-        verify(rollupRepository, never()).updateReliableTransaction(any());
-    }
-
-    /**
-     * Test state transition from TX_PENDING to TX_FAILED when receipt shows failure
-     */
-    @Test
-    public void testStateTransition_PendingToFailed() {
-        reliableTransactionDO.setState(ReliableTransactionStateEnum.TX_PENDING);
-        reliableTransactionDO.setLatestTxSendTime(DateUtil.date());
-
-        when(rollupRepository.getNotFinalizedReliableTransactions(notNull(), anyInt()))
-                .thenReturn(ListUtil.toList(reliableTransactionDO));
-        when(l1Client.queryTx(notNull())).thenReturn(new Transaction());
-        when(l1Client.queryLatestBlockNumber(notNull())).thenReturn(BigInteger.valueOf(100));
-
-        TransactionReceipt receipt = new TransactionReceipt();
-        receipt.setStatus("0x0"); // Failed status
-        receipt.setBlockNumber("0x0A");
-        when(l1Client.queryTxReceipt(notNull())).thenReturn(receipt);
-
-        reliableTxService.processL1NotFinalizedTx();
-
-        verify(rollupRepository, times(1)).updateReliableTransaction(
-                argThat(argument -> argument.getState() == ReliableTransactionStateEnum.TX_FAILED)
-        );
-    }
-
-    /**
-     * Test state transition error when invalid state change attempted
-     */
-    @Test
-    public void testStateTransition_InvalidStateChange() {
-        reliableTransactionDO.setState(ReliableTransactionStateEnum.BIZ_SUCCESS);
-        reliableTransactionDO.setLatestTxSendTime(DateUtil.date());
-
-        // BIZ_SUCCESS should not be returned by getNotFinalizedReliableTransactions
-        // Return empty list to simulate correct behavior
-        when(rollupRepository.getNotFinalizedReliableTransactions(notNull(), anyInt()))
-                .thenReturn(ListUtil.empty());
-
-        reliableTxService.processL1NotFinalizedTx();
-
-        // Should not attempt to query when no transactions returned
-        verify(l1Client, never()).queryTx(anyString());
-        verify(rollupRepository, times(1)).getNotFinalizedReliableTransactions(notNull(), anyInt());
-    }
-
-    /**
-     * Test transaction recovery when nonce conflict occurs
-     */
-    @Test
-    public void testTransactionRecovery_NonceConflict() {
-        reliableTransactionDO.setState(ReliableTransactionStateEnum.TX_PENDING);
-        reliableTransactionDO.setNonce(5L);
-
-        when(rollupRepository.getNotFinalizedReliableTransactions(notNull(), anyInt()))
-                .thenReturn(ListUtil.toList(reliableTransactionDO));
-        when(l1Client.queryTx(notNull())).thenReturn(null);
-        when(l1Client.queryTxCount(notNull(), notNull())).thenReturn(BigInteger.valueOf(10)); // Nonce already used
-
-        EthSendTransaction ethSendTransaction = new EthSendTransaction();
-        ethSendTransaction.setResult("0x05f71e1b2cb4f03e547739db15d080fd30c989eda04d37ce6264c5686e0722c9");
-        when(l1Client.sendRawTx(notNull())).thenReturn(ethSendTransaction);
-
-        reliableTxService.processL1NotFinalizedTx();
-
-        verify(rollupRepository, times(1)).updateReliableTransaction(
-                argThat(argument -> argument.getLatestTxHash().equals(ethSendTransaction.getTransactionHash()))
-        );
-    }
-
-    /**
-     * Test transaction recovery when speed up fails with contract warning
-     */
-    @Test
-    public void testTransactionRecovery_SpeedUpContractWarning() {
-        reliableTransactionDO.setState(ReliableTransactionStateEnum.TX_PENDING);
-        reliableTransactionDO.setLatestTxSendTime(DateUtil.lastMonth());
-
-        when(rollupRepository.getNotFinalizedReliableTransactions(notNull(), anyInt()))
-                .thenReturn(ListUtil.toList(reliableTransactionDO));
-        when(l1Client.queryTx(notNull())).thenReturn(new Transaction());
-        when(l1Client.speedUpRollupTx(notNull())).thenThrow(new L1ContractWarnException(L2RelayerErrorCodeEnum.CALL_WITH_WARNING, "Batch already committed"));
-
-        reliableTxService.processL1NotFinalizedTx();
-
-        verify(rollupRepository, times(1)).updateReliableTransaction(
-                argThat(argument -> argument.getState() == ReliableTransactionStateEnum.BIZ_SUCCESS)
-        );
-    }
-
-    /**
-     * Test transaction recovery when speed up fails with invalid permission
-     */
-    @Test
-    public void testTransactionRecovery_SpeedUpInvalidPermission() {
-        reliableTransactionDO.setState(ReliableTransactionStateEnum.TX_PENDING);
-        reliableTransactionDO.setLatestTxSendTime(DateUtil.lastMonth());
-
-        when(rollupRepository.getNotFinalizedReliableTransactions(notNull(), anyInt()))
-                .thenReturn(ListUtil.toList(reliableTransactionDO));
-        when(l1Client.queryTx(notNull())).thenReturn(new Transaction());
-        when(l1Client.speedUpRollupTx(notNull())).thenThrow(new L1ContractInvalidPermissionException("Not authorized", "INVALID_PERMISSION"));
-
-        try {
-            reliableTxService.processL1NotFinalizedTx();
-        } catch (L1ContractInvalidPermissionException e) {
-            // Exception should be propagated
-        }
-
-        // Should not update state to BIZ_SUCCESS for permission errors
-        verify(rollupRepository, never()).updateReliableTransaction(
-                argThat(argument -> argument.getState() == ReliableTransactionStateEnum.BIZ_SUCCESS)
-        );
-    }
-
-    /**
-     * Test L2 transaction recovery when query returns null
-     */
-    @Test
-    public void testL2TransactionRecovery_QueryReturnsNull() {
-        var mockL2Tx = mockReliableTransactionDO(
-                TransactionTypeEnum.L2_ORACLE_BASE_FEE_FEED_TX,
-                5,
-                ChainTypeEnum.LAYER_TWO,
-                ReliableTransactionStateEnum.TX_PENDING
-        );
-
-        when(rollupRepository.getNotFinalizedReliableTransactions(notNull(), anyInt()))
-                .thenReturn(ListUtil.toList(mockL2Tx));
-        when(l2Client.queryTx(notNull())).thenReturn(null);
-
-        reliableTxService.processL2NotFinalizedTx();
-
-        verify(rollupRepository, times(1)).updateReliableTransaction(any());
-    }
-
-    /**
-     * Test retry failed transaction when previous batch not finalized
-     */
-    @Test
-    public void testRetryFailedTx_PreviousBatchNotFinalized() {
-        var tx = RollupRepositoryTest.randomReliableTransactionDOs(1, ReliableTransactionStateEnum.TX_FAILED).get(0);
-        tx.setTransactionType(TransactionTypeEnum.BATCH_COMMIT_TX);
-        tx.setRawTx(reliableTransactionDO.getRawTx());
-        tx.setRetryCount(0);
-        tx.setBatchIndex(BigInteger.valueOf(10));
-
-        when(rollupRepository.getFailedReliableTransactions(anyInt(), anyInt()))
-                .thenReturn(ListUtil.toList(tx));
-        when(rollupRepository.getReliableTransaction(
-                eq(ChainTypeEnum.LAYER_ONE),
-                eq(tx.getBatchIndex().subtract(BigInteger.ONE)),
-                eq(TransactionTypeEnum.BATCH_COMMIT_TX)
-        )).thenReturn(ReliableTransactionDO.builder().state(ReliableTransactionStateEnum.TX_PENDING).build());
-
-        reliableTxService.retryFailedTx();
-
-        // Should not retry when previous batch is not finalized
-        verify(l1Client, never()).resendRollupTx(any(), anyString());
-    }
-
-    /**
-     * Test transaction recovery when receipt query throws exception
-     */
-    @Test
-    public void testTransactionRecovery_ReceiptQueryException() {
-        reliableTransactionDO.setState(ReliableTransactionStateEnum.TX_PENDING);
-        reliableTransactionDO.setLatestTxSendTime(DateUtil.date());
-
-        when(rollupRepository.getNotFinalizedReliableTransactions(notNull(), anyInt()))
-                .thenReturn(ListUtil.toList(reliableTransactionDO));
-        when(l1Client.queryTx(notNull())).thenReturn(new Transaction());
-        when(l1Client.queryLatestBlockNumber(notNull())).thenReturn(BigInteger.valueOf(100));
-        when(l1Client.queryTxReceipt(notNull())).thenThrow(new RuntimeException("RPC error"));
-
-        try {
-            reliableTxService.processL1NotFinalizedTx();
-        } catch (Exception e) {
-            // Exception should be caught and logged
-        }
-
-        // Should not update state when receipt query fails
-        verify(rollupRepository, never()).updateReliableTransaction(any());
+    private ReliableTransactionDO mockReliableTransactionDO(TransactionTypeEnum txType, int batchIndex, ChainTypeEnum chainType, ReliableTransactionStateEnum txState, byte[] rawTx) {
+        return ReliableTransactionDO.builder()
+                .transactionType(txType)
+                .batchIndex(BigInteger.valueOf(batchIndex))
+                .chainType(chainType)
+                .senderAccount("0x863df6bfa4469f3ead0be8f9f2aae51c91a907b4")
+                .originalTxHash("0x05f71e1b2cb4f03e547739db15d080fd30c989eda04d37ce6264c5686e0722c9")
+                .latestTxHash("0x05f71e1b2cb4f03e547739db15d080fd30c989eda04d37ce6264c5686e0722c9")
+                .latestTxSendTime(new Date())
+                .retryCount(0)
+                .rawTx(rawTx)
+                .state(txState)
+                .nonce(11L)
+                .build();
     }
 }

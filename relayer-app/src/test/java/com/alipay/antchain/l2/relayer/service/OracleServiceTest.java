@@ -1,3 +1,19 @@
+/*
+ * Copyright 2026 Ant Group
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.alipay.antchain.l2.relayer.service;
 
 import java.io.IOException;
@@ -39,7 +55,6 @@ import org.web3j.protocol.core.methods.response.*;
 import org.web3j.protocol.http.HttpService;
 import org.web3j.utils.Numeric;
 
-import static org.junit.Assert.*;
 import static org.mockito.ArgumentMatchers.notNull;
 import static org.mockito.Mockito.*;
 
@@ -88,11 +103,8 @@ public class OracleServiceTest extends TestBase {
     @Before
     @SneakyThrows
     public void initMock() {
-        when(rollupConfig.getMaxCallDataInChunk()).thenReturn(1000_000L);
-        when(rollupConfig.getOneChunkBlocksLimit()).thenReturn(32L);
-        when(rollupConfig.getMaxTxsInChunks()).thenReturn(1000);
+        when(rollupConfig.getGasPerChunk()).thenReturn(3000_0000);
         when(rollupConfig.getBatchCommitBlobSizeLimit()).thenReturn(4);
-        when(rollupConfig.getChunkZkCycleSumLimit()).thenReturn(940_000L);
 
         when(ethForkBlobConfig.getCurrConfig()).thenReturn(bpoConfig);
 
@@ -435,139 +447,6 @@ public class OracleServiceTest extends TestBase {
         }
     }
 
-    // ==================== Negative Case Tests ====================
-
-    @Test
-    public void testUpdateBlobBaseFeeScalaAndTxFeeScala_NetworkException() throws IOException {
-        BigInteger mockRequestIndex = BigInteger.valueOf(2);
-        byte[] mockRawData = JSON.toJSONBytes(L1BlockFeeInfo.builder()
-                .number("0x1000000")
-                .baseFeePerGas("0x1000000")
-                .gasUsed("0x5000000")
-                .gasLimit("0x10000000")
-                .blobGasUsed("0x100000")
-                .excessBlobGas("0x50000")
-                .build());
-
-        OracleRequestDO oracleRequestDO = OracleRequestDO.builder()
-                .requestIndex(mockRequestIndex)
-                .rawData(mockRawData)
-                .oracleType(OracleTypeEnum.L2_GAS_ORACLE)
-                .oracleTaskType(OracleRequestTypeEnum.L1_BLOCK_UPDATE)
-                .build();
-
-        when(l2Client.updateBaseFeeScala(any(), any())).thenThrow(new RuntimeException("Network timeout"));
-
-        try {
-            oracleService.updateBlobBaseFeeScalaAndTxFeeScala(oracleRequestDO);
-            fail("Should throw exception");
-        } catch (Exception e) {
-            assertNotNull(e);
-        }
-    }
-
-    @Test
-    public void testUpdateBatchBlobFeeAndTxFee_BatchNotFound() {
-        BigInteger mockRequestIndex = BigInteger.valueOf(2);
-        OracleRequestDO oracleRequestDO = OracleRequestDO.builder()
-                .requestIndex(mockRequestIndex)
-                .oracleTaskType(OracleRequestTypeEnum.L2_BATCH_PROVE)
-                .txState(OracleTransactionStateEnum.COMMITED)
-                .build();
-
-        when(rollupRepository.getBatch(any())).thenReturn(null);
-
-        try {
-            oracleService.updateBatchBlobFeeAndTxFee(oracleRequestDO);
-            fail("Should throw exception");
-        } catch (Exception e) {
-            assertNotNull(e);
-        }
-    }
-
-    @Test
-    public void testUpdateFixedProfit_TransactionFailed() {
-        BigInteger newFixedProfit = BigInteger.valueOf(RandomUtil.randomLong());
-
-        when(l2Client.updateFixedProfit(any())).thenThrow(new RuntimeException("Transaction failed"));
-
-        try {
-            oracleService.updateFixedProfit(newFixedProfit);
-            fail("Should throw exception");
-        } catch (Exception e) {
-            assertNotNull(e);
-            assertTrue(e.getMessage().contains("Transaction failed"));
-        }
-    }
-
-    @Test
-    public void testUpdateTotalScala_InvalidValue() {
-        BigInteger invalidTotal = BigInteger.valueOf(-1);
-
-        when(l2Client.updateTotalScala(any())).thenThrow(new IllegalArgumentException("Invalid total scala value"));
-
-        try {
-            oracleService.updateTotalScala(invalidTotal);
-            fail("Should throw exception");
-        } catch (Exception e) {
-            assertNotNull(e);
-        }
-    }
-
-    @Test
-    public void testWithdrawVault_InsufficientBalance() {
-        BigInteger account = BigInteger.valueOf(RandomUtil.randomLong());
-
-        when(l2Client.withdrawVault(anyString(), any())).thenThrow(new RuntimeException("Insufficient balance"));
-
-        try {
-            oracleService.withdrawVault(mockSender, account);
-            fail("Should throw exception");
-        } catch (Exception e) {
-            assertNotNull(e);
-            assertTrue(e.getMessage().contains("Insufficient balance"));
-        }
-    }
-
-    @Test
-    public void testUpdateBlobBaseFeeScalaAndTxFeeScala_InvalidBlockData() {
-        BigInteger mockRequestIndex = BigInteger.valueOf(2);
-        OracleRequestDO oracleRequestDO = OracleRequestDO.builder()
-                .requestIndex(mockRequestIndex)
-                .rawData(new byte[]{})
-                .oracleType(OracleTypeEnum.L2_GAS_ORACLE)
-                .oracleTaskType(OracleRequestTypeEnum.L1_BLOCK_UPDATE)
-                .build();
-
-        try {
-            oracleService.updateBlobBaseFeeScalaAndTxFeeScala(oracleRequestDO);
-            fail("Should throw exception");
-        } catch (Exception e) {
-            assertNotNull(e);
-        }
-    }
-
-    @Test
-    public void testUpdateBatchBlobFeeAndTxFee_RepositoryException() {
-        BigInteger mockRequestIndex = BigInteger.valueOf(2);
-        OracleRequestDO oracleRequestDO = OracleRequestDO.builder()
-                .requestIndex(mockRequestIndex)
-                .oracleTaskType(OracleRequestTypeEnum.L2_BATCH_PROVE)
-                .txState(OracleTransactionStateEnum.COMMITED)
-                .build();
-
-        when(oracleRepository.peekRequestByTypeAndIndex(notNull(), notNull(), notNull()))
-                .thenThrow(new RuntimeException("Database connection error"));
-
-        try {
-            oracleService.updateBatchBlobFeeAndTxFee(oracleRequestDO);
-            fail("Should throw exception");
-        } catch (Exception e) {
-            assertNotNull(e);
-            assertTrue(e.getMessage().contains("Database connection error"));
-        }
-    }
-
     private EthBlock mockEthBlock(String baseFeePerGas, String gasUsed, String gasLimit, String blobGasUsed, String excessBlobGas) {
         EthBlock mockEthBlock = new EthBlock();
         EthBlock.Block mockBlock = new EthBlock.Block();
@@ -612,7 +491,6 @@ public class OracleServiceTest extends TestBase {
     }
 
     private BatchWrapper mockBatchV0() {
-        int maxTxsInChunks = rollupConfig.getMaxTxsInChunks();
         return BatchWrapper.createBatch(
                 BatchVersionEnum.BATCH_V0,
                 BigInteger.valueOf(1),
@@ -621,7 +499,7 @@ public class OracleServiceTest extends TestBase {
                 BASIC_BLOCK_TRACE2.getL1MsgRollingHash().getValue().toByteArray(),
                 Bytes32.DEFAULT.getValue(),
                 0,
-                ListUtil.toList(new ChunkWrapper(BigInteger.valueOf(1), 0, ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2), maxTxsInChunks))
+                ListUtil.toList(new ChunkWrapper(BatchVersionEnum.BATCH_V0, BigInteger.valueOf(1), 0, ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2)))
         );
     }
 

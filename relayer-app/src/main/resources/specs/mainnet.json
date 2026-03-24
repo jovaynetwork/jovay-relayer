@@ -5,6 +5,9 @@
   "forks": {
     "1": {
       "batch_version": 1
+    },
+    "1768536000000": {
+      "batch_version": 2
     }
   }
 }

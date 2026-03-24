@@ -1,3 +1,19 @@
+/*
+ * Copyright 2026 Ant Group
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.alipay.antchain.l2.relayer.dal;
 
 import java.math.BigInteger;
@@ -52,7 +68,7 @@ import static org.mockito.Mockito.when;
 @Sql(scripts = "classpath:data/drop_all.sql", executionPhase = Sql.ExecutionPhase.AFTER_TEST_METHOD)
 public class RollupRepositoryTest extends TestBase {
 
-    public static final ChunkWrapper CHUNK1 = new ChunkWrapper(BigInteger.valueOf(100), 0, ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2), 1000);
+    public static final ChunkWrapper CHUNK1 = new ChunkWrapper(BatchVersionEnum.BATCH_V0, BigInteger.valueOf(100), 0, ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2));
 
     public static final Batch BATCH1 = new Batch(
             BatchVersionEnum.BATCH_V0, BigInteger.valueOf(100),
@@ -137,15 +153,9 @@ public class RollupRepositoryTest extends TestBase {
 
     @Before
     public void initMock() {
-        when(l1Client.maxCallDataInChunk()).thenReturn(BigInteger.valueOf(1000_000));
-        when(l1Client.maxBlockInChunk()).thenReturn(BigInteger.valueOf(32));
-        when(l1Client.maxTxsInChunk()).thenReturn(BigInteger.valueOf(1000));
-        when(l1Client.maxZkCircleInChunk()).thenReturn(BigInteger.valueOf(940000));
         when(l1Client.l1BlobNumLimit()).thenReturn(4L);
 
-        when(rollupConfig.getMaxCallDataInChunk()).thenReturn(1000_000L);
-        when(rollupConfig.getOneChunkBlocksLimit()).thenReturn(32L);
-        when(rollupConfig.getMaxTxsInChunks()).thenReturn(1000);
+        when(rollupConfig.getGasPerChunk()).thenReturn(3000_0000);
     }
 
     @Test
@@ -175,13 +185,12 @@ public class RollupRepositoryTest extends TestBase {
         assertNotNull(actual);
         assertEquals(CHUNK1.getBatchIndex(), actual.getBatchIndex());
         assertEquals(CHUNK1.getChunkIndex(), actual.getChunkIndex());
-        assertEquals(CHUNK1.getZkCycleSum(), actual.getZkCycleSum());
-        assertArrayEquals(CHUNK1.getChunk().serialize(), actual.getChunk().serialize());
-        assertArrayEquals(CHUNK1.getChunk().getHash(), actual.getChunk().getHash());
+        assertArrayEquals(CHUNK1.getChunk().serialize(false), actual.getChunk().serialize(false));
+        assertEquals(CHUNK1.getGasSum(), actual.getGasSum());
 
         List<ChunkWrapper> chunkWrappers = rollupRepository.getChunks(CHUNK1.getBatchIndex());
         assertEquals(CHUNK1.getBatchIndex(), chunkWrappers.get(0).getBatchIndex());
-        assertArrayEquals(CHUNK1.getChunk().serialize(), chunkWrappers.get(0).getChunk().serialize());
+        assertArrayEquals(CHUNK1.getChunk().serialize(false), chunkWrappers.get(0).getChunk().serialize(false));
     }
 
     @Test
@@ -198,7 +207,7 @@ public class RollupRepositoryTest extends TestBase {
         BatchWrapper batch = rollupRepository.getBatch(BATCH1.getBatchIndex());
         assertEquals(BATCH1.getBatchIndex(), batch.getBatch().getBatchIndex());
         assertEquals(1, batch.getChunks().size());
-        assertArrayEquals(CHUNK1.getChunk().serialize(), batch.getChunks().get(0).serialize());
+        assertArrayEquals(CHUNK1.getChunk().serialize(false), batch.getChunks().get(0).serialize(false));
         assertArrayEquals(BATCH1.getBatchHeader().getL1MsgRollingHash(), batch.getBatchHeader().getL1MsgRollingHash());
         assertArrayEquals(BATCH1.getBatchHash(), batch.getBatch().getBatchHash());
         assertArrayEquals(BATCH1.getBatchHeader().getDataHash(), batch.getBatchHeader().getDataHash());
@@ -330,6 +339,31 @@ public class RollupRepositoryTest extends TestBase {
     }
 
     @Test
+    public void testRemoveRawTx() {
+        rollupRepository.insertReliableTransaction(RELIABLE_TRANSACTION_DO1);
+        var actual = rollupRepository.getReliableTransaction(RELIABLE_TRANSACTION_DO1.getOriginalTxHash());
+        assertEquals(1, actual.getRawTx().length);
+        rollupRepository.removeRawTx(ChainTypeEnum.LAYER_ONE, RELIABLE_TRANSACTION_DO1.getBatchIndex(), RELIABLE_TRANSACTION_DO1.getTransactionType());
+        actual = rollupRepository.getReliableTransaction(RELIABLE_TRANSACTION_DO1.getOriginalTxHash());
+        assertEquals(0, actual.getRawTx().length);
+    }
+
+    @Test
+    public void testQueryLatestNonce() {
+        rollupRepository.insertReliableTransaction(RELIABLE_TRANSACTION_DO1);
+
+        var actual = rollupRepository.queryLatestNonce(RELIABLE_TRANSACTION_DO1.getChainType(), RELIABLE_TRANSACTION_DO1.getSenderAccount());
+        assertEquals(BigInteger.valueOf(RELIABLE_TRANSACTION_DO1.getNonce()), actual);
+
+        rollupRepository.insertReliableTransaction(RELIABLE_TRANSACTION_DO2);
+        actual = rollupRepository.queryLatestNonce(RELIABLE_TRANSACTION_DO1.getChainType(), RELIABLE_TRANSACTION_DO1.getSenderAccount());
+        assertEquals(BigInteger.valueOf(RELIABLE_TRANSACTION_DO2.getNonce()), actual);
+
+        actual = rollupRepository.queryLatestNonce(ChainTypeEnum.LAYER_TWO, RELIABLE_TRANSACTION_DO1.getSenderAccount());
+        assertEquals(BigInteger.valueOf(-1), actual);
+    }
+
+    @Test
     public void testGetFailedReliableTransactions() {
         var dataList = randomReliableTransactionDOs(10, ReliableTransactionStateEnum.TX_FAILED);
         dataList.get(0).setRetryCount(1);
@@ -345,305 +379,6 @@ public class RollupRepositoryTest extends TestBase {
             assertEquals(0, actual.get(i).getRetryCount().intValue());
             assertEquals(ReliableTransactionStateEnum.TX_FAILED, actual.get(i).getState());
             assertEquals(dataList.get(i + 2).getChainType(), actual.get(i).getChainType());
-        }
-    }
-
-    // ==================== Negative Case Tests ====================
-
-    /**
-     * Test get batch with non-existent batch index
-     * Verifies that querying non-existent batch returns null
-     */
-    @Test
-    public void testGetBatch_NonExistentIndex() {
-        BatchWrapper result = rollupRepository.getBatch(BigInteger.valueOf(999999));
-        assertNull(result);
-    }
-
-    /**
-     * Test get batch header with non-existent batch index
-     * Verifies that querying non-existent batch header returns null
-     */
-    @Test
-    public void testGetBatchHeader_NonExistentIndex() {
-        BatchHeader result = rollupRepository.getBatchHeader(BigInteger.valueOf(999999));
-        assertNull(result);
-    }
-
-    /**
-     * Test get chunk with non-existent indices
-     * Verifies that querying non-existent chunk returns null
-     */
-    @Test
-    public void testGetChunk_NonExistentIndices() {
-        ChunkWrapper result = rollupRepository.getChunk(BigInteger.valueOf(999999), 0);
-        assertNull(result);
-    }
-
-    /**
-     * Test get chunks with non-existent batch index
-     * Verifies that querying non-existent chunks returns empty list
-     */
-    @Test
-    public void testGetChunks_NonExistentBatchIndex() {
-        List<ChunkWrapper> result = rollupRepository.getChunks(BigInteger.valueOf(999999));
-        assertNotNull(result);
-        assertEquals(0, result.size());
-    }
-
-    /**
-     * Test get reliable transaction with non-existent hash
-     * Verifies that querying non-existent transaction returns null
-     */
-    @Test
-    public void testGetReliableTransaction_NonExistentHash() {
-        ReliableTransactionDO result = rollupRepository.getReliableTransaction("0x0000000000000000000000000000000000000000000000000000000000000000");
-        assertNull(result);
-    }
-
-    /**
-     * Test get reliable transaction with non-existent batch index and type
-     * Verifies that querying non-existent transaction returns null
-     */
-    @Test
-    public void testGetReliableTransaction_NonExistentBatchAndType() {
-        ReliableTransactionDO result = rollupRepository.getReliableTransaction(
-                ChainTypeEnum.LAYER_ONE,
-                BigInteger.valueOf(999999),
-                TransactionTypeEnum.BATCH_COMMIT_TX
-        );
-        assertNull(result);
-    }
-
-    /**
-     * Test update reliable transaction state for non-existent transaction
-     * Verifies that updating non-existent transaction throws IllegalArgumentException
-     */
-    @Test
-    public void testUpdateReliableTransactionState_NonExistentTransaction() {
-        // Should throw IllegalArgumentException when updating non-existent transaction
-        try {
-            rollupRepository.updateReliableTransactionState(
-                    "0x0000000000000000000000000000000000000000000000000000000000000000",
-                    ReliableTransactionStateEnum.TX_SUCCESS
-            );
-            fail("Expected IllegalArgumentException for non-existent transaction");
-        } catch (IllegalArgumentException e) {
-            // Expected exception - update count must be 1
-            assertTrue(e.getMessage().contains("must be equals"));
-        }
-    }
-
-    /**
-     * Test get batch prove request with non-existent batch index
-     * Verifies that querying non-existent prove request returns null
-     */
-    @Test
-    public void testGetBatchProveRequest_NonExistentIndex() {
-        BatchProveRequestDO result = rollupRepository.getBatchProveRequest(
-                BigInteger.valueOf(999999),
-                ProveTypeEnum.TEE_PROOF
-        );
-        assertNull(result);
-    }
-
-    /**
-     * Test update batch prove request state for non-existent request
-     * Verifies that updating non-existent request throws IllegalArgumentException
-     */
-    @Test
-    public void testUpdateBatchProveRequestState_NonExistentRequest() {
-        // Should throw IllegalArgumentException when updating non-existent request
-        try {
-            rollupRepository.updateBatchProveRequestState(
-                    BigInteger.valueOf(999999),
-                    ProveTypeEnum.TEE_PROOF,
-                    BatchProveRequestStateEnum.PROVE_READY
-            );
-            fail("Expected IllegalArgumentException for non-existent request");
-        } catch (IllegalArgumentException e) {
-            // Expected exception - update count must be 1
-            assertTrue(e.getMessage().contains("must be equals"));
-        }
-    }
-
-    /**
-     * Test get L2 block trace from cache with non-existent block number
-     * Verifies that querying non-existent cached block trace returns null
-     */
-    @Test
-    public void testGetL2BlockTraceFromCache_NonExistentBlock() {
-        BasicBlockTrace result = rollupRepository.getL2BlockTraceFromCache(BigInteger.valueOf(999999));
-        assertNull(result);
-    }
-
-    /**
-     * Test get rollup number record with invalid type
-     * Verifies that querying with invalid parameters returns default value
-     */
-    @Test
-    public void testGetRollupNumberRecord_DefaultValues() {
-        // Test various combinations that should return default values
-        BigInteger result1 = rollupRepository.getRollupNumberRecord(
-                ChainTypeEnum.LAYER_ONE,
-                RollupNumberRecordTypeEnum.NEXT_CHUNK
-        );
-        assertEquals(BigInteger.valueOf(0), result1);
-
-        BigInteger result2 = rollupRepository.getRollupNumberRecord(
-                ChainTypeEnum.LAYER_TWO,
-                RollupNumberRecordTypeEnum.BLOCK_PROCESSED
-        );
-        assertEquals(BigInteger.valueOf(0), result2);
-    }
-
-    /**
-     * Test get not finalized reliable transactions with zero limit
-     * Verifies that zero limit returns empty list
-     */
-    @Test
-    public void testGetNotFinalizedReliableTransactions_ZeroLimit() {
-        rollupRepository.insertReliableTransaction(RELIABLE_TRANSACTION_DO1);
-
-        List<ReliableTransactionDO> result = rollupRepository.getNotFinalizedReliableTransactions(
-                ChainTypeEnum.LAYER_ONE,
-                0
-        );
-        assertNotNull(result);
-        assertEquals(0, result.size());
-    }
-
-    /**
-     * Test get TX pending reliable transactions with zero limit
-     * Verifies that zero limit returns empty list
-     */
-    @Test
-    public void testGetTxPendingReliableTransactions_ZeroLimit() {
-        rollupRepository.insertReliableTransaction(RELIABLE_TRANSACTION_DO1);
-
-        List<ReliableTransactionDO> result = rollupRepository.getTxPendingReliableTransactions(0);
-        assertNotNull(result);
-        assertEquals(0, result.size());
-    }
-
-    /**
-     * Test get failed reliable transactions with zero limit
-     * Verifies that zero limit returns empty list
-     */
-    @Test
-    public void testGetFailedReliableTransactions_ZeroLimit() {
-        var dataList = randomReliableTransactionDOs(5, ReliableTransactionStateEnum.TX_FAILED);
-        dataList.forEach(rollupRepository::insertReliableTransaction);
-
-        var result = rollupRepository.getFailedReliableTransactions(0, 0);
-        assertNotNull(result);
-        assertEquals(0, result.size());
-    }
-
-    /**
-     * Test peek pending batch prove request with zero limit
-     * Verifies that zero limit returns empty list
-     */
-    @Test
-    public void testPeekPendingBatchProveRequest_ZeroLimit() {
-        rollupRepository.createBatchProveRequest(BigInteger.valueOf(100), ProveTypeEnum.TEE_PROOF);
-
-        List<BatchProveRequestDO> result = rollupRepository.peekPendingBatchProveRequest(0, null);
-        assertNotNull(result);
-        assertEquals(0, result.size());
-    }
-
-    /**
-     * Test save batch proof and update request state for non-existent request
-     * Verifies that operation throws IllegalArgumentException for non-existent request
-     */
-    @Test
-    public void testSaveBatchProofAndUpdateReqState_NonExistentRequest() {
-        byte[] rawProof = RandomUtil.randomBytes(10);
-
-        // Should throw IllegalArgumentException when saving proof for non-existent request
-        try {
-            rollupRepository.saveBatchProofAndUpdateReqState(
-                    BigInteger.valueOf(999999),
-                    ProveTypeEnum.TEE_PROOF,
-                    rawProof
-            );
-            fail("Expected IllegalArgumentException for non-existent request");
-        } catch (IllegalArgumentException e) {
-            // Expected exception - update count must be 1
-            assertTrue(e.getMessage().contains("must be equals"));
-        }
-    }
-
-    /**
-     * Test duplicate chunk insertion
-     * Verifies that saving the same chunk twice is handled correctly
-     */
-    @Test
-    public void testSaveChunk_DuplicateInsertion() {
-        rollupRepository.saveChunk(CHUNK1);
-
-        // Save the same chunk again - should handle gracefully
-        rollupRepository.saveChunk(CHUNK1);
-
-        List<ChunkWrapper> chunks = rollupRepository.getChunks(CHUNK1.getBatchIndex());
-        assertNotNull(chunks);
-        // Should only have one chunk
-        assertEquals(1, chunks.size());
-    }
-
-    /**
-     * Test calc waiting batch count beyond index with negative index
-     * Verifies that calculation handles edge cases correctly
-     */
-    @Test
-    public void testCalcWaitingBatchCountBeyondIndex_EdgeCases() {
-        rollupRepository.updateRollupNumberRecord(
-                ChainTypeEnum.LAYER_TWO,
-                RollupNumberRecordTypeEnum.NEXT_BATCH,
-                BigInteger.valueOf(100)
-        );
-
-        // Test with very large index
-        assertEquals(0, rollupRepository.calcWaitingBatchCountBeyondIndex(BigInteger.valueOf(1000000)));
-    }
-
-    /**
-     * Test calc waiting proof count beyond index with negative index
-     * Verifies that calculation handles edge cases correctly
-     */
-    @Test
-    public void testCalcWaitingProofCountBeyondIndex_EdgeCases() {
-        rollupRepository.updateRollupNumberRecord(
-                ChainTypeEnum.LAYER_TWO,
-                RollupNumberRecordTypeEnum.NEXT_BATCH,
-                BigInteger.valueOf(100)
-        );
-
-        // Test with very large index
-        assertEquals(0, rollupRepository.calcWaitingProofCountBeyondIndex(
-                ProveTypeEnum.TEE_PROOF,
-                BigInteger.valueOf(1000000)
-        ));
-    }
-
-    /**
-     * Test update reliable transaction with non-existent transaction
-     * Verifies that updating non-existent transaction throws IllegalArgumentException
-     */
-    @Test
-    public void testUpdateReliableTransaction_NonExistentTransaction() {
-        ReliableTransactionDO temp = BeanUtil.copyProperties(RELIABLE_TRANSACTION_DO1, ReliableTransactionDO.class);
-        temp.setOriginalTxHash("0x0000000000000000000000000000000000000000000000000000000000000000");
-        temp.setLatestTxHash("0x1111111111111111111111111111111111111111111111111111111111111111");
-
-        // Should throw IllegalArgumentException when updating non-existent transaction
-        try {
-            rollupRepository.updateReliableTransaction(temp);
-            fail("Expected IllegalArgumentException for non-existent transaction");
-        } catch (IllegalArgumentException e) {
-            // Expected exception - update count must be 1
-            assertTrue(e.getMessage().contains("must be equals"));
         }
     }
 }

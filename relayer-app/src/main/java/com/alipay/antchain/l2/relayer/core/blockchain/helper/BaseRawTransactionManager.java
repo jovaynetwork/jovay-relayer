@@ -1,3 +1,19 @@
+/*
+ * Copyright 2026 Ant Group
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.alipay.antchain.l2.relayer.core.blockchain.helper;
 
 import java.io.IOException;
@@ -39,6 +55,8 @@ public abstract class BaseRawTransactionManager extends RawTransactionManager im
 
     private final RLock sendTxLock;
 
+    private final RLock sendL1MsgLock;
+
     private final Web3j web3j;
 
     private final long chainId;
@@ -50,6 +68,7 @@ public abstract class BaseRawTransactionManager extends RawTransactionManager im
     public BaseRawTransactionManager(Web3j web3j, TxSignService txSignService, long chainId, RedissonClient redisson, EthBlobForkConfig ethBlobForkConfig) {
         super(web3j, txSignService, chainId);
         sendTxLock = redisson.getLock(getSendTxLockKey(chainId, txSignService.getAddress()));
+        sendL1MsgLock = redisson.getLock(getSendTxLockKey(chainId, L1MsgTransaction.L1_MAILBOX_AS_SENDER.toString()));
         this.web3j = web3j;
         this.chainId = chainId;
         this.txSignService = txSignService;
@@ -65,11 +84,11 @@ public abstract class BaseRawTransactionManager extends RawTransactionManager im
         EthSendTransaction ethSendTransaction;
         try {
             ethSendTransaction = web3j.ethSendRawTransaction(hexValue).send();
-        } catch (Exception e) {
+        } catch (Throwable t) {
             if (L1MsgTransaction.L2_MAILBOX_AS_RECEIVER.equals(new Address(to)) && ObjectUtil.isNull(gasPrice)) {
-                throw e;
+                throw t;
             }
-            return handleSendRawTxFailedRpc(e, hexValue);
+            return handleSendRawTxFailedRpc(t, hexValue);
         }
 
         if (ethSendTransaction != null && !ethSendTransaction.hasError()) {
@@ -133,11 +152,11 @@ public abstract class BaseRawTransactionManager extends RawTransactionManager im
         EthSendTransaction ethSendTransaction;
         try {
             ethSendTransaction = getWeb3j().ethSendRawTransaction(signedRawTx).send();
-        } catch (Exception e) {
+        } catch (Throwable t) {
             if (L1MsgTransaction.L2_MAILBOX_AS_RECEIVER.equals(new Address(to)) && ObjectUtil.isNull(gasPrice)) {
-                throw e;
+                throw t;
             }
-            return handleSendRawTxFailedRpc(e, signedRawTx);
+            return handleSendRawTxFailedRpc(t, signedRawTx);
         }
         return SendTxResult.builder()
                 .rawTxHex(Numeric.cleanHexPrefix(signedRawTx))
@@ -148,16 +167,11 @@ public abstract class BaseRawTransactionManager extends RawTransactionManager im
     }
 
     @Override
-    public SendTxResult sendL1MsgTx(BigInteger gasLimit, BigInteger nonce, String data) throws IOException {
-        return sendTx(null, gasLimit, L1MsgTransaction.L2_MAILBOX_AS_RECEIVER.toString(), data, nonce, BigInteger.ZERO, false);
-    }
-
-    @Override
     public String getAddress() {
         return txSignService.getAddress();
     }
 
-    private SendTxResult handleSendRawTxFailedRpc(Exception e, String hexRawTx) {
+    private SendTxResult handleSendRawTxFailedRpc(Throwable e, String hexRawTx) {
         var rawTransactionWithSig = (SignedRawTransaction) EthTxDecoder.decode(hexRawTx);
         var txhash = rawTransactionWithSig.getTransaction().getType().isEip4844() ?
                 Utils.calcEip4844TxHash(
@@ -165,6 +179,7 @@ public abstract class BaseRawTransactionManager extends RawTransactionManager im
                         rawTransactionWithSig.getSignatureData()
                 ) : Hash.sha3(hexRawTx);
         var retryCount = 3;
+        var queryTxRetryCount = 3;
         while (retryCount-- != 0) {
             EthTransaction txSent;
             try {
@@ -188,17 +203,23 @@ public abstract class BaseRawTransactionManager extends RawTransactionManager im
                         .ethSendTransaction(res)
                         .nonce(rawTransactionWithSig.getNonce())
                         .build();
+            } else {
+                if (queryTxRetryCount-- != 0) {
+                    // if query tx successful, do not consume the count of retries
+                    retryCount++;
+                    continue;
+                }
+                log.error("rpc to send tx failed for tx {} and no tx found on eth node: ", txhash, e);
+                var res = new EthSendTransaction();
+                res.setResult(txhash);
+                res.setError(new Response.Error(-1, "rpc failed"));
+                return SendTxResult.builder()
+                        .rawTxHex(Numeric.cleanHexPrefix(hexRawTx))
+                        .txSendTime(new Date())
+                        .ethSendTransaction(res)
+                        .nonce(rawTransactionWithSig.getNonce())
+                        .build();
             }
-            log.error("rpc to send tx failed for tx {} and no tx found on eth node: ", txhash, e);
-            var res = new EthSendTransaction();
-            res.setResult(txhash);
-            res.setError(new Response.Error(-1, "rpc failed"));
-            return SendTxResult.builder()
-                    .rawTxHex(Numeric.cleanHexPrefix(hexRawTx))
-                    .txSendTime(new Date())
-                    .ethSendTransaction(res)
-                    .nonce(rawTransactionWithSig.getNonce())
-                    .build();
         }
         log.error("rpc to send raw tx failed, try to search the tx from node and rpc still failed: {}", txhash);
         throw new RuntimeException(e);

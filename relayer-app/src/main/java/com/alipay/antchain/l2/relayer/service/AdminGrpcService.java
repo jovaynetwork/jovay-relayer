@@ -1,3 +1,19 @@
+/*
+ * Copyright 2026 Ant Group
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.alipay.antchain.l2.relayer.service;
 
 import java.math.BigInteger;
@@ -9,18 +25,21 @@ import cn.hutool.core.lang.Assert;
 import cn.hutool.core.util.HexUtil;
 import cn.hutool.core.util.ObjectUtil;
 import cn.hutool.core.util.StrUtil;
-import com.alipay.antchain.l2.relayer.commons.enums.ChainTypeEnum;
-import com.alipay.antchain.l2.relayer.commons.enums.ReliableTransactionStateEnum;
-import com.alipay.antchain.l2.relayer.commons.enums.TransactionTypeEnum;
+import com.alipay.antchain.l2.relayer.commons.enums.*;
+import com.alipay.antchain.l2.relayer.commons.enums.*;
+import com.alipay.antchain.l2.relayer.commons.exceptions.L1ContractWarnException;
+import com.alipay.antchain.l2.relayer.commons.exceptions.ProofNotReadyException;
 import com.alipay.antchain.l2.relayer.commons.l2basic.BatchHeader;
 import com.alipay.antchain.l2.relayer.commons.l2basic.BatchVersionEnum;
 import com.alipay.antchain.l2.relayer.commons.l2basic.ChunksPayload;
 import com.alipay.antchain.l2.relayer.commons.l2basic.L2MsgProofData;
 import com.alipay.antchain.l2.relayer.commons.merkle.AppendMerkleTree;
 import com.alipay.antchain.l2.relayer.commons.models.BatchWrapper;
+import com.alipay.antchain.l2.relayer.commons.models.ReliableTransactionDO;
 import com.alipay.antchain.l2.relayer.commons.models.TransactionInfo;
 import com.alipay.antchain.l2.relayer.core.blockchain.L1Client;
 import com.alipay.antchain.l2.relayer.core.blockchain.L2Client;
+import com.alipay.antchain.l2.relayer.core.blockchain.helper.CachedNonceManager;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.gasprice.DynamicGasPriceProviderConfig;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.gasprice.GasPriceProviderConfig;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.gasprice.IGasPriceProviderConfig;
@@ -32,15 +51,16 @@ import com.google.protobuf.ByteString;
 import io.grpc.stub.StreamObserver;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
-import net.devh.boot.grpc.server.service.GrpcService;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.security.access.annotation.Secured;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.stereotype.Component;
+import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.support.TransactionCallbackWithoutResult;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.web3j.abi.datatypes.generated.Bytes32;
+import org.web3j.protocol.core.methods.response.EthSendTransaction;
 import org.web3j.utils.Numeric;
 
-@GrpcService
-@Secured("ROLE_ADMIN")
+@Component
 @Slf4j
 public class AdminGrpcService extends AdminServiceGrpc.AdminServiceImplBase {
 
@@ -68,11 +88,11 @@ public class AdminGrpcService extends AdminServiceGrpc.AdminServiceImplBase {
     @Resource(name = "l1-gasprice-provider-conf")
     private IGasPriceProviderConfig l1GasPriceProviderConfig;
 
-    @Resource(name = "l2-gasprice-provider-conf")
-    private IGasPriceProviderConfig l2GasPriceProviderConfig;
-
     @Resource
     private RollupEconomicStrategyConfig rollupEconomicStrategyConfig;
+
+    @Resource
+    private TransactionTemplate transactionTemplate;
 
     @Value("${l2-relayer.tasks.reliable-tx.retry-limit:0}")
     private int retryCountLimit;
@@ -132,7 +152,7 @@ public class AdminGrpcService extends AdminServiceGrpc.AdminServiceImplBase {
                             BatchHeaderInfo.newBuilder()
                                     .setHash(batchHeader.getHashHex())
                                     .setBatchIndex(batchHeader.getBatchIndex().longValue())
-                                    .setVersion(batchHeader.getVersion().getValue())
+                                    .setVersion(batchHeader.getVersion().getValueAsUint8())
                                     .setParentBatchHash(HexUtil.encodeHexStr(batchHeader.getParentBatchHash()))
                                     .setDataHash(HexUtil.encodeHexStr(batchHeader.getDataHash()))
                                     .setL1MsgRollingHash(Numeric.toHexString(batchHeader.getL1MsgRollingHash()))
@@ -149,9 +169,8 @@ public class AdminGrpcService extends AdminServiceGrpc.AdminServiceImplBase {
                                         .build()
                                 ).collect(Collectors.toList());
                                 return Chunk.newBuilder()
-                                        .setHash(HexUtil.encodeHexStr(x.getHash()))
                                         .setL2Transactions(ByteString.copyFrom(x.getL2Transactions()))
-                                        .setNumBlocks(x.getNumBlocks())
+                                        .setNumBlocks(Math.toIntExact(x.getNumBlocks()))
                                         .addAllBlocks(blockContexts)
                                         .build();
                             }).collect(Collectors.toList())
@@ -188,8 +207,8 @@ public class AdminGrpcService extends AdminServiceGrpc.AdminServiceImplBase {
                                     .addAllChunks(
                                             ((ChunksPayload) batchWrapper.getBatch().getPayload()).chunks().stream()
                                                     .map(x -> RawChunkInfo.newBuilder()
-                                                            .setHash(HexUtil.encodeHexStr(Assert.notNull(x.getHash())))
-                                                            .setRawChunk(ByteString.copyFrom(x.serialize()))
+                                                            .setRawChunk(ByteString.copyFrom(batchWrapper.getBatchHeader()
+                                                                    .getVersion().getChunkCodec().serialize(x)))
                                                             .build()
                                                     ).collect(Collectors.toList())
                                     ).setDaInfo(
@@ -236,24 +255,28 @@ public class AdminGrpcService extends AdminServiceGrpc.AdminServiceImplBase {
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public void retryBatchTx(RetryBatchTxReq request, StreamObserver<Response> responseObserver) {
         try {
-            log.info("retry batch txs from {} to {}", request.getFromBatchIndex(), request.getToBatchIndex());
-            if (retryCountLimit <= 0) {
-                throw new RuntimeException("setting `l2-relayer.tasks.reliable-tx.retry-limit` has to be none-zero");
-            }
-            for (long i = request.getFromBatchIndex(); i <= request.getToBatchIndex(); i++) {
-                var tx = rollupRepository.getReliableTransaction(ChainTypeEnum.LAYER_ONE, BigInteger.valueOf(i), TransactionTypeEnum.valueOf(request.getType()));
-                if (tx.getState() != ReliableTransactionStateEnum.TX_FAILED) {
-                    log.warn("tx for batch#{} with type {} is not failed, only support that retry the failed tx", i, request.getType());
-                    continue;
+            transactionTemplate.execute(new TransactionCallbackWithoutResult() {
+                @Override
+                protected void doInTransactionWithoutResult(TransactionStatus status) {
+                    log.info("retry batch txs from {} to {}", request.getFromBatchIndex(), request.getToBatchIndex());
+                    if (retryCountLimit <= 0) {
+                        throw new RuntimeException("setting `l2-relayer.tasks.reliable-tx.retry-limit` has to be none-zero");
+                    }
+                    for (long i = request.getFromBatchIndex(); i <= request.getToBatchIndex(); i++) {
+                        var tx = rollupRepository.getReliableTransaction(ChainTypeEnum.LAYER_ONE, BigInteger.valueOf(i), TransactionTypeEnum.valueOf(request.getType()));
+                        if (tx.getState() != ReliableTransactionStateEnum.TX_FAILED) {
+                            log.warn("tx for batch#{} with type {} is not failed, only support that retry the failed tx", i, request.getType());
+                            continue;
+                        }
+                        tx.setRetryCount(0);
+                        rollupRepository.updateReliableTransaction(tx);
+                        log.info("set tx for batch#{} with type {} to pending and reset retry count to zero", i, request.getType());
+                    }
+                    responseObserver.onNext(Response.newBuilder().setCode(0).build());
                 }
-                tx.setRetryCount(0);
-                rollupRepository.updateReliableTransaction(tx);
-                log.info("set tx for batch#{} with type {} to pending and reset retry count to zero", i, request.getType());
-            }
-            responseObserver.onNext(Response.newBuilder().setCode(0).build());
+            });
         } catch (Throwable t) {
             log.error("failed to retry batch tx: ", t);
             responseObserver.onNext(Response.newBuilder().setCode(-1).setErrorMsg(t.getMessage()).build());
@@ -399,7 +422,6 @@ public class AdminGrpcService extends AdminServiceGrpc.AdminServiceImplBase {
     }
 
     @Override
-    @Transactional
     public void speedupTx(SpeedupTxReq request, StreamObserver<Response> responseObserver) {
         try {
             log.info("⏩ speedup tx for {}-{}-{}", request.getChainType(), request.getType(), request.getBatchIndex());
@@ -527,6 +549,259 @@ public class AdminGrpcService extends AdminServiceGrpc.AdminServiceImplBase {
             ).build());
         } catch (Throwable t) {
             log.error("failed to get rollup economic strategy config: ", t);
+            responseObserver.onNext(Response.newBuilder().setCode(-1).setErrorMsg(t.getMessage()).build());
+        } finally {
+            responseObserver.onCompleted();
+        }
+    }
+
+    @Override
+    public void wasteEthAccountNonce(WasteEthAccountNonceReq request, StreamObserver<Response> responseObserver) {
+        try {
+            log.info("waste eth account nonce : (chain: {}, account: {}, nonce: {})",
+                    request.getChainType(), request.getAddress(), request.getNonce());
+            EthSendTransaction result;
+            if (request.getChainType() == ChainType.L1) {
+                result = l1Client.sendTransferValueTx(request.getAddress(), request.getAddress(), BigInteger.valueOf(request.getNonce()), BigInteger.ZERO);
+            } else {
+                result = l2Client.sendTransferValueTx(request.getAddress(), request.getAddress(), BigInteger.valueOf(request.getNonce()), BigInteger.ZERO);
+            }
+            responseObserver.onNext(Response.newBuilder().setCode(0)
+                    .setWasteEthAccountNonceResp(WasteEthAccountNonceResp.newBuilder().setTxHash(result.getTransactionHash())).build());
+        } catch (Throwable t) {
+            log.error("failed to waste eth account nonce: ", t);
+            responseObserver.onNext(Response.newBuilder().setCode(-1).setErrorMsg(t.getMessage()).build());
+        } finally {
+            responseObserver.onCompleted();
+        }
+    }
+
+    @Override
+    public void commitBatchManually(CommitBatchManuallyReq request, StreamObserver<Response> responseObserver) {
+        try {
+            transactionTemplate.execute(new TransactionCallbackWithoutResult() {
+                @Override
+                protected void doInTransactionWithoutResult(TransactionStatus status) {
+                    log.info("try to commit batch manually : (batchIndex: {})", request.getBatchIndex());
+                    var lastCommittedBatchIdx = l1Client.lastCommittedBatch();
+                    var batchIndex = BigInteger.valueOf(request.getBatchIndex());
+                    if (lastCommittedBatchIdx.compareTo(batchIndex) >= 0) {
+                        throw new RuntimeException(StrUtil.format(
+                                "no need to commit this batch {} because of last committed batch is {}",
+                                request.getBatchIndex(), lastCommittedBatchIdx
+                        ));
+                    }
+                    if (!lastCommittedBatchIdx.equals(batchIndex.subtract(BigInteger.ONE))) {
+                        throw new RuntimeException(StrUtil.format(
+                                "you can't skip to commit, next batch is {}", lastCommittedBatchIdx.add(BigInteger.ONE)
+                        ));
+                    }
+                    var txCommitted = rollupRepository.getReliableTransaction(ChainTypeEnum.LAYER_ONE, batchIndex, TransactionTypeEnum.BATCH_COMMIT_TX);
+                    if (ObjectUtil.isNotNull(txCommitted) && ReliableTransactionStateEnum.considerAsSuccess(txCommitted.getState())) {
+                        throw new RuntimeException(StrUtil.format(
+                                "no need to commit this batch {} because of batch has been confirmed success, tx: {}",
+                                request.getBatchIndex(), txCommitted.getLatestTxHash()
+                        ));
+                    }
+                    var batch = rollupRepository.getBatch(batchIndex);
+                    if (ObjectUtil.isNull(batch)) {
+                        throw new RuntimeException(StrUtil.format("batch {} not exists", request.getBatchIndex()));
+                    }
+
+                    TransactionInfo transactionInfo;
+                    try {
+                        transactionInfo = l1Client.commitBatchWithEthCall(batch);
+                    } catch (L1ContractWarnException e) {
+                        throw new RuntimeException(StrUtil.format("rollup contract shows that batch {} has been committed", batchIndex));
+                    }
+                    log.info("successful to commit batch {} manually with txhash {}", batchIndex, transactionInfo.getTxHash());
+                    var reliableTx = ReliableTransactionDO.builder()
+                            .rawTx(transactionInfo.getRawTx())
+                            .latestTxHash(transactionInfo.getTxHash())
+                            .originalTxHash(transactionInfo.getTxHash())
+                            .nonce(transactionInfo.getNonce().longValue())
+                            .state(ReliableTransactionStateEnum.TX_PENDING)
+                            .chainType(ChainTypeEnum.LAYER_ONE)
+                            .senderAccount(transactionInfo.getSenderAccount())
+                            .latestTxSendTime(transactionInfo.getSendTxTime())
+                            .batchIndex(batch.getBatch().getBatchIndex())
+                            .transactionType(TransactionTypeEnum.BATCH_COMMIT_TX)
+                            .build();
+                    var batchCommittedLocally = rollupRepository.getRollupNumberRecord(ChainTypeEnum.LAYER_TWO, RollupNumberRecordTypeEnum.BATCH_COMMITTED);
+                    if (batchCommittedLocally.compareTo(batchIndex) < 0) {
+                        rollupRepository.updateRollupNumberRecord(ChainTypeEnum.LAYER_TWO, RollupNumberRecordTypeEnum.BATCH_COMMITTED, batchIndex);
+                    }
+                    if (ObjectUtil.isNotNull(txCommitted)) {
+                        rollupRepository.updateReliableTransaction(reliableTx);
+                    } else {
+                        rollupRepository.insertReliableTransaction(reliableTx);
+                    }
+                    responseObserver.onNext(Response.newBuilder().setCode(0)
+                            .setCommitBatchManuallyResp(CommitBatchManuallyResp.newBuilder().setTxHash(transactionInfo.getTxHash())).build());
+                }
+            });
+        } catch (Throwable t) {
+            log.error("failed to commit batch manually: ", t);
+            responseObserver.onNext(Response.newBuilder().setCode(-1).setErrorMsg(t.getMessage()).build());
+        } finally {
+            responseObserver.onCompleted();
+        }
+    }
+
+    @Override
+    public void commitProofManually(CommitProofManuallyReq request, StreamObserver<Response> responseObserver) {
+        try {
+            log.info("try to commit proof manually : (batchIndex: {}, type: {})", request.getBatchIndex(), request.getProofType());
+            var proofType = request.getProofType() == ProofType.TEE ? ProveTypeEnum.TEE_PROOF : ProveTypeEnum.ZK_PROOF;
+            var batchIndex = BigInteger.valueOf(request.getBatchIndex());
+
+            var lastCommittedProofIdx = request.getProofType() == ProofType.TEE ? l1Client.lastTeeVerifiedBatch() : l1Client.lastZkVerifiedBatch();
+            if (lastCommittedProofIdx.compareTo(batchIndex) >= 0) {
+                throw new RuntimeException(StrUtil.format(
+                        "no need to commit this proof {} because of last committed proof is {}",
+                        request.getBatchIndex(), lastCommittedProofIdx
+                ));
+            }
+            if (!lastCommittedProofIdx.equals(batchIndex.subtract(BigInteger.ONE))) {
+                throw new RuntimeException(StrUtil.format(
+                        "you can't skip to commit, next proof is {}", lastCommittedProofIdx.add(BigInteger.ONE)
+                ));
+            }
+
+            var txType = request.getProofType() == ProofType.TEE ? TransactionTypeEnum.BATCH_TEE_PROOF_COMMIT_TX : TransactionTypeEnum.BATCH_ZK_PROOF_COMMIT_TX;
+            var txCommitted = rollupRepository.getReliableTransaction(ChainTypeEnum.LAYER_ONE, batchIndex, txType);
+            if (ObjectUtil.isNotNull(txCommitted) && ReliableTransactionStateEnum.considerAsSuccess(txCommitted.getState())) {
+                throw new RuntimeException(StrUtil.format(
+                        "no need to commit this proof {} because of tx for this proof has been confirmed success, tx: {}",
+                        request.getBatchIndex(), txCommitted.getLatestTxHash()
+                ));
+            }
+
+            var proofRequest = rollupRepository.getBatchProveRequest(batchIndex, proofType);
+            if (ObjectUtil.isNull(proofRequest) || ObjectUtil.isEmpty(proofRequest.getProof()) || proofRequest.getState() == BatchProveRequestStateEnum.PENDING) {
+                log.debug("tee proof for next batch {} not ready, please wait...", request.getBatchIndex());
+                throw new ProofNotReadyException(ProveTypeEnum.TEE_PROOF, batchIndex);
+            }
+            var batch = rollupRepository.getBatch(batchIndex);
+            if (ObjectUtil.isNull(batch)) {
+                throw new RuntimeException(StrUtil.format("batch {} not exists", request.getBatchIndex()));
+            }
+
+            TransactionInfo transactionInfo;
+            try {
+                transactionInfo = l1Client.verifyBatchWithEthCall(batch, proofRequest);
+            } catch (L1ContractWarnException e) {
+                throw new RuntimeException(StrUtil.format("rollup contract shows that {} batch proof {} has been committed", proofType, batchIndex));
+            }
+            log.info("successful to commit proof {} manually with txhash {}", batchIndex, transactionInfo.getTxHash());
+            var reliableTx = ReliableTransactionDO.builder()
+                    .rawTx(transactionInfo.getRawTx())
+                    .latestTxHash(transactionInfo.getTxHash())
+                    .originalTxHash(transactionInfo.getTxHash())
+                    .nonce(transactionInfo.getNonce().longValue())
+                    .state(ReliableTransactionStateEnum.TX_PENDING)
+                    .chainType(ChainTypeEnum.LAYER_ONE)
+                    .senderAccount(transactionInfo.getSenderAccount())
+                    .latestTxSendTime(transactionInfo.getSendTxTime())
+                    .batchIndex(batch.getBatch().getBatchIndex())
+                    .transactionType(txType)
+                    .build();
+
+            if (ObjectUtil.isNotNull(txCommitted)) {
+                rollupRepository.updateReliableTransaction(reliableTx);
+            } else {
+                rollupRepository.insertReliableTransaction(reliableTx);
+            }
+            responseObserver.onNext(Response.newBuilder().setCode(0)
+                    .setCommitProofManuallyResp(CommitProofManuallyResp.newBuilder().setTxHash(transactionInfo.getTxHash())).build());
+        } catch (Throwable t) {
+            log.error("failed to commit proof manually: ", t);
+            responseObserver.onNext(Response.newBuilder().setCode(-1).setErrorMsg(t.getMessage()).build());
+        } finally {
+            responseObserver.onCompleted();
+        }
+    }
+
+    @Override
+    public void updateNonceManually(UpdateNonceManuallyReq request, StreamObserver<Response> responseObserver) {
+        try {
+            log.info("try to update nonce : (chainType: {}, accType: {})", request.getChainType(), request.getAccType());
+            var nonceManager = switch (request.getChainType()) {
+                case L1 -> switch (request.getAccType()) {
+                    case BLOB -> l1Client.getBlobPoolTxManager().getNonceManager();
+                    case LEGACY -> l1Client.getLegacyPoolTxManager().getNonceManager();
+                    default -> throw new RuntimeException("unknown acc type");
+                };
+                case L2 -> switch (request.getAccType()) {
+                    case BLOB -> l2Client.getBlobPoolTxManager().getNonceManager();
+                    case LEGACY -> l2Client.getLegacyPoolTxManager().getNonceManager();
+                    default -> throw new RuntimeException("unknown acc type");
+                };
+                default -> throw new RuntimeException("unknown chain type");
+            };
+            Assert.isInstanceOf(CachedNonceManager.class, nonceManager, "only supports cached nonce manager");
+            ((CachedNonceManager) nonceManager).setNonceIntoCache(BigInteger.valueOf(request.getNonce()));
+            responseObserver.onNext(Response.newBuilder().setCode(0).build());
+        } catch (Throwable t) {
+            log.error("failed to update nonce: ", t);
+            responseObserver.onNext(Response.newBuilder().setCode(-1).setErrorMsg(t.getMessage()).build());
+        } finally {
+            responseObserver.onCompleted();
+        }
+    }
+
+    @Override
+    public void queryCurrNonce(QueryCurrNonceReq request, StreamObserver<Response> responseObserver) {
+        try {
+            log.info("try to query curr nonce : (chainType: {}, accType: {})", request.getChainType(), request.getAccType());
+            responseObserver.onNext(Response.newBuilder().setQueryCurrNonceResp(QueryCurrNonceResp.newBuilder().setNonce(
+                    (switch (request.getChainType()) {
+                        case L1 -> switch (request.getAccType()) {
+                            case BLOB -> l1Client.getBlobPoolTxManager().getNonceManager().getNextNonce();
+                            case LEGACY -> l1Client.getLegacyPoolTxManager().getNonceManager().getNextNonce();
+                            default -> throw new RuntimeException("unknown acc type");
+                        };
+                        case L2 -> switch (request.getAccType()) {
+                            case BLOB -> l2Client.getBlobPoolTxManager().getNonceManager().getNextNonce();
+                            case LEGACY -> l2Client.getLegacyPoolTxManager().getNonceManager().getNextNonce();
+                            default -> throw new RuntimeException("unknown acc type");
+                        };
+                        default -> throw new RuntimeException("unknown chain type");
+                    }).longValue()
+            )).setCode(0).build());
+        } catch (Throwable t) {
+            log.error("failed to query curr nonce: ", t);
+            responseObserver.onNext(Response.newBuilder().setCode(-1).setErrorMsg(t.getMessage()).build());
+        } finally {
+            responseObserver.onCompleted();
+        }
+    }
+
+    @Override
+    public void refetchProof(RefetchProofReq request, StreamObserver<Response> responseObserver) {
+        try {
+            transactionTemplate.execute(new TransactionCallbackWithoutResult() {
+                @Override
+                protected void doInTransactionWithoutResult(TransactionStatus status) {
+                    log.info("refetch {} proof for batch range [{}, {}]",
+                            request.getProofType(), request.getFromBatchIndex(), request.getToBatchIndex());
+                    var startBatch = new BigInteger(request.getFromBatchIndex());
+                    var endBatch = new BigInteger(request.getToBatchIndex());
+                    var proofType = ProveTypeEnum.valueOf(request.getProofType().toUpperCase());
+                    for (var curr = startBatch; curr.compareTo(endBatch) <= 0; curr = curr.add(BigInteger.ONE)) {
+                        var proveReq = rollupRepository.getBatchProveRequest(curr, proofType);
+                        if (ObjectUtil.isNull(proveReq)) {
+                            log.warn("{} batch prove request for batch {} not found", proofType, curr);
+                            continue;
+                        }
+                        rollupRepository.updateBatchProveRequestState(curr, proofType, BatchProveRequestStateEnum.PENDING);
+                        log.info("successful to update batch prove request state for batch {}", curr);
+                    }
+                    responseObserver.onNext(Response.newBuilder().setCode(0).build());
+                }
+            });
+        } catch (Throwable t) {
+            log.error("failed to refetch proof: ", t);
             responseObserver.onNext(Response.newBuilder().setCode(-1).setErrorMsg(t.getMessage()).build());
         } finally {
             responseObserver.onCompleted();

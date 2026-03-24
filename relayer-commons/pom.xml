@@ -6,14 +6,14 @@
     <parent>
         <groupId>com.alipay.antchain.l2</groupId>
         <artifactId>l2-relayer</artifactId>
-        <version>0.9.0</version>
+        <version>0.11.0</version>
     </parent>
 
     <artifactId>relayer-commons</artifactId>
 
     <properties>
-        <maven.compiler.source>17</maven.compiler.source>
-        <maven.compiler.target>17</maven.compiler.target>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
@@ -141,6 +141,32 @@
                         </goals>
                     </execution>
                 </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.web3j</groupId>
+                <artifactId>web3j-maven-plugin</artifactId>
+                <version>4.13.0</version>
+                <configuration>
+                    <packageName>com.alipay.antchain.l2.relayer.commons.abi</packageName>
+                    <sourceDestination>src/main/java</sourceDestination>
+                    <nativeJavaType>true</nativeJavaType>
+                    <outputFormat>java</outputFormat>
+                    <abiSourceFiles>
+                        <directory>../relayer-app/src/main/resources/abi/level-1</directory>
+                        <includes>
+                            <include>IMailBoxBase.json</include>
+                            <include>Rollup.json</include>
+                            <include>L1GasOracle.json</include>
+                            <include>L2CoinBase.json</include>
+                        </includes>
+                    </abiSourceFiles>
+                    <outputDirectory>
+                        <java>src/main/java</java>
+                    </outputDirectory>
+                    <pathPrefixes>
+                        <pathPrefix>dep=../dependencies</pathPrefix>
+                    </pathPrefixes>
+                </configuration>
             </plugin>
         </plugins>
     </build>

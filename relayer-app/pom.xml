@@ -5,15 +5,15 @@
     <parent>
         <groupId>com.alipay.antchain.l2</groupId>
         <artifactId>l2-relayer</artifactId>
-        <version>0.9.0</version>
+        <version>0.11.0</version>
     </parent>
 
     <artifactId>relayer-app</artifactId>
     <packaging>jar</packaging>
 
     <properties>
-        <maven.compiler.source>17</maven.compiler.source>
-        <maven.compiler.target>17</maven.compiler.target>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
@@ -25,10 +25,6 @@
         <dependency>
             <groupId>org.springframework</groupId>
             <artifactId>spring-aspects</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.security</groupId>
-            <artifactId>spring-security-config</artifactId>
         </dependency>
 
         <dependency>
@@ -47,7 +43,7 @@
         </dependency>
         <dependency>
             <groupId>org.redisson</groupId>
-            <artifactId>redisson-spring-data-27</artifactId>
+            <artifactId>redisson-spring-data-35</artifactId>
         </dependency>
         <dependency>
             <groupId>it.ozimov</groupId>
@@ -78,11 +74,6 @@
             <scope>test</scope>
         </dependency>
         <dependency>
-            <groupId>org.junit.vintage</groupId>
-            <artifactId>junit-vintage-engine</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
             <groupId>com.h2database</groupId>
             <artifactId>h2</artifactId>
             <scope>test</scope>
@@ -102,14 +93,6 @@
         <dependency>
             <groupId>net.devh</groupId>
             <artifactId>grpc-client-spring-boot-starter</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>net.devh</groupId>
-            <artifactId>grpc-server-spring-boot-starter</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>net.devh</groupId>
-            <artifactId>grpc-server-spring-boot-autoconfigure</artifactId>
         </dependency>
         <dependency>
             <groupId>com.alipay.antchain.l2</groupId>
@@ -243,42 +226,6 @@
                         </goals>
                     </execution>
                 </executions>
-            </plugin>
-            <plugin>
-                <groupId>org.web3j</groupId>
-                <artifactId>web3j-maven-plugin</artifactId>
-                <version>4.13.0</version>
-                <configuration>
-                    <packageName>com.alipay.antchain.l2.relayer.core.blockchain.abi</packageName>
-                    <sourceDestination>src/main/java</sourceDestination>
-                    <nativeJavaType>true</nativeJavaType>
-                    <outputFormat>java</outputFormat>
-                    <soliditySourceFiles>
-                        <directory>src/main/resources/contracts</directory>
-                        <includes>
-                            <include>**/*.sol</include>
-                        </includes>
-                    </soliditySourceFiles>
-                    <abiSourceFiles>
-                        <!--no api for us, errors come up if abiSourceFiles not set-->
-                        <directory>src/main/resources/contracts/noop</directory>
-                        <includes>
-                            <include>xxx.json</include>
-                        </includes>
-                    </abiSourceFiles>
-                    <contract>
-                        <includes>
-                            <include>Rollup</include>
-                            <include>IMailBoxBase</include>
-                        </includes>
-                    </contract>
-                    <outputDirectory>
-                        <java>src/main/java</java>
-                    </outputDirectory>
-                    <pathPrefixes>
-                        <pathPrefix>dep=../dependencies</pathPrefix>
-                    </pathPrefixes>
-                </configuration>
             </plugin>
             <plugin>
                 <groupId>com.github.ulisesbocchio</groupId>

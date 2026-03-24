@@ -22,6 +22,10 @@ message Response {
         QueryRelayerAddressResp queryRelayerAddressResp = 11;
         GetGasPriceConfigResp getGasPriceConfigResp = 12;
         GetRollupEconomicConfigResp getRollupEconomicConfigResp = 13;
+        WasteEthAccountNonceResp wasteEthAccountNonceResp = 14;
+        CommitBatchManuallyResp commitBatchManuallyResp = 15;
+        CommitProofManuallyResp commitProofManuallyResp = 16;
+        QueryCurrNonceResp queryCurrNonceResp = 17;
     }
 }
 
@@ -70,7 +74,6 @@ message Chunk {
     uint32 numBlocks = 1;
     repeated BlockContext blocks = 2;
     bytes l2Transactions = 3;
-    optional string hash = 4;
 }
 
 message BlockContext {
@@ -110,7 +113,6 @@ message BlobInfo {
 }
 
 message RawChunkInfo {
-    string hash = 1;
     bytes rawChunk = 2;
 }
 
@@ -224,6 +226,69 @@ message QueryRelayerAddressResp {
     string l2Address = 3;
 }
 
+enum ChainType {
+    L1 = 0;
+    L2 = 1;
+}
+
+message WasteEthAccountNonceReq {
+    ChainType chainType = 1;
+    string address = 2;
+    uint64 nonce = 3;
+}
+
+message WasteEthAccountNonceResp {
+    string txHash = 1;
+}
+
+message CommitBatchManuallyReq {
+    uint64 batchIndex = 1;
+}
+
+message CommitBatchManuallyResp {
+    string txHash = 1;
+}
+
+enum ProofType {
+    TEE = 0;
+    ZK = 1;
+}
+
+message CommitProofManuallyReq {
+    uint64 batchIndex = 1;
+    ProofType proofType = 2;
+}
+
+message CommitProofManuallyResp {
+    string txHash = 1;
+}
+
+enum AccType {
+    BLOB = 0;
+    LEGACY = 1;
+}
+
+message UpdateNonceManuallyReq {
+    ChainType chainType = 1;
+    AccType accType = 2;
+    uint64 nonce = 3;
+}
+
+message QueryCurrNonceReq {
+    ChainType chainType = 1;
+    AccType accType = 2;
+}
+
+message QueryCurrNonceResp {
+    uint64 nonce = 1;
+}
+
+message RefetchProofReq {
+    string proofType = 1;
+    string fromBatchIndex = 2;
+    string toBatchIndex = 3;
+}
+
 service AdminService {
 
     rpc initAnchorBatch(InitAnchorBatchReq) returns (Response) {}
@@ -259,4 +324,16 @@ service AdminService {
     rpc updateRollupEconomicStrategyConfig(UpdateRollupEconomicStrategyConfigReq) returns (Response) {}
 
     rpc getRollupEconomicConfig(GetRollupEconomicConfigReq) returns (Response) {}
+
+    rpc wasteEthAccountNonce(WasteEthAccountNonceReq) returns (Response) {}
+
+    rpc commitBatchManually(CommitBatchManuallyReq) returns (Response) {}
+
+    rpc commitProofManually(CommitProofManuallyReq) returns (Response) {}
+
+    rpc updateNonceManually(UpdateNonceManuallyReq) returns (Response) {}
+
+    rpc queryCurrNonce(QueryCurrNonceReq) returns (Response) {}
+
+    rpc refetchProof(RefetchProofReq) returns (Response) {}
 }

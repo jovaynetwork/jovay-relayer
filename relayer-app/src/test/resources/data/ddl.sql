@@ -69,20 +69,24 @@ CREATE TABLE IF NOT EXISTS `biz_task`
 
 CREATE TABLE IF NOT EXISTS `chunks`
 (
-    `id`           INT(11) PRIMARY KEY NOT NULL AUTO_INCREMENT,
-    `batch_index`  BIGINT UNSIGNED     NOT NULL,
-    `chunk_index`  INT(11)             NOT NULL,
-    `chunk_hash`   VARCHAR(64)         NOT NULL,
-    `num_blocks`   INT(11)             NOT NULL,
-    `zk_cycle_sum` BIGINT UNSIGNED     NOT NULL,
-    `start_number` VARCHAR(64)         NOT NULL,
-    `end_number`   VARCHAR(64)         NOT NULL,
-    `raw_chunk`    LONGBLOB,
-    `gmt_create`   DATETIME DEFAULT CURRENT_TIMESTAMP,
-    `gmt_modified` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    `id`            INT(11) PRIMARY KEY NOT NULL AUTO_INCREMENT,
+    `batch_version` INT(8)   DEFAULT -1,
+    `batch_index`   BIGINT UNSIGNED     NOT NULL,
+    `chunk_index`   INT(11) UNSIGNED    NOT NULL,
+    `chunk_hash`    VARCHAR(64)         NOT NULL,
+    `num_blocks`    INT(11)             NOT NULL,
+    `zk_cycle_sum`  BIGINT UNSIGNED     NOT NULL,
+    `gas_sum`       BIGINT   DEFAULT -1,
+    `start_number`  VARCHAR(64)         NOT NULL,
+    `end_number`    VARCHAR(64)         NOT NULL,
+    `raw_chunk`     LONGBLOB,
+    `gmt_create`    DATETIME DEFAULT CURRENT_TIMESTAMP,
+    `gmt_modified`  DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY `chunks-idx-bidx-cidx` (`batch_index`, `chunk_index`),
     KEY `chunks-chunk_hash` (`chunk_hash`)
 );
+
+CREATE INDEX chunks_batch_version_index ON chunks (batch_version);
 
 CREATE TABLE IF NOT EXISTS `reliable_transaction`
 (

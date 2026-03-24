@@ -1,14 +1,24 @@
+/*
+ * Copyright 2026 Ant Group
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.alipay.antchain.l2.relayer.service;
 
 import java.math.BigInteger;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.*;
-
-import com.alipay.antchain.l2.relayer.config.RollupConfig;
-import jakarta.annotation.Resource;
 
 import cn.hutool.core.util.HexUtil;
 import cn.hutool.core.util.ObjectUtil;
@@ -21,17 +31,19 @@ import com.alipay.antchain.l2.relayer.commons.models.BatchWrapper;
 import com.alipay.antchain.l2.relayer.commons.models.ReliableTransactionDO;
 import com.alipay.antchain.l2.relayer.commons.models.TransactionInfo;
 import com.alipay.antchain.l2.relayer.commons.utils.RollupUtils;
+import com.alipay.antchain.l2.relayer.config.RollupConfig;
 import com.alipay.antchain.l2.relayer.core.blockchain.L1Client;
-import com.alipay.antchain.l2.relayer.core.blockchain.L2Client;
 import com.alipay.antchain.l2.relayer.core.blockchain.RollupThrottle;
 import com.alipay.antchain.l2.relayer.core.layer2.IL2MsgFetcher;
 import com.alipay.antchain.l2.relayer.core.layer2.IRollupAggregator;
 import com.alipay.antchain.l2.relayer.core.prover.ProverControllerClient;
+import com.alipay.antchain.l2.relayer.core.tracer.TraceServiceClient;
 import com.alipay.antchain.l2.relayer.dal.repository.IL2MerkleTreeRepository;
 import com.alipay.antchain.l2.relayer.dal.repository.IRollupRepository;
 import com.alipay.antchain.l2.relayer.dal.repository.ISystemConfigRepository;
 import com.alipay.antchain.l2.relayer.metrics.otel.IOtelMetric;
 import com.alipay.antchain.l2.trace.BasicBlockTrace;
+import jakarta.annotation.Resource;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -55,9 +67,6 @@ public class RollupServiceImpl implements IRollupService {
     private IRollupRepository rollupRepository;
 
     @Resource
-    private L2Client l2Client;
-
-    @Resource
     private L1Client l1Client;
 
     @Resource
@@ -65,6 +74,9 @@ public class RollupServiceImpl implements IRollupService {
 
     @Resource
     private IRollupAggregator rollupAggregator;
+
+    @Resource
+    private TraceServiceClient traceServiceClient;
 
     @Resource
     private IL2MsgFetcher l2MsgFetcher;
@@ -86,9 +98,6 @@ public class RollupServiceImpl implements IRollupService {
 
     @Resource
     private RollupConfig rollupConfig;
-
-    @Value("${l2-relayer.tasks.block-polling.l2.policy:LATEST}")
-    private DefaultBlockParameterName blockPollingPolicy;
 
     @Value("${l2-relayer.tasks.block-polling.l2.max-poling-block-size:32}")
     private int maxPollingBlockSize;
@@ -162,8 +171,8 @@ public class RollupServiceImpl implements IRollupService {
 
     @Override
     public void pollL2Blocks() {
-        BigInteger currL2Height = l2Client.queryLatestBlockNumber(blockPollingPolicy);
-        BigInteger heightProcessed = getProcessedBlockHeight();
+        var currL2Height = traceServiceClient.getLatestProcessedBlock();
+        var heightProcessed = getProcessedBlockHeight();
         if (currL2Height.compareTo(heightProcessed) <= 0) {
             log.debug("already processed the latest height {} on L2", currL2Height);
             return;
@@ -194,9 +203,6 @@ public class RollupServiceImpl implements IRollupService {
                             try {
                                 blockTrace = blockFutureWrappers.get(currHeight).get(getL2BlockTimeout, TimeUnit.SECONDS);
                             } catch (InterruptedException | ExecutionException | TimeoutException e) {
-                                if (e instanceof ExecutionException && e.getCause() instanceof BlockTraceNotReadyException) {
-                                    throw (BlockTraceNotReadyException) e.getCause();
-                                }
                                 throw new BlockPollingException(e, "failed to get {} block trace from future: ", currHeight);
                             }
 
@@ -339,6 +345,8 @@ public class RollupServiceImpl implements IRollupService {
         if (ObjectUtil.isNull(latestVerifiedBatchIdxOnChain)) {
             throw new CommitL2BatchZkProofException("null result from calling lastZkVerifiedBatch of rollup contract");
         }
+        var noNeedToCommit = rollupConfig.getZkVerificationStartBatch().subtract(BigInteger.ONE);
+        latestVerifiedBatchIdxOnChain = noNeedToCommit.compareTo(latestVerifiedBatchIdxOnChain) > 0 ? noNeedToCommit : latestVerifiedBatchIdxOnChain;
 
         var lastCommittedBatchIdx = queryLastCommittedBatchIndex();
         if (ObjectUtil.isNull(lastCommittedBatchIdx)) {
@@ -414,18 +422,13 @@ public class RollupServiceImpl implements IRollupService {
             }
         }
 
-        BatchHeader parentHeader = getParentBatchHeader(nextBatch.getBatch().getBatchIndex().subtract(BigInteger.ONE));
-        if (ObjectUtil.isNull(parentHeader)) {
-            throw new CommitL2BatchException("null parent batch header for {}", nextBatch.getBatch().getBatchIndex());
-        }
-
         log.info("try to commit next batch {}-{}", nextBatch.getBatch().getBatchIndex(), nextBatch.getBatch().getBatchHashHex());
 
         rollupRepository.updateRollupNumberRecord(ChainTypeEnum.LAYER_TWO, RollupNumberRecordTypeEnum.BATCH_COMMITTED, nextBatch.getBatch().getBatchIndex());
 
         TransactionInfo transactionInfo;
         try {
-            transactionInfo = l1Client.commitBatch(nextBatch, parentHeader);
+            transactionInfo = l1Client.commitBatch(nextBatch);
         } catch (L1ContractWarnException e) {
             log.info("rollup contract shows that batch {} has been committed", nextBatch.getBatchHeader().getBatchIndex());
             return;

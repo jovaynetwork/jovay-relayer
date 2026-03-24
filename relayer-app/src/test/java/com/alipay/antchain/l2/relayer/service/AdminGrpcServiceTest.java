@@ -1,3 +1,19 @@
+/*
+ * Copyright 2026 Ant Group
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.alipay.antchain.l2.relayer.service;
 
 import java.math.BigInteger;
@@ -11,18 +27,18 @@ import cn.hutool.core.util.HexUtil;
 import cn.hutool.core.util.RandomUtil;
 import com.alibaba.fastjson.JSON;
 import com.alipay.antchain.l2.relayer.TestBase;
-import com.alipay.antchain.l2.relayer.commons.enums.ChainTypeEnum;
-import com.alipay.antchain.l2.relayer.commons.enums.ReliableTransactionStateEnum;
-import com.alipay.antchain.l2.relayer.commons.enums.TransactionTypeEnum;
+import com.alipay.antchain.l2.relayer.commons.enums.*;
+import com.alipay.antchain.l2.relayer.commons.exceptions.L1ContractWarnException;
+import com.alipay.antchain.l2.relayer.commons.exceptions.L2RelayerErrorCodeEnum;
 import com.alipay.antchain.l2.relayer.commons.l2basic.BatchVersionEnum;
 import com.alipay.antchain.l2.relayer.commons.l2basic.BlobsDaData;
-import com.alipay.antchain.l2.relayer.commons.models.BatchWrapper;
-import com.alipay.antchain.l2.relayer.commons.models.ChunkWrapper;
-import com.alipay.antchain.l2.relayer.commons.models.ReliableTransactionDO;
-import com.alipay.antchain.l2.relayer.commons.models.TransactionInfo;
+import com.alipay.antchain.l2.relayer.commons.models.*;
 import com.alipay.antchain.l2.relayer.config.RollupConfig;
 import com.alipay.antchain.l2.relayer.core.blockchain.L1Client;
 import com.alipay.antchain.l2.relayer.core.blockchain.L2Client;
+import com.alipay.antchain.l2.relayer.core.blockchain.helper.BaseRawTransactionManager;
+import com.alipay.antchain.l2.relayer.core.blockchain.helper.CachedNonceManager;
+import com.alipay.antchain.l2.relayer.core.blockchain.helper.RemoteNonceManager;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.gasprice.DynamicGasPriceProviderConfig;
 import com.alipay.antchain.l2.relayer.core.layer2.economic.RollupEconomicStrategyConfig;
 import com.alipay.antchain.l2.relayer.dal.repository.IRollupRepository;
@@ -36,6 +52,7 @@ import org.junit.Before;
 import org.junit.Test;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.web3j.abi.datatypes.generated.Bytes32;
+import org.web3j.protocol.core.methods.response.EthSendTransaction;
 import org.web3j.utils.Numeric;
 
 import static org.mockito.Mockito.*;
@@ -60,6 +77,15 @@ public class AdminGrpcServiceTest extends TestBase {
     @MockitoBean
     private L1Client l1Client;
 
+    @MockitoBean("l1BlobPoolTxTransactionManager")
+    private BaseRawTransactionManager l1BlobPoolTxTransactionManager;
+
+    @MockitoBean("l1LegacyPoolTxTransactionManager")
+    private BaseRawTransactionManager l1LegacyPoolTxTransactionManager;
+
+    @MockitoBean("l2TransactionManager")
+    private BaseRawTransactionManager l2TransactionManager;
+
     @MockitoBean
     private DistributedTaskEngine distributedTaskEngine;
 
@@ -74,11 +100,8 @@ public class AdminGrpcServiceTest extends TestBase {
 
     @Before
     public void initMock() {
-        when(rollupConfig.getMaxCallDataInChunk()).thenReturn(1000_000L);
-        when(rollupConfig.getOneChunkBlocksLimit()).thenReturn(32L);
-        when(rollupConfig.getMaxTxsInChunks()).thenReturn(1000);
+        when(rollupConfig.getGasPerChunk()).thenReturn(3000_0000);
         when(rollupConfig.getBatchCommitBlobSizeLimit()).thenReturn(4);
-        when(rollupConfig.getChunkZkCycleSumLimit()).thenReturn(940_000L);
     }
 
     @Test
@@ -136,13 +159,12 @@ public class AdminGrpcServiceTest extends TestBase {
         GetBatchReq req = GetBatchReq.newBuilder().setBatchIndex("1").build();
         StreamRecorder<Response> responseObserver = StreamRecorder.create();
 
-        int maxTxsInChunks = rollupConfig.getMaxTxsInChunks();
         BatchWrapper batchWrapper1 = BatchWrapper.createBatch(
                 BatchVersionEnum.BATCH_V0, BigInteger.valueOf(1), ZERO_BATCH_WRAPPER, BASIC_BLOCK_TRACE2.getHeader().getStateRoot().toByteArray(),
                 BASIC_BLOCK_TRACE2.getL1MsgRollingHash().getValue().toByteArray(),
                 Bytes32.DEFAULT.getValue(),
                 0,
-                ListUtil.toList(new ChunkWrapper(BigInteger.valueOf(1), 0, ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2), maxTxsInChunks))
+                ListUtil.toList(new ChunkWrapper(BatchVersionEnum.BATCH_V0, BigInteger.valueOf(1), 0, ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2)))
         );
 
         when(rollupRepository.getBatch(notNull())).thenReturn(batchWrapper1);
@@ -165,13 +187,12 @@ public class AdminGrpcServiceTest extends TestBase {
         GetRawBatchReq req = GetRawBatchReq.newBuilder().setBatchIndex("1").build();
         StreamRecorder<Response> responseObserver = StreamRecorder.create();
 
-        int maxTxsInChunks = rollupConfig.getMaxTxsInChunks();
         BatchWrapper batchWrapper1 = BatchWrapper.createBatch(
                 BatchVersionEnum.BATCH_V0, BigInteger.valueOf(1), ZERO_BATCH_WRAPPER, BASIC_BLOCK_TRACE2.getHeader().getStateRoot().toByteArray(),
                 BASIC_BLOCK_TRACE2.getL1MsgRollingHash().getValue().toByteArray(),
                 Bytes32.DEFAULT.getValue(),
                 0,
-                ListUtil.toList(new ChunkWrapper(BigInteger.valueOf(1), 0, ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2), maxTxsInChunks))
+                ListUtil.toList(new ChunkWrapper(BatchVersionEnum.BATCH_V0, BigInteger.valueOf(1), 0, ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2)))
         );
 
         when(rollupRepository.getBatch(notNull())).thenReturn(batchWrapper1);
@@ -188,10 +209,6 @@ public class AdminGrpcServiceTest extends TestBase {
         Assert.assertArrayEquals(
                 batchWrapper1.getBatchHeader().serialize(),
                 results.get(0).getGetRawBatchResp().getBatchHeader().toByteArray()
-        );
-        Assert.assertEquals(
-                HexUtil.encodeHexStr(batchWrapper1.getChunks().get(0).getHash()),
-                results.get(0).getGetRawBatchResp().getChunks(0).getHash()
         );
     }
 
@@ -299,13 +316,12 @@ public class AdminGrpcServiceTest extends TestBase {
         var req = QueryBatchDaInfoReq.newBuilder().setBatchIndex(1).build();
         StreamRecorder<Response> responseObserver = StreamRecorder.create();
 
-        var maxTxsInChunks = rollupConfig.getMaxTxsInChunks();
         var batchWrapper1 = BatchWrapper.createBatch(
                 BatchVersionEnum.BATCH_V1, BigInteger.valueOf(1), ZERO_BATCH_WRAPPER, BASIC_BLOCK_TRACE2.getHeader().getStateRoot().toByteArray(),
                 BASIC_BLOCK_TRACE2.getL1MsgRollingHash().getValue().toByteArray(),
                 Bytes32.DEFAULT.getValue(),
                 0,
-                ListUtil.toList(new ChunkWrapper(BigInteger.valueOf(1), 0, ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2), maxTxsInChunks))
+                ListUtil.toList(new ChunkWrapper(BatchVersionEnum.BATCH_V0, BigInteger.valueOf(1), 0, ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2)))
         );
 
         when(rollupRepository.getBatch(notNull())).thenReturn(batchWrapper1);
@@ -600,183 +616,915 @@ public class AdminGrpcServiceTest extends TestBase {
         Assert.assertEquals("10", results.get(0).getGetRollupEconomicConfigResp().getConfigValue());
     }
 
-    // ==================== Negative Case Tests ====================
-
     @Test
     @SneakyThrows
-    public void testInitAnchorBatch_InvalidBatchIndex() {
-        var req = InitAnchorBatchReq.newBuilder()
-                .setAnchorBatchIndex(999)
+    public void testWasteEthAccountNonce() {
+        WasteEthAccountNonceReq req = WasteEthAccountNonceReq.newBuilder()
+                .setChainType(ChainType.L1)
+                .setAddress("0x863df6bfa4469f3ead0be8f9f2aae51c91a907b4")
+                .setNonce(100)
                 .build();
         StreamRecorder<Response> responseObserver = StreamRecorder.create();
 
-        doThrow(new IllegalArgumentException("Invalid batch index")).when(rollupService).setAnchorBatch(any(BigInteger.class));
+        var mockTxResult = mock(EthSendTransaction.class);
+        when(mockTxResult.getTransactionHash()).thenReturn("0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
 
-        adminGrpcService.initAnchorBatch(req, responseObserver);
+        when(l1Client.sendTransferValueTx(
+                eq("0x863df6bfa4469f3ead0be8f9f2aae51c91a907b4"),
+                eq("0x863df6bfa4469f3ead0be8f9f2aae51c91a907b4"),
+                eq(BigInteger.valueOf(100)),
+                eq(BigInteger.ZERO)
+        )).thenReturn(mockTxResult);
+
+        adminGrpcService.wasteEthAccountNonce(req, responseObserver);
+
+        Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
+        Assert.assertNull(responseObserver.getError());
+        List<Response> results = responseObserver.getValues();
+        Assert.assertEquals(1, results.size());
+        Assert.assertEquals(0, results.get(0).getCode());
+        Assert.assertTrue(results.get(0).hasWasteEthAccountNonceResp());
+        Assert.assertEquals("0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                results.get(0).getWasteEthAccountNonceResp().getTxHash());
+
+        verify(l1Client, times(1)).sendTransferValueTx(
+                eq("0x863df6bfa4469f3ead0be8f9f2aae51c91a907b4"),
+                eq("0x863df6bfa4469f3ead0be8f9f2aae51c91a907b4"),
+                eq(BigInteger.valueOf(100)),
+                eq(BigInteger.ZERO)
+        );
+    }
+
+    @Test
+    @SneakyThrows
+    public void testWasteEthAccountNonceL2() {
+        WasteEthAccountNonceReq req = WasteEthAccountNonceReq.newBuilder()
+                .setChainType(ChainType.L2)
+                .setAddress("0x863df6bfa4469f3ead0be8f9f2aae51c91a907b4")
+                .setNonce(50)
+                .build();
+        StreamRecorder<Response> responseObserver = StreamRecorder.create();
+
+        var mockTxResult = mock(EthSendTransaction.class);
+        when(mockTxResult.getTransactionHash()).thenReturn("0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890");
+
+        when(l2Client.sendTransferValueTx(
+                eq("0x863df6bfa4469f3ead0be8f9f2aae51c91a907b4"),
+                eq("0x863df6bfa4469f3ead0be8f9f2aae51c91a907b4"),
+                eq(BigInteger.valueOf(50)),
+                eq(BigInteger.ZERO)
+        )).thenReturn(mockTxResult);
+
+        adminGrpcService.wasteEthAccountNonce(req, responseObserver);
+
+        Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
+        Assert.assertNull(responseObserver.getError());
+        List<Response> results = responseObserver.getValues();
+        Assert.assertEquals(1, results.size());
+        Assert.assertEquals(0, results.get(0).getCode());
+        Assert.assertTrue(results.get(0).hasWasteEthAccountNonceResp());
+        Assert.assertEquals("0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+                results.get(0).getWasteEthAccountNonceResp().getTxHash());
+
+        verify(l2Client, times(1)).sendTransferValueTx(
+                eq("0x863df6bfa4469f3ead0be8f9f2aae51c91a907b4"),
+                eq("0x863df6bfa4469f3ead0be8f9f2aae51c91a907b4"),
+                eq(BigInteger.valueOf(50)),
+                eq(BigInteger.ZERO)
+        );
+    }
+
+    @Test
+    @SneakyThrows
+    public void testWasteEthAccountNonceWithException() {
+        WasteEthAccountNonceReq req = WasteEthAccountNonceReq.newBuilder()
+                .setChainType(ChainType.L1)
+                .setAddress("0x863df6bfa4469f3ead0be8f9f2aae51c91a907b4")
+                .setNonce(100)
+                .build();
+        StreamRecorder<Response> responseObserver = StreamRecorder.create();
+
+        when(l1Client.sendTransferValueTx(
+                anyString(),
+                anyString(),
+                any(BigInteger.class),
+                any(BigInteger.class)
+        )).thenThrow(new RuntimeException("Failed to send transaction"));
+
+        adminGrpcService.wasteEthAccountNonce(req, responseObserver);
 
         Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
         Assert.assertNull(responseObserver.getError());
         List<Response> results = responseObserver.getValues();
         Assert.assertEquals(1, results.size());
         Assert.assertEquals(-1, results.get(0).getCode());
+        Assert.assertTrue(results.get(0).getErrorMsg().contains("Failed to send transaction"));
     }
 
     @Test
     @SneakyThrows
-    public void testGetBatch_BatchNotFound() {
-        var req = GetBatchReq.newBuilder()
-                .setBatchIndex("999")
+    public void testWasteEthAccountNonceMultipleNonces() {
+        // Test with different nonce values
+        long[] nonces = {0, 1, 100, 999999};
+
+        for (long nonce : nonces) {
+            WasteEthAccountNonceReq req = WasteEthAccountNonceReq.newBuilder()
+                    .setChainType(ChainType.L1)
+                    .setAddress("0x863df6bfa4469f3ead0be8f9f2aae51c91a907b4")
+                    .setNonce(nonce)
+                    .build();
+            StreamRecorder<Response> responseObserver = StreamRecorder.create();
+
+            var mockTxResult = mock(EthSendTransaction.class);
+            var mockTxHash = "0x" + String.format("%064x", nonce);
+            when(mockTxResult.getTransactionHash()).thenReturn(mockTxHash);
+
+            when(l1Client.sendTransferValueTx(
+                    anyString(),
+                    anyString(),
+                    eq(BigInteger.valueOf(nonce)),
+                    eq(BigInteger.ZERO)
+            )).thenReturn(mockTxResult);
+
+            adminGrpcService.wasteEthAccountNonce(req, responseObserver);
+
+            Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
+            Assert.assertNull(responseObserver.getError());
+            List<Response> results = responseObserver.getValues();
+            Assert.assertEquals(1, results.size());
+            Assert.assertEquals(0, results.get(0).getCode());
+            Assert.assertEquals(mockTxHash, results.get(0).getWasteEthAccountNonceResp().getTxHash());
+        }
+    }
+
+    @Test
+    @SneakyThrows
+    public void testCommitProofManuallyTeeProof() {
+        CommitProofManuallyReq req = CommitProofManuallyReq.newBuilder()
+                .setBatchIndex(1)
+                .setProofType(ProofType.TEE)
                 .build();
         StreamRecorder<Response> responseObserver = StreamRecorder.create();
 
-        when(rollupRepository.getBatch(any())).thenReturn(null);
+        when(l1Client.lastTeeVerifiedBatch()).thenReturn(BigInteger.ZERO);
 
-        adminGrpcService.getBatch(req, responseObserver);
+        var batchWrapper = BatchWrapper.createBatch(
+                BatchVersionEnum.BATCH_V0, BigInteger.valueOf(1), ZERO_BATCH_WRAPPER,
+                BASIC_BLOCK_TRACE2.getHeader().getStateRoot().toByteArray(),
+                BASIC_BLOCK_TRACE2.getL1MsgRollingHash().getValue().toByteArray(),
+                Bytes32.DEFAULT.getValue(),
+                0,
+                ListUtil.toList(new ChunkWrapper(BatchVersionEnum.BATCH_V0, BigInteger.valueOf(1), 0, ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2)))
+        );
+
+        var proofRequest = new BatchProveRequestDO();
+        proofRequest.setProof(RandomUtil.randomBytes(32));
+        proofRequest.setState(BatchProveRequestStateEnum.COMMITTED);
+
+        when(rollupRepository.getBatchProveRequest(eq(BigInteger.ONE), eq(ProveTypeEnum.TEE_PROOF)))
+                .thenReturn(proofRequest);
+        when(rollupRepository.getBatch(eq(BigInteger.ONE))).thenReturn(batchWrapper);
+
+        var txInfo = TransactionInfo.builder()
+                .txHash(Numeric.toHexString(RandomUtil.randomBytes(32)))
+                .nonce(BigInteger.ONE)
+                .senderAccount("0x863df6bfa4469f3ead0be8f9f2aae51c91a907b4")
+                .sendTxTime(new Date())
+                .rawTx(JSON.toJSONBytes(HexUtil.decodeHex("00")))
+                .build();
+
+        when(l1Client.verifyBatchWithEthCall(any(BatchWrapper.class), any(BatchProveRequestDO.class)))
+                .thenReturn(txInfo);
+
+        adminGrpcService.commitProofManually(req, responseObserver);
+
+        Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
+        Assert.assertNull(responseObserver.getError());
+        List<Response> results = responseObserver.getValues();
+        Assert.assertEquals(1, results.size());
+        Assert.assertEquals(0, results.get(0).getCode());
+        Assert.assertTrue(results.get(0).hasCommitProofManuallyResp());
+        Assert.assertEquals(txInfo.getTxHash(), results.get(0).getCommitProofManuallyResp().getTxHash());
+
+        verify(rollupRepository, times(1)).insertReliableTransaction(argThat(tx ->
+                tx.getTransactionType() == TransactionTypeEnum.BATCH_TEE_PROOF_COMMIT_TX &&
+                tx.getBatchIndex().equals(BigInteger.ONE) &&
+                tx.getState() == ReliableTransactionStateEnum.TX_PENDING
+        ));
+    }
+
+    @Test
+    @SneakyThrows
+    public void testCommitProofManuallyZkProof() {
+        CommitProofManuallyReq req = CommitProofManuallyReq.newBuilder()
+                .setBatchIndex(2)
+                .setProofType(ProofType.ZK)
+                .build();
+        StreamRecorder<Response> responseObserver = StreamRecorder.create();
+
+        when(l1Client.lastZkVerifiedBatch()).thenReturn(BigInteger.ONE);
+
+        var batchWrapper = BatchWrapper.createBatch(
+                BatchVersionEnum.BATCH_V0, BigInteger.valueOf(2), ZERO_BATCH_WRAPPER,
+                BASIC_BLOCK_TRACE2.getHeader().getStateRoot().toByteArray(),
+                BASIC_BLOCK_TRACE2.getL1MsgRollingHash().getValue().toByteArray(),
+                Bytes32.DEFAULT.getValue(),
+                0,
+                ListUtil.toList(new ChunkWrapper(BatchVersionEnum.BATCH_V0, BigInteger.valueOf(2), 0, ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2)))
+        );
+
+        var proofRequest = new BatchProveRequestDO();
+        proofRequest.setProof(RandomUtil.randomBytes(64));
+        proofRequest.setState(BatchProveRequestStateEnum.COMMITTED);
+
+        when(rollupRepository.getBatchProveRequest(eq(BigInteger.valueOf(2)), eq(ProveTypeEnum.ZK_PROOF)))
+                .thenReturn(proofRequest);
+        when(rollupRepository.getBatch(eq(BigInteger.valueOf(2)))).thenReturn(batchWrapper);
+
+        var txInfo = TransactionInfo.builder()
+                .txHash(Numeric.toHexString(RandomUtil.randomBytes(32)))
+                .nonce(BigInteger.valueOf(2))
+                .senderAccount("0x863df6bfa4469f3ead0be8f9f2aae51c91a907b4")
+                .sendTxTime(new Date())
+                .rawTx(JSON.toJSONBytes(HexUtil.decodeHex("00")))
+                .build();
+
+        when(l1Client.verifyBatchWithEthCall(any(BatchWrapper.class), any(BatchProveRequestDO.class)))
+                .thenReturn(txInfo);
+
+        adminGrpcService.commitProofManually(req, responseObserver);
+
+        Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
+        Assert.assertNull(responseObserver.getError());
+        List<Response> results = responseObserver.getValues();
+        Assert.assertEquals(1, results.size());
+        Assert.assertEquals(0, results.get(0).getCode());
+        Assert.assertTrue(results.get(0).hasCommitProofManuallyResp());
+        Assert.assertEquals(txInfo.getTxHash(), results.get(0).getCommitProofManuallyResp().getTxHash());
+
+        verify(rollupRepository, times(1)).insertReliableTransaction(argThat(tx ->
+                tx.getTransactionType() == TransactionTypeEnum.BATCH_ZK_PROOF_COMMIT_TX &&
+                tx.getBatchIndex().equals(BigInteger.valueOf(2)) &&
+                tx.getState() == ReliableTransactionStateEnum.TX_PENDING
+        ));
+    }
+
+    @Test
+    @SneakyThrows
+    public void testCommitProofManuallyProofNotReady() {
+        CommitProofManuallyReq req = CommitProofManuallyReq.newBuilder()
+                .setBatchIndex(1)
+                .setProofType(ProofType.TEE)
+                .build();
+        StreamRecorder<Response> responseObserver = StreamRecorder.create();
+
+        when(l1Client.lastTeeVerifiedBatch()).thenReturn(BigInteger.ZERO);
+
+        // Proof is still pending
+        var proofRequest = new BatchProveRequestDO();
+        proofRequest.setState(BatchProveRequestStateEnum.PENDING);
+
+        when(rollupRepository.getBatchProveRequest(eq(BigInteger.ONE), eq(ProveTypeEnum.TEE_PROOF)))
+                .thenReturn(proofRequest);
+
+        adminGrpcService.commitProofManually(req, responseObserver);
 
         Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
         Assert.assertNull(responseObserver.getError());
         List<Response> results = responseObserver.getValues();
         Assert.assertEquals(1, results.size());
         Assert.assertEquals(-1, results.get(0).getCode());
+        Assert.assertTrue(results.get(0).getErrorMsg().contains("not ready"));
     }
 
     @Test
     @SneakyThrows
-    public void testRetryBatchTx_InvalidTransactionType() {
-        var req = RetryBatchTxReq.newBuilder()
-                .setType("INVALID_TYPE")
-                .setFromBatchIndex(1)
-                .setToBatchIndex(3)
-                .build();
-        StreamRecorder<Response> responseObserver = StreamRecorder.create();
-
-        adminGrpcService.retryBatchTx(req, responseObserver);
-
-        Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
-        Assert.assertNull(responseObserver.getError());
-        List<Response> results = responseObserver.getValues();
-        Assert.assertEquals(1, results.size());
-        Assert.assertEquals(-1, results.get(0).getCode());
-    }
-
-    @Test
-    @SneakyThrows
-    public void testQueryBatchTxInfo_TransactionNotFound() {
-        var req = QueryBatchTxInfoReq.newBuilder()
-                .setType(TransactionTypeEnum.BATCH_TEE_PROOF_COMMIT_TX.name())
+    public void testCommitProofManuallyBatchNotExists() {
+        CommitProofManuallyReq req = CommitProofManuallyReq.newBuilder()
                 .setBatchIndex(999)
+                .setProofType(ProofType.TEE)
                 .build();
         StreamRecorder<Response> responseObserver = StreamRecorder.create();
 
-        when(rollupRepository.getReliableTransaction(any(), any(), any())).thenReturn(null);
+        when(l1Client.lastTeeVerifiedBatch()).thenReturn(BigInteger.valueOf(998));
 
-        adminGrpcService.queryBatchTxInfo(req, responseObserver);
+        var proofRequest = new BatchProveRequestDO();
+        proofRequest.setProof(RandomUtil.randomBytes(32));
+        proofRequest.setState(BatchProveRequestStateEnum.COMMITTED);
+
+        when(rollupRepository.getBatchProveRequest(eq(BigInteger.valueOf(999)), eq(ProveTypeEnum.TEE_PROOF)))
+                .thenReturn(proofRequest);
+        when(rollupRepository.getBatch(eq(BigInteger.valueOf(999)))).thenReturn(null);
+
+        adminGrpcService.commitProofManually(req, responseObserver);
 
         Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
         Assert.assertNull(responseObserver.getError());
         List<Response> results = responseObserver.getValues();
         Assert.assertEquals(1, results.size());
         Assert.assertEquals(-1, results.get(0).getCode());
+        Assert.assertTrue(results.get(0).getErrorMsg().contains("not exists"));
     }
 
     @Test
     @SneakyThrows
-    public void testWithdrawFromVault_InvalidAddress() {
-        var req = WithdrawFromVaultReq.newBuilder()
-                .setTo("invalid_address")
-                .setAmount(100)
+    public void testCommitProofManuallyAlreadyCommitted() {
+        CommitProofManuallyReq req = CommitProofManuallyReq.newBuilder()
+                .setBatchIndex(1)
+                .setProofType(ProofType.TEE)
                 .build();
         StreamRecorder<Response> responseObserver = StreamRecorder.create();
 
-        when(oracleService.withdrawVault(anyString(), any())).thenThrow(new IllegalArgumentException("Invalid address format"));
+        when(l1Client.lastTeeVerifiedBatch()).thenReturn(BigInteger.valueOf(2));
 
-        adminGrpcService.withdrawFromVault(req, responseObserver);
+        adminGrpcService.commitProofManually(req, responseObserver);
 
         Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
         Assert.assertNull(responseObserver.getError());
         List<Response> results = responseObserver.getValues();
         Assert.assertEquals(1, results.size());
         Assert.assertEquals(-1, results.get(0).getCode());
+        Assert.assertTrue(results.get(0).getErrorMsg().contains("no need to commit"));
     }
 
     @Test
     @SneakyThrows
-    public void testUpdateFixedProfit_InvalidValue() {
-        var req = UpdateFixedProfitReq.newBuilder()
-                .setProfit("-100")
+    public void testCommitProofManuallySkipBatch() {
+        CommitProofManuallyReq req = CommitProofManuallyReq.newBuilder()
+                .setBatchIndex(3)
+                .setProofType(ProofType.TEE)
                 .build();
         StreamRecorder<Response> responseObserver = StreamRecorder.create();
 
-        when(oracleService.updateFixedProfit(any())).thenThrow(new IllegalArgumentException("Invalid profit value"));
+        when(l1Client.lastTeeVerifiedBatch()).thenReturn(BigInteger.ONE);
 
-        adminGrpcService.updateFixedProfit(req, responseObserver);
+        adminGrpcService.commitProofManually(req, responseObserver);
 
         Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
         Assert.assertNull(responseObserver.getError());
         List<Response> results = responseObserver.getValues();
         Assert.assertEquals(1, results.size());
         Assert.assertEquals(-1, results.get(0).getCode());
+        Assert.assertTrue(results.get(0).getErrorMsg().contains("can't skip"));
     }
 
     @Test
     @SneakyThrows
-    public void testSpeedupTx_TransactionNotPending() {
-        var req = SpeedupTxReq.newBuilder()
-                .setChainType(ChainTypeEnum.LAYER_ONE.name())
-                .setType(TransactionTypeEnum.BATCH_COMMIT_TX.name())
+    public void testCommitProofManuallyUpdateExistingTx() {
+        CommitProofManuallyReq req = CommitProofManuallyReq.newBuilder()
+                .setBatchIndex(1)
+                .setProofType(ProofType.TEE)
+                .build();
+        StreamRecorder<Response> responseObserver = StreamRecorder.create();
+
+        when(l1Client.lastTeeVerifiedBatch()).thenReturn(BigInteger.ZERO);
+
+        var batchWrapper = BatchWrapper.createBatch(
+                BatchVersionEnum.BATCH_V0, BigInteger.valueOf(1), ZERO_BATCH_WRAPPER,
+                BASIC_BLOCK_TRACE2.getHeader().getStateRoot().toByteArray(),
+                BASIC_BLOCK_TRACE2.getL1MsgRollingHash().getValue().toByteArray(),
+                Bytes32.DEFAULT.getValue(),
+                0,
+                ListUtil.toList(new ChunkWrapper(BatchVersionEnum.BATCH_V0, BigInteger.valueOf(1), 0, ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2)))
+        );
+
+        var proofRequest = new BatchProveRequestDO();
+        proofRequest.setProof(RandomUtil.randomBytes(32));
+        proofRequest.setState(BatchProveRequestStateEnum.COMMITTED);
+
+        when(rollupRepository.getBatchProveRequest(eq(BigInteger.ONE), eq(ProveTypeEnum.TEE_PROOF)))
+                .thenReturn(proofRequest);
+        when(rollupRepository.getBatch(eq(BigInteger.ONE))).thenReturn(batchWrapper);
+
+        // Existing transaction
+        var existingTx = ReliableTransactionDO.builder()
+                .batchIndex(BigInteger.ONE)
+                .transactionType(TransactionTypeEnum.BATCH_TEE_PROOF_COMMIT_TX)
+                .state(ReliableTransactionStateEnum.TX_FAILED)
+                .build();
+        when(rollupRepository.getReliableTransaction(eq(ChainTypeEnum.LAYER_ONE), eq(BigInteger.ONE),
+                eq(TransactionTypeEnum.BATCH_TEE_PROOF_COMMIT_TX))).thenReturn(existingTx);
+
+        var txInfo = TransactionInfo.builder()
+                .txHash(Numeric.toHexString(RandomUtil.randomBytes(32)))
+                .nonce(BigInteger.ONE)
+                .senderAccount("0x863df6bfa4469f3ead0be8f9f2aae51c91a907b4")
+                .sendTxTime(new Date())
+                .rawTx(JSON.toJSONBytes(HexUtil.decodeHex("00")))
+                .build();
+
+        when(l1Client.verifyBatchWithEthCall(any(BatchWrapper.class), any(BatchProveRequestDO.class)))
+                .thenReturn(txInfo);
+
+        adminGrpcService.commitProofManually(req, responseObserver);
+
+        Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
+        Assert.assertNull(responseObserver.getError());
+        List<Response> results = responseObserver.getValues();
+        Assert.assertEquals(1, results.size());
+        Assert.assertEquals(0, results.get(0).getCode());
+
+        verify(rollupRepository, times(1)).updateReliableTransaction(argThat(tx ->
+                tx.getTransactionType() == TransactionTypeEnum.BATCH_TEE_PROOF_COMMIT_TX &&
+                tx.getBatchIndex().equals(BigInteger.ONE) &&
+                tx.getLatestTxHash().equals(txInfo.getTxHash())
+        ));
+    }
+
+    @Test
+    @SneakyThrows
+    public void testCommitProofManuallyL1ContractWarn() {
+        CommitProofManuallyReq req = CommitProofManuallyReq.newBuilder()
+                .setBatchIndex(1)
+                .setProofType(ProofType.TEE)
+                .build();
+        StreamRecorder<Response> responseObserver = StreamRecorder.create();
+
+        when(l1Client.lastTeeVerifiedBatch()).thenReturn(BigInteger.ZERO);
+
+        var batchWrapper = BatchWrapper.createBatch(
+                BatchVersionEnum.BATCH_V0, BigInteger.valueOf(1), ZERO_BATCH_WRAPPER,
+                BASIC_BLOCK_TRACE2.getHeader().getStateRoot().toByteArray(),
+                BASIC_BLOCK_TRACE2.getL1MsgRollingHash().getValue().toByteArray(),
+                Bytes32.DEFAULT.getValue(),
+                0,
+                ListUtil.toList(new ChunkWrapper(BatchVersionEnum.BATCH_V0, BigInteger.valueOf(1), 0, ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2)))
+        );
+
+        var proofRequest = new BatchProveRequestDO();
+        proofRequest.setProof(RandomUtil.randomBytes(32));
+        proofRequest.setState(BatchProveRequestStateEnum.COMMITTED);
+
+        when(rollupRepository.getBatchProveRequest(eq(BigInteger.ONE), eq(ProveTypeEnum.TEE_PROOF)))
+                .thenReturn(proofRequest);
+        when(rollupRepository.getBatch(eq(BigInteger.ONE))).thenReturn(batchWrapper);
+
+        when(l1Client.verifyBatchWithEthCall(any(BatchWrapper.class), any(BatchProveRequestDO.class)))
+                .thenThrow(new L1ContractWarnException(L2RelayerErrorCodeEnum.CALL_WITH_WARNING, "proof already committed"));
+
+        adminGrpcService.commitProofManually(req, responseObserver);
+
+        Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
+        Assert.assertNull(responseObserver.getError());
+        List<Response> results = responseObserver.getValues();
+        Assert.assertEquals(-1, results.get(0).getCode());
+
+        // Should not insert or update transaction when contract warns
+        verify(rollupRepository, never()).insertReliableTransaction(any());
+        verify(rollupRepository, never()).updateReliableTransaction(any());
+    }
+
+    @Test
+    @SneakyThrows
+    public void testCommitBatchManually() {
+        CommitBatchManuallyReq req = CommitBatchManuallyReq.newBuilder()
                 .setBatchIndex(1)
                 .build();
         StreamRecorder<Response> responseObserver = StreamRecorder.create();
 
-        when(rollupRepository.getReliableTransaction(any(), any(), any())).thenReturn(
-                ReliableTransactionDO.builder()
-                        .state(ReliableTransactionStateEnum.TX_SUCCESS)
-                        .build()
+        when(l1Client.lastCommittedBatch()).thenReturn(BigInteger.ZERO);
+
+        var batchWrapper = BatchWrapper.createBatch(
+                BatchVersionEnum.BATCH_V0, BigInteger.valueOf(1), ZERO_BATCH_WRAPPER,
+                BASIC_BLOCK_TRACE2.getHeader().getStateRoot().toByteArray(),
+                BASIC_BLOCK_TRACE2.getL1MsgRollingHash().getValue().toByteArray(),
+                Bytes32.DEFAULT.getValue(),
+                0,
+                ListUtil.toList(new ChunkWrapper(BatchVersionEnum.BATCH_V0, BigInteger.valueOf(1), 0, ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2)))
         );
 
-        adminGrpcService.speedupTx(req, responseObserver);
+        when(rollupRepository.getBatch(eq(BigInteger.ONE))).thenReturn(batchWrapper);
+        when(rollupRepository.getReliableTransaction(eq(ChainTypeEnum.LAYER_ONE), eq(BigInteger.ONE), eq(TransactionTypeEnum.BATCH_COMMIT_TX)))
+                .thenReturn(null);
+        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BATCH_COMMITTED)))
+                .thenReturn(BigInteger.ZERO);
+
+        var txInfo = TransactionInfo.builder()
+                .txHash(Numeric.toHexString(RandomUtil.randomBytes(32)))
+                .nonce(BigInteger.ONE)
+                .senderAccount("0x863df6bfa4469f3ead0be8f9f2aae51c91a907b4")
+                .sendTxTime(new Date())
+                .rawTx(JSON.toJSONBytes(HexUtil.decodeHex("00")))
+                .build();
+
+        when(l1Client.commitBatchWithEthCall(any(BatchWrapper.class)))
+                .thenReturn(txInfo);
+
+        adminGrpcService.commitBatchManually(req, responseObserver);
 
         Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
         Assert.assertNull(responseObserver.getError());
         List<Response> results = responseObserver.getValues();
         Assert.assertEquals(1, results.size());
-        Assert.assertEquals(-1, results.get(0).getCode());
+        Assert.assertEquals(0, results.get(0).getCode());
+        Assert.assertTrue(results.get(0).hasCommitBatchManuallyResp());
+        Assert.assertEquals(txInfo.getTxHash(), results.get(0).getCommitBatchManuallyResp().getTxHash());
+
+        verify(rollupRepository, times(1)).insertReliableTransaction(argThat(tx ->
+                tx.getTransactionType() == TransactionTypeEnum.BATCH_COMMIT_TX &&
+                tx.getBatchIndex().equals(BigInteger.ONE) &&
+                tx.getState() == ReliableTransactionStateEnum.TX_PENDING
+        ));
     }
 
     @Test
     @SneakyThrows
-    public void testUpdateGasPriceConfig_InvalidConfigValue() {
-        var req = UpdateGasPriceConfigReq.newBuilder()
-                .setChainType("ethereum")
-                .setConfigKey("gasPriceIncreasedPercentage")
-                .setConfigValue("invalid_number")
+    public void testCommitBatchManuallyAlreadyCommitted() {
+        CommitBatchManuallyReq req = CommitBatchManuallyReq.newBuilder()
+                .setBatchIndex(1)
                 .build();
         StreamRecorder<Response> responseObserver = StreamRecorder.create();
 
-        adminGrpcService.updateGasPriceConfig(req, responseObserver);
+        when(l1Client.lastCommittedBatch()).thenReturn(BigInteger.valueOf(2));
+
+        adminGrpcService.commitBatchManually(req, responseObserver);
 
         Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
         Assert.assertNull(responseObserver.getError());
         List<Response> results = responseObserver.getValues();
         Assert.assertEquals(1, results.size());
         Assert.assertEquals(-1, results.get(0).getCode());
+        Assert.assertTrue(results.get(0).getErrorMsg().contains("no need to commit"));
     }
 
     @Test
     @SneakyThrows
-    public void testGetGasPriceConfig_UnknownConfigKey() {
-        var req = GetGasPriceConfigReq.newBuilder()
-                .setChainType("ethereum")
-                .setConfigKey("unknownKey")
+    public void testCommitBatchManuallySkipBatch() {
+        CommitBatchManuallyReq req = CommitBatchManuallyReq.newBuilder()
+                .setBatchIndex(3)
                 .build();
         StreamRecorder<Response> responseObserver = StreamRecorder.create();
 
-        adminGrpcService.getGasPriceConfig(req, responseObserver);
+        when(l1Client.lastCommittedBatch()).thenReturn(BigInteger.ONE);
+
+        adminGrpcService.commitBatchManually(req, responseObserver);
 
         Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
         Assert.assertNull(responseObserver.getError());
         List<Response> results = responseObserver.getValues();
         Assert.assertEquals(1, results.size());
         Assert.assertEquals(-1, results.get(0).getCode());
+        Assert.assertTrue(results.get(0).getErrorMsg().contains("can't skip"));
+    }
+
+    @Test
+    @SneakyThrows
+    public void testCommitBatchManuallyBatchNotExists() {
+        CommitBatchManuallyReq req = CommitBatchManuallyReq.newBuilder()
+                .setBatchIndex(1)
+                .build();
+        StreamRecorder<Response> responseObserver = StreamRecorder.create();
+
+        when(l1Client.lastCommittedBatch()).thenReturn(BigInteger.ZERO);
+        when(rollupRepository.getBatch(eq(BigInteger.ONE))).thenReturn(null);
+
+        adminGrpcService.commitBatchManually(req, responseObserver);
+
+        Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
+        Assert.assertNull(responseObserver.getError());
+        List<Response> results = responseObserver.getValues();
+        Assert.assertEquals(1, results.size());
+        Assert.assertEquals(-1, results.get(0).getCode());
+        Assert.assertTrue(results.get(0).getErrorMsg().contains("not exists"));
+    }
+
+    @Test
+    @SneakyThrows
+    public void testCommitBatchManuallyL1ContractWarn() {
+        CommitBatchManuallyReq req = CommitBatchManuallyReq.newBuilder()
+                .setBatchIndex(1)
+                .build();
+        StreamRecorder<Response> responseObserver = StreamRecorder.create();
+
+        when(l1Client.lastCommittedBatch()).thenReturn(BigInteger.ZERO);
+
+        var batchWrapper = BatchWrapper.createBatch(
+                BatchVersionEnum.BATCH_V0, BigInteger.valueOf(1), ZERO_BATCH_WRAPPER,
+                BASIC_BLOCK_TRACE2.getHeader().getStateRoot().toByteArray(),
+                BASIC_BLOCK_TRACE2.getL1MsgRollingHash().getValue().toByteArray(),
+                Bytes32.DEFAULT.getValue(),
+                0,
+                ListUtil.toList(new ChunkWrapper(BatchVersionEnum.BATCH_V0, BigInteger.valueOf(1), 0, ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2)))
+        );
+
+        when(rollupRepository.getBatch(eq(BigInteger.ONE))).thenReturn(batchWrapper);
+        when(rollupRepository.getReliableTransaction(eq(ChainTypeEnum.LAYER_ONE), eq(BigInteger.ONE), eq(TransactionTypeEnum.BATCH_COMMIT_TX)))
+                .thenReturn(null);
+
+        when(l1Client.commitBatchWithEthCall(any(BatchWrapper.class)))
+                .thenThrow(new L1ContractWarnException(L2RelayerErrorCodeEnum.CALL_WITH_WARNING, "batch already committed"));
+
+        adminGrpcService.commitBatchManually(req, responseObserver);
+
+        Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
+        Assert.assertNull(responseObserver.getError());
+        List<Response> results = responseObserver.getValues();
+        Assert.assertEquals(1, results.size());
+        Assert.assertEquals(-1, results.get(0).getCode());
+        Assert.assertTrue(results.get(0).getErrorMsg().contains("been committed"));
+
+        verify(rollupRepository, never()).insertReliableTransaction(any());
+        verify(rollupRepository, never()).updateReliableTransaction(any());
+    }
+
+    @Test
+    @SneakyThrows
+    public void testCommitBatchManuallyUpdateExistingTx() {
+        CommitBatchManuallyReq req = CommitBatchManuallyReq.newBuilder()
+                .setBatchIndex(1)
+                .build();
+        StreamRecorder<Response> responseObserver = StreamRecorder.create();
+
+        when(l1Client.lastCommittedBatch()).thenReturn(BigInteger.ZERO);
+
+        var batchWrapper = BatchWrapper.createBatch(
+                BatchVersionEnum.BATCH_V0, BigInteger.valueOf(1), ZERO_BATCH_WRAPPER,
+                BASIC_BLOCK_TRACE2.getHeader().getStateRoot().toByteArray(),
+                BASIC_BLOCK_TRACE2.getL1MsgRollingHash().getValue().toByteArray(),
+                Bytes32.DEFAULT.getValue(),
+                0,
+                ListUtil.toList(new ChunkWrapper(BatchVersionEnum.BATCH_V0, BigInteger.valueOf(1), 0, ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2)))
+        );
+
+        when(rollupRepository.getBatch(eq(BigInteger.ONE))).thenReturn(batchWrapper);
+
+        // Existing transaction in failed state
+        var existingTx = ReliableTransactionDO.builder()
+                .batchIndex(BigInteger.ONE)
+                .transactionType(TransactionTypeEnum.BATCH_COMMIT_TX)
+                .state(ReliableTransactionStateEnum.TX_FAILED)
+                .build();
+        when(rollupRepository.getReliableTransaction(eq(ChainTypeEnum.LAYER_ONE), eq(BigInteger.ONE), eq(TransactionTypeEnum.BATCH_COMMIT_TX)))
+                .thenReturn(existingTx);
+        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BATCH_COMMITTED)))
+                .thenReturn(BigInteger.ZERO);
+
+        var txInfo = TransactionInfo.builder()
+                .txHash(Numeric.toHexString(RandomUtil.randomBytes(32)))
+                .nonce(BigInteger.ONE)
+                .senderAccount("0x863df6bfa4469f3ead0be8f9f2aae51c91a907b4")
+                .sendTxTime(new Date())
+                .rawTx(JSON.toJSONBytes(HexUtil.decodeHex("00")))
+                .build();
+
+        when(l1Client.commitBatchWithEthCall(any(BatchWrapper.class)))
+                .thenReturn(txInfo);
+
+        adminGrpcService.commitBatchManually(req, responseObserver);
+
+        Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
+        Assert.assertNull(responseObserver.getError());
+        List<Response> results = responseObserver.getValues();
+        Assert.assertEquals(1, results.size());
+        Assert.assertEquals(0, results.get(0).getCode());
+
+        verify(rollupRepository, times(1)).updateReliableTransaction(argThat(tx ->
+                tx.getTransactionType() == TransactionTypeEnum.BATCH_COMMIT_TX &&
+                tx.getBatchIndex().equals(BigInteger.ONE) &&
+                tx.getLatestTxHash().equals(txInfo.getTxHash())
+        ));
+        verify(rollupRepository, times(1)).updateRollupNumberRecord(
+                eq(ChainTypeEnum.LAYER_TWO),
+                eq(RollupNumberRecordTypeEnum.BATCH_COMMITTED),
+                eq(batchWrapper.getBatchIndex())
+        );
+    }
+
+    @Test
+    @SneakyThrows
+    public void testCommitBatchManuallyUpdateBatchCommittedRecord() {
+        CommitBatchManuallyReq req = CommitBatchManuallyReq.newBuilder()
+                .setBatchIndex(2)
+                .build();
+        StreamRecorder<Response> responseObserver = StreamRecorder.create();
+
+        when(l1Client.lastCommittedBatch()).thenReturn(BigInteger.ONE);
+
+        var batchWrapper = BatchWrapper.createBatch(
+                BatchVersionEnum.BATCH_V0, BigInteger.valueOf(2), ZERO_BATCH_WRAPPER,
+                BASIC_BLOCK_TRACE2.getHeader().getStateRoot().toByteArray(),
+                BASIC_BLOCK_TRACE2.getL1MsgRollingHash().getValue().toByteArray(),
+                Bytes32.DEFAULT.getValue(),
+                0,
+                ListUtil.toList(new ChunkWrapper(BatchVersionEnum.BATCH_V0, BigInteger.valueOf(2), 0, ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2)))
+        );
+
+        when(rollupRepository.getBatch(eq(BigInteger.valueOf(2)))).thenReturn(batchWrapper);
+        when(rollupRepository.getReliableTransaction(eq(ChainTypeEnum.LAYER_ONE), eq(BigInteger.valueOf(2)), eq(TransactionTypeEnum.BATCH_COMMIT_TX)))
+                .thenReturn(null);
+        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BATCH_COMMITTED)))
+                .thenReturn(BigInteger.ONE);
+
+        var txInfo = TransactionInfo.builder()
+                .txHash(Numeric.toHexString(RandomUtil.randomBytes(32)))
+                .nonce(BigInteger.valueOf(2))
+                .senderAccount("0x863df6bfa4469f3ead0be8f9f2aae51c91a907b4")
+                .sendTxTime(new Date())
+                .rawTx(JSON.toJSONBytes(HexUtil.decodeHex("00")))
+                .build();
+
+        when(l1Client.commitBatchWithEthCall(any(BatchWrapper.class)))
+                .thenReturn(txInfo);
+
+        adminGrpcService.commitBatchManually(req, responseObserver);
+
+        Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
+        Assert.assertNull(responseObserver.getError());
+        List<Response> results = responseObserver.getValues();
+        Assert.assertEquals(1, results.size());
+        Assert.assertEquals(0, results.get(0).getCode());
+
+        verify(rollupRepository, times(1)).updateRollupNumberRecord(
+                eq(ChainTypeEnum.LAYER_TWO),
+                eq(RollupNumberRecordTypeEnum.BATCH_COMMITTED),
+                eq(BigInteger.valueOf(2))
+        );
+    }
+
+    @Test
+    @SneakyThrows
+    public void testCommitBatchManuallyTxAlreadySucceed() {
+        CommitBatchManuallyReq req = CommitBatchManuallyReq.newBuilder()
+                .setBatchIndex(1)
+                .build();
+        StreamRecorder<Response> responseObserver = StreamRecorder.create();
+
+        when(l1Client.lastCommittedBatch()).thenReturn(BigInteger.ZERO);
+
+        // Transaction already confirmed
+        var succeededTx = ReliableTransactionDO.builder()
+                .batchIndex(BigInteger.ONE)
+                .transactionType(TransactionTypeEnum.BATCH_COMMIT_TX)
+                .state(ReliableTransactionStateEnum.TX_SUCCESS)
+                .latestTxHash("0x1234567890abcdef")
+                .build();
+        when(rollupRepository.getReliableTransaction(eq(ChainTypeEnum.LAYER_ONE), eq(BigInteger.ONE), eq(TransactionTypeEnum.BATCH_COMMIT_TX)))
+                .thenReturn(succeededTx);
+
+        adminGrpcService.commitBatchManually(req, responseObserver);
+
+        Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
+        Assert.assertNull(responseObserver.getError());
+        List<Response> results = responseObserver.getValues();
+        Assert.assertEquals(1, results.size());
+        Assert.assertEquals(-1, results.get(0).getCode());
+        Assert.assertTrue(results.get(0).getErrorMsg().contains("confirmed success"));
+
+        verify(rollupRepository, never()).insertReliableTransaction(any());
+    }
+
+    @Test
+    @SneakyThrows
+    public void testCommitBatchManuallyMultipleBatches() {
+        // Test committing multiple batches sequentially
+        for (int i = 1; i <= 3; i++) {
+            CommitBatchManuallyReq req = CommitBatchManuallyReq.newBuilder()
+                    .setBatchIndex(i)
+                    .build();
+            StreamRecorder<Response> responseObserver = StreamRecorder.create();
+
+            when(l1Client.lastCommittedBatch()).thenReturn(BigInteger.valueOf(i - 1));
+
+            var batchWrapper = BatchWrapper.createBatch(
+                    BatchVersionEnum.BATCH_V0, BigInteger.valueOf(i), ZERO_BATCH_WRAPPER,
+                    BASIC_BLOCK_TRACE2.getHeader().getStateRoot().toByteArray(),
+                    BASIC_BLOCK_TRACE2.getL1MsgRollingHash().getValue().toByteArray(),
+                    Bytes32.DEFAULT.getValue(),
+                    0,
+                    ListUtil.toList(new ChunkWrapper(BatchVersionEnum.BATCH_V0, BigInteger.valueOf(i), 0, ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2)))
+            );
+
+            when(rollupRepository.getBatch(eq(BigInteger.valueOf(i)))).thenReturn(batchWrapper);
+            when(rollupRepository.getReliableTransaction(eq(ChainTypeEnum.LAYER_ONE), eq(BigInteger.valueOf(i)), eq(TransactionTypeEnum.BATCH_COMMIT_TX)))
+                    .thenReturn(null);
+            when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BATCH_COMMITTED)))
+                    .thenReturn(BigInteger.valueOf(i - 1));
+
+            var txInfo = TransactionInfo.builder()
+                    .txHash("0x" + String.format("%064x", i))
+                    .nonce(BigInteger.valueOf(i))
+                    .senderAccount("0x863df6bfa4469f3ead0be8f9f2aae51c91a907b4")
+                    .sendTxTime(new Date())
+                    .rawTx(JSON.toJSONBytes(HexUtil.decodeHex("00")))
+                    .build();
+
+            when(l1Client.commitBatchWithEthCall(any(BatchWrapper.class)))
+                    .thenReturn(txInfo);
+
+            adminGrpcService.commitBatchManually(req, responseObserver);
+
+            Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
+            Assert.assertNull(responseObserver.getError());
+            List<Response> results = responseObserver.getValues();
+            Assert.assertEquals(1, results.size());
+            Assert.assertEquals(0, results.get(0).getCode());
+            Assert.assertEquals(txInfo.getTxHash(), results.get(0).getCommitBatchManuallyResp().getTxHash());
+        }
+    }
+
+    @Test
+    @SneakyThrows
+    public void testUpdateNonceManuallyL1() {
+        when(l1Client.getBlobPoolTxManager()).thenReturn(l1BlobPoolTxTransactionManager);
+        var nonceManager = mock(CachedNonceManager.class);
+        when(l1BlobPoolTxTransactionManager.getNonceManager()).thenReturn(nonceManager);
+        doNothing().when(nonceManager).setNonceIntoCache(notNull());
+
+        // Update L1 nonce successfully
+        var updateReq = UpdateNonceManuallyReq.newBuilder()
+                .setChainType(ChainType.L1)
+                .setAccType(AccType.BLOB)
+                .setNonce(1000L)
+                .build();
+
+        StreamRecorder<Response> responseObserver = StreamRecorder.create();
+        adminGrpcService.updateNonceManually(updateReq, responseObserver);
+
+        // Wait for response
+        List<Response> results = responseObserver.getValues();
+        Assert.assertEquals(1, results.size());
+        Assert.assertEquals(0, results.get(0).getCode());
+
+        // Verify nonce was updated in cache
+        verify(nonceManager, times(1)).setNonceIntoCache(eq(BigInteger.valueOf(1000L)));
+
+        var nonceManager1 = mock(RemoteNonceManager.class);
+        when(l1BlobPoolTxTransactionManager.getNonceManager()).thenReturn(nonceManager1);
+
+        StreamRecorder.create();
+        adminGrpcService.updateNonceManually(updateReq, responseObserver);
+        // Wait for response
+        results = responseObserver.getValues();
+        Assert.assertEquals(2, results.size());
+        Assert.assertEquals(-1, results.get(1).getCode());
+        Assert.assertTrue(results.get(1).getErrorMsg().contains("only supports cached nonce manager"));
+    }
+
+    @Test
+    @SneakyThrows
+    public void testQueryCurrNonceL1() {
+        // Query L1 nonce from cache
+        when(l1Client.getBlobPoolTxManager()).thenReturn(l1BlobPoolTxTransactionManager);
+        var nonceManager = mock(CachedNonceManager.class);
+        when(l1BlobPoolTxTransactionManager.getNonceManager()).thenReturn(nonceManager);
+        when(nonceManager.getNextNonce()).thenReturn(BigInteger.valueOf(5000L));
+
+        var queryReq = QueryCurrNonceReq.newBuilder()
+                .setChainType(ChainType.L1)
+                .setAccType(AccType.BLOB)
+                .build();
+
+        StreamRecorder<Response> responseObserver = StreamRecorder.create();
+        adminGrpcService.queryCurrNonce(queryReq, responseObserver);
+
+        // Wait for response
+        List<Response> results = responseObserver.getValues();
+        Assert.assertEquals(1, results.size());
+        Assert.assertEquals(0, results.get(0).getCode());
+        Assert.assertEquals(5000L, results.get(0).getQueryCurrNonceResp().getNonce());
+
+        // Verify query was called
+        verify(nonceManager, times(1)).getNextNonce();
+    }
+
+    @Test
+    @SneakyThrows
+    public void testRefetchProof() {
+        // pick a valid proof type dynamically to avoid hard-coding enum name
+        var proofType = ProveTypeEnum.values()[0].name();
+
+        var req = RefetchProofReq.newBuilder()
+                .setProofType(proofType)
+                .setFromBatchIndex("1")
+                .setToBatchIndex("3")
+                .build();
+        StreamRecorder<Response> responseObserver = StreamRecorder.create();
+
+        // prepare a mock non-null return for certain batches using reflection to create correct return type
+        var m = IRollupRepository.class.getMethod("getBatchProveRequest", BigInteger.class, ProveTypeEnum.class);
+        var mockProveReq = mock(BatchProveRequestDO.class);
+
+        // return non-null for batch 1 and 3, default (null) for batch 2
+        when(rollupRepository.getBatchProveRequest(eq(BigInteger.valueOf(1)), any())).thenReturn(mockProveReq);
+        when(rollupRepository.getBatchProveRequest(eq(BigInteger.valueOf(3)), any())).thenReturn(mockProveReq);
+
+        adminGrpcService.refetchProof(req, responseObserver);
+
+        Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
+        Assert.assertNull(responseObserver.getError());
+        var results = responseObserver.getValues();
+        Assert.assertEquals(1, results.size());
+        Assert.assertEquals(0, results.get(0).getCode());
+
+        // verify update called only for batches 1 and 3 with PENDING state
+        verify(rollupRepository, times(1)).updateBatchProveRequestState(
+                eq(BigInteger.valueOf(1)), eq(ProveTypeEnum.valueOf(proofType.toUpperCase())), eq(BatchProveRequestStateEnum.PENDING)
+        );
+        verify(rollupRepository, times(1)).updateBatchProveRequestState(
+                eq(BigInteger.valueOf(3)), eq(ProveTypeEnum.valueOf(proofType.toUpperCase())), eq(BatchProveRequestStateEnum.PENDING)
+        );
+        verify(rollupRepository, never()).updateBatchProveRequestState(
+                eq(BigInteger.valueOf(2)), any(), any()
+        );
     }
 }

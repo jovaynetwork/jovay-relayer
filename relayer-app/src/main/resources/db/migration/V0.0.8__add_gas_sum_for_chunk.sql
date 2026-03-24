@@ -1,0 +1,2 @@
+ALTER TABLE chunks
+    ADD COLUMN gas_sum BIGINT DEFAULT -1;

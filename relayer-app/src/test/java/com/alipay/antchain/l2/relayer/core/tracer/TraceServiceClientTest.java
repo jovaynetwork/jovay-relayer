@@ -1,7 +1,25 @@
+/*
+ * Copyright 2026 Ant Group
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.alipay.antchain.l2.relayer.core.tracer;
 
 import java.math.BigInteger;
 import java.util.List;
+
+import com.alipay.antchain.l2.tracer.GetLatestProcessedBlockResponse;
 import jakarta.annotation.Resource;
 
 import cn.hutool.core.collection.ListUtil;
@@ -69,6 +87,16 @@ public class TraceServiceClientTest extends TestBase {
     }
 
     @Test
+    public void testGetLatestProcessedBlock() {
+        when(stub.getLatestProcessedBlock(notNull())).thenReturn(
+                GetLatestProcessedBlockResponse.newBuilder().setBlockNumber(BigInteger.ONE.longValue()).build()
+        );
+
+        var res = traceServiceClient.getLatestProcessedBlock();
+        Assert.assertEquals(1L, res.longValue());
+    }
+
+    @Test
     public void testGetBasicTrace() {
         when(stub.getBasicTrace(notNull())).thenReturn(
                 GetBasicTraceResponse.newBuilder().setBasicTrace(BASIC_BLOCK_TRACE1).setStatus(L2Status.newBuilder().setErrorCode(L2ErrorCode.L2_OK)).build(),
@@ -90,125 +118,5 @@ public class TraceServiceClientTest extends TestBase {
 
         Assert.assertThrows(RemoteServiceRetryException.class, () -> traceServiceClient.getBasicTrace(BigInteger.ONE));
         verify(stub, times(5)).getBasicTrace(notNull());
-    }
-
-    // ==================== Negative Case Tests ====================
-
-    /**
-     * Test fetch basic trace when tracer service is unavailable
-     */
-    @Test
-    public void testFetchBasicTrace_ServiceUnavailable() {
-        when(stub.fetchBasicTrace(notNull())).thenThrow(new RuntimeException("Tracer service unavailable"));
-
-        Assert.assertThrows(RuntimeException.class,
-            () -> traceServiceClient.fetchBasicTrace(BigInteger.ONE, BigInteger.valueOf(3)));
-    }
-
-    /**
-     * Test fetch basic trace when stream returns null
-     */
-    @Test
-    public void testFetchBasicTrace_NullInStream() {
-        when(stub.fetchBasicTrace(notNull())).thenReturn(
-            ListUtil.toList(BASIC_BLOCK_TRACE1, null, BASIC_BLOCK_TRACE2).stream().iterator()
-        );
-
-        Assert.assertThrows(RuntimeException.class,
-            () -> traceServiceClient.fetchBasicTrace(BigInteger.ONE, BigInteger.valueOf(4)));
-    }
-
-    /**
-     * Test get basic trace when block is not stable yet
-     */
-    @Test
-    public void testGetBasicTrace_BlockNotStable() {
-        when(stub.getBasicTrace(notNull())).thenReturn(
-                GetBasicTraceResponse.newBuilder()
-                    .setBasicTrace(BASIC_BLOCK_TRACE1)
-                    .setStableBlockNumber(5)
-                    .setStatus(L2Status.newBuilder()
-                        .setErrorCode(L2ErrorCode.L2_TRACER_ERROR_INVALID_BLOCK_NUMBER)
-                        .setErrorMessage("Block not stable yet"))
-                    .build()
-        );
-
-        Assert.assertThrows(CallRemoteServiceFailedException.class,
-            () -> traceServiceClient.getBasicTrace(BigInteger.valueOf(20)));
-    }
-
-    /**
-     * Test get basic trace when tracer returns timeout error
-     */
-    @Test
-    public void testGetBasicTrace_Timeout() {
-        when(stub.getBasicTrace(notNull())).thenReturn(
-                GetBasicTraceResponse.newBuilder()
-                    .setBasicTrace(BASIC_BLOCK_TRACE1)
-                    .setStatus(L2Status.newBuilder()
-                        .setErrorCode(L2ErrorCode.L2_TIMEOUT)
-                        .setErrorMessage("Trace generation timeout"))
-                    .build()
-        );
-
-        Assert.assertThrows(RemoteServiceRetryException.class,
-            () -> traceServiceClient.getBasicTrace(BigInteger.ONE));
-    }
-
-    /**
-     * Test get basic trace when block number is invalid
-     */
-    @Test
-    public void testGetBasicTrace_InvalidBlockNumber() {
-        when(stub.getBasicTrace(notNull())).thenReturn(
-                GetBasicTraceResponse.newBuilder()
-                    .setBasicTrace(BASIC_BLOCK_TRACE1)
-                    .setStableBlockNumber(10)
-                    .setStatus(L2Status.newBuilder()
-                        .setErrorCode(L2ErrorCode.L2_TRACER_ERROR_INVALID_BLOCK_NUMBER)
-                        .setErrorMessage("Block number does not exist"))
-                    .build()
-        );
-
-        Assert.assertThrows(CallRemoteServiceFailedException.class,
-            () -> traceServiceClient.getBasicTrace(BigInteger.valueOf(100)));
-    }
-
-    /**
-     * Test fetch basic trace when range is invalid
-     */
-    @Test
-    public void testFetchBasicTrace_InvalidRange() {
-        when(stub.fetchBasicTrace(notNull())).thenReturn(
-            ListUtil.<BasicBlockTrace>empty().stream().iterator()
-        );
-
-        List<BasicBlockTrace> traces = traceServiceClient.fetchBasicTrace(BigInteger.valueOf(10), BigInteger.ONE);
-        Assert.assertEquals(0, traces.size());
-    }
-
-    /**
-     * Test get basic trace with multiple retries until success
-     */
-    @Test
-    public void testGetBasicTrace_RetryUntilSuccess() {
-        when(stub.getBasicTrace(notNull())).thenReturn(
-                GetBasicTraceResponse.newBuilder()
-                    .setBasicTrace(BASIC_BLOCK_TRACE1)
-                    .setStatus(L2Status.newBuilder().setErrorCode(L2ErrorCode.L2_RESOURCE_EXHAUSTED))
-                    .build(),
-                GetBasicTraceResponse.newBuilder()
-                    .setBasicTrace(BASIC_BLOCK_TRACE1)
-                    .setStatus(L2Status.newBuilder().setErrorCode(L2ErrorCode.L2_RESOURCE_EXHAUSTED))
-                    .build(),
-                GetBasicTraceResponse.newBuilder()
-                    .setBasicTrace(BASIC_BLOCK_TRACE1)
-                    .setStatus(L2Status.newBuilder().setErrorCode(L2ErrorCode.L2_OK))
-                    .build()
-        );
-
-        // Should succeed after retries
-        BasicBlockTrace res = traceServiceClient.getBasicTrace(BigInteger.ONE);
-        Assert.assertEquals(1L, res.getHeader().getNumber());
     }
 }

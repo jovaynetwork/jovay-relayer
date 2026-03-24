@@ -1,0 +1,130 @@
+networks:
+  default:
+    external: false
+    name: jovay-network-${CONTAINER_INDEX:-0}
+
+services:
+  jovay-relayer:
+    container_name: jovay-relayer-${CONTAINER_INDEX:-0}
+    image: ghcr.io/jovaynetwork/jovay-relayer:${DOCKER_TAG:-latest}
+    restart: always
+    networks:
+      - default
+    privileged: true
+    environment:
+      - MYSQL_HOST=jovay-relayer-mysql
+      - MYSQL_PORT=3306
+      - MYSQL_USER_NAME=root
+      - MYSQL_USER_PASSWORD=${MYSQL_ROOT_PASSWORD:-changeme}
+      - MYSQL_DB_NAME=${MYSQL_DB_NAME:-l2relayer}
+      - REDIS_URL=jovay-relayer-redis
+      - REDIS_PORT=6379
+      - REDIS_USER_PASSWORD=${REDIS_PASSWORD:-changeme}
+      - REDIS_DATABASE=${REDIS_DATABASE:-0}
+      - OTEL_SERVICE_NAME=jovay-relayer-${CONTAINER_INDEX:-0}
+      - OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://${OTLP_TRACES_ADDRESS}:${OTLP_TRACES_PORT}
+      - L1_RPC_URL=${L1_RPC_URL}
+      - L1_ROLLUP_CONTRACT=${L1_ROLLUP_CONTRACT}
+      - L1_MAILBOX_CONTRACT=${L1_MAILBOX_CONTRACT}
+      - L2_RPC_URL=${L2_RPC_URL}
+      - TRACER_IP=${TRACER_IP}
+      - TRACER_PORT=${TRACER_PORT}
+      - PROVER_CONTROLLER_ENDPOINTS=${PROVER_CONTROLLER_ENDPOINTS}
+      - BATCH_PROVE_REQ_TYPES=${BATCH_PROVE_REQ_TYPES:-ALL}
+      - ROLLUP_SPECS_NETWORK=${ROLLUP_SPECS_NETWORK}
+      - L1_LEGACY_POOL_TX_SIGN_SERVICE_TYPE=${L1_LEGACY_POOL_TX_SIGN_SERVICE_TYPE}
+      - L1_CLIENT_LEGACY_POOL_TX_PRIVATE_KEY=${L1_CLIENT_LEGACY_POOL_TX_PRIVATE_KEY}
+      - L1_CLIENT_LEGACY_POOL_KMS_ENDPOINT=${L1_CLIENT_LEGACY_POOL_KMS_ENDPOINT}
+      - L1_CLIENT_LEGACY_POOL_KMS_ACCESS_KEY_ID=${L1_CLIENT_LEGACY_POOL_KMS_ACCESS_KEY_ID}
+      - L1_CLIENT_LEGACY_POOL_KMS_ACCESS_KEY_SECRET=${L1_CLIENT_LEGACY_POOL_KMS_ACCESS_KEY_SECRET}
+      - L1_CLIENT_LEGACY_POOL_KMS_PRIVATE_KEY_ID=${L1_CLIENT_LEGACY_POOL_KMS_PRIVATE_KEY_ID}
+      - L1_CLIENT_LEGACY_POOL_KMS_PRIVATE_KEY_VERSION_ID=${L1_CLIENT_LEGACY_POOL_KMS_PRIVATE_KEY_VERSION_ID}
+      - L1_CLIENT_LEGACY_POOL_KMS_CA=${L1_CLIENT_LEGACY_POOL_KMS_CA}
+      - L1_BLOB_POOL_TX_SIGN_SERVICE_TYPE=${L1_BLOB_POOL_TX_SIGN_SERVICE_TYPE}
+      - L1_CLIENT_BLOB_POOL_TX_PRIVATE_KEY=${L1_CLIENT_BLOB_POOL_TX_PRIVATE_KEY}
+      - L1_CLIENT_BLOB_POOL_KMS_ENDPOINT=${L1_CLIENT_BLOB_POOL_KMS_ENDPOINT}
+      - L1_CLIENT_BLOB_POOL_KMS_ACCESS_KEY_ID=${L1_CLIENT_BLOB_POOL_KMS_ACCESS_KEY_ID}
+      - L1_CLIENT_BLOB_POOL_KMS_ACCESS_KEY_SECRET=${L1_CLIENT_BLOB_POOL_KMS_ACCESS_KEY_SECRET}
+      - L1_CLIENT_BLOB_POOL_KMS_PRIVATE_KEY_ID=${L1_CLIENT_BLOB_POOL_KMS_PRIVATE_KEY_ID}
+      - L1_CLIENT_BLOB_POOL_KMS_PRIVATE_KEY_VERSION_ID=${L1_CLIENT_BLOB_POOL_KMS_PRIVATE_KEY_VERSION_ID}
+      - L1_CLIENT_BLOB_POOL_KMS_CA=${L1_CLIENT_BLOB_POOL_KMS_CA}
+      - L2_TX_SIGN_SERVICE_TYPE=${L2_TX_SIGN_SERVICE_TYPE}
+      - L2_CLIENT_PRIVATE_KEY=${L2_CLIENT_PRIVATE_KEY}
+      - L2_CLIENT_KMS_ENDPOINT=${L2_CLIENT_KMS_ENDPOINT}
+      - L2_CLIENT_KMS_ACCESS_KEY_ID=${L2_CLIENT_KMS_ACCESS_KEY_ID}
+      - L2_CLIENT_KMS_ACCESS_KEY_SECRET=${L2_CLIENT_KMS_ACCESS_KEY_SECRET}
+      - L2_CLIENT_KMS_PRIVATE_KEY_ID=${L2_CLIENT_KMS_PRIVATE_KEY_ID}
+      - L2_CLIENT_KMS_PRIVATE_KEY_VERSION_ID=${L2_CLIENT_KMS_PRIVATE_KEY_VERSION_ID}
+      - L2_CLIENT_KMS_CA=${L2_CLIENT_KMS_CA}
+    ports:
+      - "${ADMIN_EXPOSE_PORT:-7088}:7088"
+      - "${DEBUG_PORT:-25005}:25005"
+    tty: true
+    working_dir: /l2-relayer
+    volumes:
+      - ./relayer-log:/l2-relayer/log
+    depends_on:
+      jovay-relayer-mysql:
+        condition: service_healthy
+      jovay-relayer-redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "7088"]
+      timeout: 20s
+      retries: 10
+    stop_grace_period: 5m
+
+  jovay-relayer-mysql:
+    container_name: jovay-relayer-mysql-${CONTAINER_INDEX:-0}
+    image: mysql:8.4
+    restart: always
+    mem_limit: 1024m
+    environment:
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-changeme}
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./mysql/data:/var/lib/mysql
+      - ./mysql/conf:/etc/mysql/conf.d
+    command: --max_allowed_packet=32505856 --default-time_zone=+8:00 --disable-log-bin
+    ports:
+      - "${MYSQL_DB_PORT:-13306}:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
+
+  jovay-relayer-redis:
+    container_name: jovay-relayer-redis-${CONTAINER_INDEX:-0}
+    image: redis:7
+    restart: always
+    command: --requirepass '${REDIS_PASSWORD:-changeme}' --maxmemory 1024MB --maxmemory-policy volatile-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-changeme}", "ping"]
+      timeout: 10s
+      retries: 3
+
+  query-service:
+    container_name: query-service-${CONTAINER_INDEX:-0}
+    image: ghcr.io/jovaynetwork/jovay-relayer-query-service:${DOCKER_TAG:-latest}
+    restart: always
+    networks:
+      - default
+    privileged: true
+    environment:
+      - MYSQL_HOST=jovay-relayer-mysql
+      - MYSQL_PORT=3306
+      - MYSQL_DB_NAME=${MYSQL_DB_NAME:-l2relayer}
+      - MYSQL_USER_NAME=root
+      - MYSQL_USER_PASSWORD=${MYSQL_ROOT_PASSWORD:-changeme}
+      - JASYPT_PASSWD=${JASYPT_PASSWD}
+      - DEBUG_MODE=${DEBUG_MODE:-off}
+    ports:
+      - "${QS_EXPOSE_PORT:-8080}:8080"
+      - "${QS_DEBUG_PORT:-25006}:25006"
+    tty: true
+    working_dir: /query-service
+    volumes:
+      - ./relayer-log:/query-service/log
+    depends_on:
+      jovay-relayer:
+        condition: service_healthy

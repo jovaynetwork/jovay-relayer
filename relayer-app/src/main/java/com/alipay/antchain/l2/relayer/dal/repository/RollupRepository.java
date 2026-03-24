@@ -1,3 +1,19 @@
+/*
+ * Copyright 2026 Ant Group
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.alipay.antchain.l2.relayer.dal.repository;
 
 import java.math.BigInteger;
@@ -5,19 +21,21 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
-import jakarta.annotation.Resource;
-
+import cn.hutool.cache.Cache;
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.collection.ListUtil;
 import cn.hutool.core.lang.Assert;
-import cn.hutool.core.util.HexUtil;
 import cn.hutool.core.util.ObjectUtil;
 import cn.hutool.core.util.StrUtil;
 import com.alipay.antchain.l2.relayer.commons.enums.*;
 import com.alipay.antchain.l2.relayer.commons.exceptions.BlockPollingException;
 import com.alipay.antchain.l2.relayer.commons.l2basic.BatchHeader;
+import com.alipay.antchain.l2.relayer.commons.l2basic.BatchVersionEnum;
 import com.alipay.antchain.l2.relayer.commons.models.*;
 import com.alipay.antchain.l2.relayer.core.tracer.TraceServiceClient;
 import com.alipay.antchain.l2.relayer.dal.entities.*;
@@ -25,7 +43,9 @@ import com.alipay.antchain.l2.relayer.dal.mapper.*;
 import com.alipay.antchain.l2.relayer.utils.ConvertUtil;
 import com.alipay.antchain.l2.trace.BasicBlockTrace;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import jakarta.annotation.Resource;
 import lombok.NonNull;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -47,10 +67,12 @@ public class RollupRepository implements IRollupRepository {
 
     private static final String L2BATCH_ETH_BLOBS_CACHE_KEY = "L2_BATCH_BLOBS@{}";
 
-    @Value("${l2-relayer.tasks.cache.l2-block-trace-ttl:1024000}")
+    private static final Integer CHUNK_HAS_NO_BATCH_VERSION_YET = -1;
+
+    @Value("${l2-relayer.tasks.cache.l2-block-trace-ttl:4200000}")
     private int l2BlockTraceCacheTTL;
 
-    @Value("${l2-relayer.tasks.cache.l2-chunk-ttl:2048000}")
+    @Value("${l2-relayer.tasks.cache.l2-chunk-ttl:4200000}")
     private int l2ChunkCacheTTL;
 
     @Value("${l2-relayer.tasks.cache.l2-batch-eth-blobs-ttl:300000}")
@@ -80,16 +102,30 @@ public class RollupRepository implements IRollupRepository {
     @Resource
     private TraceServiceClient traceServiceClient;
 
+    @Resource
+    private ExecutorService getL2BlockTraceRangeThreadsPool;
+
+    @Resource
+    private Cache<BigInteger, BasicBlockTrace> l2BlockTracesCacheForCurrChunk;
+
     @Override
     public void cacheL2BlockTrace(@NonNull BasicBlockTrace blockTrace) {
         log.info("cache l2 block trace: {}", blockTrace.getHeader().getNumber());
-        redisson.getBucket(getL2blockTraceCacheKey(BigInteger.valueOf(blockTrace.getHeader().getNumber())), ByteArrayCodec.INSTANCE)
+        var height = BigInteger.valueOf(blockTrace.getHeader().getNumber());
+        redisson.getBucket(getL2blockTraceCacheKey(height), ByteArrayCodec.INSTANCE)
                 .setIfAbsent(blockTrace.toByteArray(), Duration.ofMillis(l2BlockTraceCacheTTL));
+        l2BlockTracesCacheForCurrChunk.put(height, blockTrace);
     }
 
     @Override
     @SneakyThrows
     public BasicBlockTrace getL2BlockTraceFromCache(BigInteger blockNumber) {
+        if (l2BlockTracesCacheForCurrChunk.containsKey(blockNumber)) {
+            var result = l2BlockTracesCacheForCurrChunk.get(blockNumber);
+            if (ObjectUtil.isNotNull(result)) {
+                return result;
+            }
+        }
         RBucket<byte[]> bucket = redisson.getBucket(getL2blockTraceCacheKey(blockNumber), ByteArrayCodec.INSTANCE);
         byte[] raw = bucket.get();
         if (ObjectUtil.isEmpty(raw)) {
@@ -100,12 +136,48 @@ public class RollupRepository implements IRollupRepository {
     }
 
     @Override
+    public void deleteL2BlockTracesFromCache(BigInteger start, BigInteger end) {
+        log.info("delete cached l2 block traces from {} to {} included", start, end);
+        for (var h = start; h.compareTo(end) <= 0; h = h.add(BigInteger.ONE)) {
+            var finalH = h;
+            redisson.getBucket(getL2blockTraceCacheKey(h), ByteArrayCodec.INSTANCE).deleteAsync().exceptionally(
+                    throwable -> {
+                        log.error("delete cached l2 block traces {} failed: ", finalH, throwable);
+                        return null;
+                    }
+            );
+        }
+    }
+
+    @Override
+    public void clearL2BlockTracesCacheForCurrChunk() {
+        log.info("clear cached l2 block traces for current chunk");
+        this.l2BlockTracesCacheForCurrChunk.clear();
+    }
+
+    @Override
+    @SneakyThrows
     public List<BasicBlockTrace> getL2BlockTraceRange(BigInteger start, BigInteger end) {
         log.info("try to get block traces from {} to {} included", start, end);
-        List<BasicBlockTrace> blockTraces = new ArrayList<>();
-        for (BigInteger h = start; h.compareTo(end) <= 0; h = h.add(BigInteger.ONE)) {
-            log.debug("try to get block trace for height {}", h);
-            blockTraces.add(getL2BlockTrace(h));
+        var blockTraces = new ArrayList<BasicBlockTrace>();
+        var blockFutures = new ArrayList<CompletableFuture<BasicBlockTrace>>();
+        for (var h = start; h.compareTo(end) <= 0; h = h.add(BigInteger.ONE)) {
+            var finalH = h;
+            if (l2BlockTracesCacheForCurrChunk.containsKey(finalH)) {
+                var result = l2BlockTracesCacheForCurrChunk.get(finalH);
+                if (ObjectUtil.isNotNull(result)) {
+                    log.debug("try to get l2 block trace from memory cache: {}", finalH);
+                    blockTraces.add(result);
+                    continue;
+                }
+            }
+            blockFutures.add(CompletableFuture.supplyAsync(() -> {
+                log.debug("try to get block trace for height {} from redis cache", finalH);
+                return getL2BlockTrace(finalH);
+            }, getL2BlockTraceRangeThreadsPool));
+        }
+        for (var blockFuture : blockFutures) {
+            blockTraces.add(blockFuture.get(10, TimeUnit.SECONDS));
         }
         blockTraces.sort(Comparator.comparingLong(o -> o.getHeader().getNumber()));
         return blockTraces;
@@ -225,7 +297,10 @@ public class RollupRepository implements IRollupRepository {
     @Override
     public ChunkWrapper getChunk(BigInteger batchIndex, long chunkIndex) {
         ChunkWrapper chunkWrapper = getL2ChunkFromCache(batchIndex, chunkIndex);
-        if (ObjectUtil.isNotNull(chunkWrapper)) {
+        // We add ths field batch_version to ChunkWrapper
+        // But some cached chunks could have no value for batch_version
+        // So if no value for batch_version, we read it from storage.
+        if (ObjectUtil.isNotNull(chunkWrapper) && ObjectUtil.isNotNull(chunkWrapper.getBatchVersion())) {
             return chunkWrapper;
         }
 
@@ -236,6 +311,18 @@ public class RollupRepository implements IRollupRepository {
         );
         if (ObjectUtil.isNull(entity)) {
             return null;
+        }
+        // According to flyway v0.0.7 SQL, there must be a batch_version for this chunk,
+        // if not, there has to be a sealed batch header for this chunk.
+        if (CHUNK_HAS_NO_BATCH_VERSION_YET.equals(entity.getBatchVersion())) {
+            var batchHeader = getBatchHeader(batchIndex);
+            if (ObjectUtil.isNull(batchHeader)) {
+                throw new RuntimeException(StrUtil.format(
+                        "no batch header found for chunk (batch: {}, chunk: {}), it not supposed to be happened",
+                        batchIndex, chunkIndex
+                ));
+            }
+            entity.setBatchVersion(batchHeader.getVersion().getValueAsUint8());
         }
         return ConvertUtil.convertFromChunksEntity(entity);
     }
@@ -251,13 +338,27 @@ public class RollupRepository implements IRollupRepository {
         }
         return entities.stream().map(
                 x -> new ChunkWrapper(
+                        BatchVersionEnum.from(x.getBatchVersion()),
                         new BigInteger(x.getBatchIndex()),
                         x.getChunkIndex(),
-                        HexUtil.decodeHex(x.getChunkHash()),
-                        x.getZkCycleSum(),
+                        x.getGasSum(),
                         x.getRawChunk()
                 )
         ).sorted(Comparator.comparingLong(ChunkWrapper::getChunkIndex)).collect(Collectors.toList());
+    }
+
+    @Override
+    public void deleteChunksFromCache(BigInteger batchIndex, long start, long end) {
+        log.info("delete chunks from cache for batch {} with index range {}-{}", batchIndex, start, end);
+        for (var i = start; i <= end; i++) {
+            long finalI = i;
+            redisson.getBucket(getL2ChunkCacheKey(batchIndex, i), StringCodec.INSTANCE).deleteAsync().exceptionally(
+                    throwable -> {
+                        log.error("delete chunk {} from cache for batch {} ", finalI, batchIndex, throwable);
+                        return null;
+                    }
+            );
+        }
     }
 
     @Override
@@ -299,7 +400,7 @@ public class RollupRepository implements IRollupRepository {
 
     @Override
     public BatchWrapper getBatch(BigInteger batchIndex) {
-       return getBatch(batchIndex, true);
+        return getBatch(batchIndex, true);
     }
 
     @Override
@@ -463,6 +564,19 @@ public class RollupRepository implements IRollupRepository {
     }
 
     @Override
+    public void removeRawTx(ChainTypeEnum chainType, BigInteger batchIndex, TransactionTypeEnum transactionType) {
+        var entity = new ReliableTransactionEntity();
+        entity.setRawTx(new byte[0]);
+        Assert.equals(1, reliableTransactionMapper.update(
+                entity,
+                new LambdaUpdateWrapper<ReliableTransactionEntity>()
+                        .eq(ReliableTransactionEntity::getChainType, chainType)
+                        .eq(ReliableTransactionEntity::getTransactionType, transactionType)
+                        .eq(ReliableTransactionEntity::getBatchIndex, batchIndex.toString())
+        ));
+    }
+
+    @Override
     public List<ReliableTransactionDO> getTxPendingReliableTransactions(int batchSize) {
         List<ReliableTransactionEntity> entities = reliableTransactionMapper.selectList(
                 new LambdaQueryWrapper<ReliableTransactionEntity>()
@@ -537,6 +651,19 @@ public class RollupRepository implements IRollupRepository {
         return BeanUtil.copyProperties(entity, ReliableTransactionDO.class);
     }
 
+    @Override
+    public BigInteger queryLatestNonce(ChainTypeEnum chainType, String sender) {
+        var wrapper = new QueryWrapper<ReliableTransactionEntity>();
+        wrapper.select("MAX(nonce)");
+        wrapper.eq("chain_type", chainType);
+        wrapper.eq("sender_account", sender);
+        var resultMap = reliableTransactionMapper.selectMaps(wrapper);
+        if (resultMap.isEmpty() || resultMap.stream().allMatch(ObjectUtil::isNull) || resultMap.get(0).isEmpty()) {
+            return BigInteger.valueOf(-1);
+        }
+        return BigInteger.valueOf((Long) resultMap.get(0).values().iterator().next());
+    }
+
     private BigInteger getDefaultRecordNumber(ChainTypeEnum chainType, RollupNumberRecordTypeEnum recordType) {
         if (chainType == ChainTypeEnum.LAYER_ONE) {
             return switch (recordType) {
@@ -546,8 +673,7 @@ public class RollupRepository implements IRollupRepository {
         }
         return switch (recordType) {
             case BLOCK_PROCESSED -> new BigInteger(startProcessedBlockNumberVal);
-            case NEXT_CHUNK, ZK_ROWS_ACCUMULATOR, NEXT_CHUNK_TX_COUNT, NEXT_CHUNK_CALL_DATA_COUNT, BATCH_COMMITTED ->
-                    BigInteger.ZERO;
+            case NEXT_CHUNK, NEXT_CHUNK_GAS_ACCUMULATOR, BATCH_COMMITTED -> BigInteger.ZERO;
             case NEXT_BATCH, NEXT_MSG_PROVE_BATCH -> null;
         };
     }

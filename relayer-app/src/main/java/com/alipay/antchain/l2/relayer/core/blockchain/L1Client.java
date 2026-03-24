@@ -1,3 +1,19 @@
+/*
+ * Copyright 2026 Ant Group
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.alipay.antchain.l2.relayer.core.blockchain;
 
 import java.io.IOException;
@@ -16,15 +32,15 @@ import cn.hutool.core.date.DateUtil;
 import cn.hutool.core.util.HexUtil;
 import cn.hutool.core.util.ObjectUtil;
 import cn.hutool.core.util.StrUtil;
+import com.alipay.antchain.l2.relayer.commons.abi.IMailBoxBase;
+import com.alipay.antchain.l2.relayer.commons.abi.Rollup;
 import com.alipay.antchain.l2.relayer.commons.enums.ChainTypeEnum;
 import com.alipay.antchain.l2.relayer.commons.enums.TransactionTypeEnum;
 import com.alipay.antchain.l2.relayer.commons.exceptions.*;
-import com.alipay.antchain.l2.relayer.commons.l2basic.BatchHeader;
+import com.alipay.antchain.l2.relayer.commons.l2basic.FusakaTransaction4844;
 import com.alipay.antchain.l2.relayer.commons.l2basic.L1MsgTransaction;
 import com.alipay.antchain.l2.relayer.commons.models.*;
 import com.alipay.antchain.l2.relayer.commons.utils.EthTxDecoder;
-import com.alipay.antchain.l2.relayer.core.blockchain.abi.IMailBoxBase;
-import com.alipay.antchain.l2.relayer.core.blockchain.abi.Rollup;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.BaseRawTransactionManager;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.IGasPriceProvider;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.model.*;
@@ -50,6 +66,7 @@ import org.springframework.retry.support.RetrySynchronizationManager;
 import org.springframework.stereotype.Component;
 import org.web3j.abi.EventEncoder;
 import org.web3j.abi.EventValues;
+import org.web3j.abi.FunctionEncoder;
 import org.web3j.abi.datatypes.DynamicBytes;
 import org.web3j.abi.datatypes.Function;
 import org.web3j.abi.datatypes.generated.Bytes32;
@@ -69,7 +86,7 @@ import org.web3j.protocol.core.methods.response.EthLog;
 import org.web3j.protocol.exceptions.ClientConnectionException;
 import org.web3j.utils.Numeric;
 
-import static com.alipay.antchain.l2.relayer.core.blockchain.abi.Rollup.FUNC_VERIFYBATCH;
+import static com.alipay.antchain.l2.relayer.commons.abi.Rollup.FUNC_VERIFYBATCH;
 import static org.web3j.tx.Contract.staticExtractEventParameters;
 
 @Component("l1Client")
@@ -149,31 +166,19 @@ public class L1Client extends AbstractWeb3jClient implements L1ClientInterface {
         checkIfMailboxContractValid();
     }
 
-    @Override
     @WithSpan
     @Retryable(retryFor = {TxSimulateException.class, ClientConnectionException.class, SocketException.class, SocketTimeoutException.class}, backoff = @Backoff(delay = 300))
-    public TransactionInfo commitBatch(BatchWrapper batchWrapper, BatchHeader parentBatchHeader) throws L2RelayerException {
+    public TransactionInfo commitBatch(BatchWrapper batchWrapper) throws L2RelayerException {
         log.info("start sending tx to commit batch#{} with retry {}", batchWrapper.getBatchIndex(),
                 ObjectUtil.isNull(RetrySynchronizationManager.getContext()) ? 0 : RetrySynchronizationManager.getContext().getRetryCount());
         selfReportMetric.recordStart(RollupMetricRecord.createCommitBatchRecord(batchWrapper.getBatch().getBatchIndex()));
-        // 1. check
-        // 2. create func
-        var function = new Function(
-                Rollup.FUNC_COMMITBATCH, // function name
-                Arrays.asList(
-                        new Uint8(batchWrapper.getBatch().getBatchHeader().getVersion().getValue()),
-                        new Uint256(batchWrapper.getBatchIndex()),
-                        new Uint256(batchWrapper.getTotalL1MessagePopped())
-                ), // inputs
-                Collections.emptyList()// outputs
-        );
+        return commitBatch(batchWrapper, false);
+    }
 
-        return sendBlobTransaction(
-                this.rollupContractAddress,
-                function,
-                batchWrapper.getBatch().getEthBlobs(),
-                getRollupEconomicStrategy().createBatchCommitCostChecker(batchWrapper)
-        );
+    @Override
+    public TransactionInfo commitBatchWithEthCall(BatchWrapper batchWrapper) throws L2RelayerException {
+        log.info("start sending tx to commit batch#{} with eth call", batchWrapper.getBatchIndex());
+        return commitBatch(batchWrapper, true);
     }
 
     @Override
@@ -183,19 +188,13 @@ public class L1Client extends AbstractWeb3jClient implements L1ClientInterface {
         log.info("start sending tx to verify batch#{} with retry {}", batchWrapper.getBatchIndex(),
                 ObjectUtil.isNull(RetrySynchronizationManager.getContext()) ? 0 : RetrySynchronizationManager.getContext().getRetryCount());
         selfReportMetric.recordStart(RollupMetricRecord.createCommitProofRecord(proveReq.getProveType(), batchWrapper.getBatch().getBatchIndex()));
-        // 1. check
-        // 2. create func
-        Function function = new Function(
-                FUNC_VERIFYBATCH, // function name
-                Arrays.asList(new Uint8(proveReq.getProveType().getRollupProofNum()),
-                        new DynamicBytes(batchWrapper.getBatchHeader().serialize()),
-                        new Bytes32(batchWrapper.getPostStateRoot()),
-                        new Bytes32(batchWrapper.getL2MsgRoot()),
-                        new DynamicBytes(proveReq.getProof())), // inputs
-                Collections.emptyList()// outputs
-        );
+        return verifyBatch(batchWrapper, proveReq, false);
+    }
 
-        return sendTransaction(this.rollupContractAddress, function, getRollupEconomicStrategy().createProofCommitCostChecker(proveReq));
+    @Override
+    public TransactionInfo verifyBatchWithEthCall(BatchWrapper batchWrapper, BatchProveRequestDO proveReq) throws L2RelayerException {
+        log.info("start sending tx to verify batch#{} with eth call", batchWrapper.getBatchIndex());
+        return verifyBatch(batchWrapper, proveReq, true);
     }
 
     @Override
@@ -247,58 +246,6 @@ public class L1Client extends AbstractWeb3jClient implements L1ClientInterface {
 
     @Override
     @Retryable(retryFor = {ClientConnectionException.class, SocketException.class, SocketTimeoutException.class}, backoff = @Backoff(delay = 100))
-    public BigInteger maxTxsInChunk() {
-        BigInteger maxTxsInChunk;
-        try {
-            maxTxsInChunk = this.getRollupForEthCall().maxTxsInChunk().send();
-        } catch (Exception e) {
-            throw new RuntimeException("failed to get max tx size in chunk", e);
-        }
-        log.info("🔗 maxTxsInChunk {}", maxTxsInChunk);
-        return maxTxsInChunk;
-    }
-
-    @Override
-    @Retryable(retryFor = {ClientConnectionException.class, SocketException.class, SocketTimeoutException.class}, backoff = @Backoff(delay = 100))
-    public BigInteger maxBlockInChunk() {
-        BigInteger maxBlockInChunk;
-        try {
-            maxBlockInChunk = this.getRollupForEthCall().maxBlockInChunk().send();
-        } catch (Exception e) {
-            throw new RuntimeException("failed to get max block size in chunk", e);
-        }
-        log.info("🔗 maxBlockInChunk {}", maxBlockInChunk);
-        return maxBlockInChunk;
-    }
-
-    @Override
-    @Retryable(retryFor = {ClientConnectionException.class, SocketException.class, SocketTimeoutException.class}, backoff = @Backoff(delay = 100))
-    public BigInteger maxCallDataInChunk() {
-        BigInteger maxCallData;
-        try {
-            maxCallData = this.getRollupForEthCall().maxCallDataInChunk().send();
-        } catch (Exception e) {
-            throw new RuntimeException("failed to get max tx data size in chunk", e);
-        }
-        log.info("🔗 maxCallDataInChunk {}", maxCallData);
-        return maxCallData;
-    }
-
-    @Override
-    @Retryable(retryFor = {ClientConnectionException.class, SocketException.class, SocketTimeoutException.class}, backoff = @Backoff(delay = 100))
-    public BigInteger maxZkCircleInChunk() {
-        BigInteger maxZkCircleInChunk;
-        try {
-            maxZkCircleInChunk = this.getRollupForEthCall().maxZkCircleInChunk().send();
-        } catch (Exception e) {
-            throw new RuntimeException("failed to get max zk circle in chunk", e);
-        }
-        log.info("🔗 maxZkCircleInChunk {}", maxZkCircleInChunk);
-        return maxZkCircleInChunk;
-    }
-
-    @Override
-    @Retryable(retryFor = {ClientConnectionException.class, SocketException.class, SocketTimeoutException.class}, backoff = @Backoff(delay = 100))
     public long l1BlobNumLimit() {
         BigInteger l1BlobNumberLimit;
         try {
@@ -320,6 +267,9 @@ public class L1Client extends AbstractWeb3jClient implements L1ClientInterface {
             throw new RuntimeException("failed to get maxTimeIntervalBetweenBatches", e);
         }
         log.info("🔗 maxTimeIntervalBetweenBatches {}", maxTimeIntervalBetweenBatches);
+        if (maxTimeIntervalBetweenBatches.compareTo(BigInteger.ZERO) <= 0) {
+            throw new RuntimeException("maxTimeIntervalBetweenBatches is not positive");
+        }
         return maxTimeIntervalBetweenBatches.longValue();
     }
 
@@ -363,7 +313,7 @@ public class L1Client extends AbstractWeb3jClient implements L1ClientInterface {
     @Override
     @Retryable(retryFor = {ClientConnectionException.class, SocketException.class, SocketTimeoutException.class}, backoff = @Backoff(delay = 100))
     public TransactionInfo resendRollupTx(ReliableTransactionDO reliableTx, Transaction4844 transaction4844) {
-        var call = ethCall(this.rollupContractAddress, transaction4844);
+        var call = ethCall(transaction4844);
         if (call.isReverted()) {
             processFailedEthCall(call, this.rollupContractAddress, StrUtil.sub(Numeric.cleanHexPrefix(transaction4844.getData()), 0, 8));
             return null;
@@ -465,6 +415,81 @@ public class L1Client extends AbstractWeb3jClient implements L1ClientInterface {
             futures.add(CompletableFuture.supplyAsync(() -> getL1MsgsFromBlock(finalH), fetchingL1MsgThreadsPool));
         }
         return Flowable.merge(futures.stream().map(x -> Flowable.fromFuture(x, 30, TimeUnit.SECONDS)).collect(Collectors.toList()));
+    }
+
+    private TransactionInfo commitBatch(BatchWrapper batchWrapper, boolean ethCall) throws L2RelayerException {
+        // 1. check
+        // 2. create func
+        var function = new Function(
+                Rollup.FUNC_COMMITBATCH, // function name
+                Arrays.asList(
+                        new Uint8(batchWrapper.getBatch().getBatchHeader().getVersion().getValueAsUint8()),
+                        new Uint256(batchWrapper.getBatchIndex()),
+                        new Uint256(batchWrapper.getTotalL1MessagePopped())
+                ), // inputs
+                Collections.emptyList()// outputs
+        );
+
+        if (ethCall) {
+            Transaction4844 tx4844;
+            if (getBlobPoolTxManager().getEthBlobForkConfig().getCurrConfig().getBlobSidecarVersion() != 0) {
+                tx4844 = new FusakaTransaction4844(
+                        batchWrapper.getBatch().getEthBlobs().blobs(),
+                        getBlobPoolTxManager().getChainId(),
+                        null, null, null, null,
+                        this.rollupContractAddress,
+                        BigInteger.ZERO,
+                        FunctionEncoder.encode(function),
+                        null
+                );
+            } else {
+                tx4844 = (Transaction4844) RawTransaction.createTransaction(
+                        batchWrapper.getBatch().getEthBlobs().blobs(),
+                        getBlobPoolTxManager().getChainId(),
+                        null, null, null, null,
+                        this.rollupContractAddress,
+                        BigInteger.ZERO,
+                        FunctionEncoder.encode(function),
+                        null
+                ).getTransaction();
+            }
+            var call = ethCall(tx4844);
+            if (call.isReverted()) {
+                processFailedEthCall(call, this.rollupContractAddress, StrUtil.sub(Numeric.cleanHexPrefix(tx4844.getData()), 0, 8));
+                return null;
+            }
+        }
+
+        return sendBlobTransaction(
+                this.rollupContractAddress,
+                function,
+                batchWrapper.getBatch().getEthBlobs(),
+                getRollupEconomicStrategy().createBatchCommitCostChecker(batchWrapper)
+        );
+    }
+
+    private TransactionInfo verifyBatch(BatchWrapper batchWrapper, BatchProveRequestDO proveReq, boolean ethCall) {
+        // 1. check
+        // 2. create func
+        var function = new Function(
+                FUNC_VERIFYBATCH, // function name
+                Arrays.asList(new Uint8(proveReq.getProveType().getRollupProofNum()),
+                        new DynamicBytes(batchWrapper.getBatchHeader().serialize()),
+                        new Bytes32(batchWrapper.getPostStateRoot()),
+                        new Bytes32(batchWrapper.getL2MsgRoot()),
+                        new DynamicBytes(proveReq.getProof())), // inputs
+                Collections.emptyList()// outputs
+        );
+
+        if (ethCall) {
+            var call = ethCall(this.rollupContractAddress, FunctionEncoder.encode(function));
+            if (call.isReverted()) {
+                processFailedEthCall(call, this.rollupContractAddress, function.getName());
+                return null;
+            }
+        }
+
+        return sendTransaction(this.rollupContractAddress, function, getRollupEconomicStrategy().createProofCommitCostChecker(proveReq));
     }
 
     private TransactionInfo speedUpRollupTxLogic(ReliableTransactionDO reliableTxDO, RawTransaction rawTransaction, IGasPrice currentGasPrice) throws IOException {

@@ -1,3 +1,19 @@
+/*
+ * Copyright 2026 Ant Group
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.alipay.antchain.l2.relayer.cli.commands;
 
 import java.io.IOException;
@@ -7,6 +23,7 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Scanner;
 import java.util.stream.Collectors;
 
 import cn.hutool.core.util.HexUtil;
@@ -17,6 +34,7 @@ import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.alibaba.fastjson.serializer.SerializerFeature;
 import com.alipay.antchain.l2.relayer.commons.enums.ChainTypeEnum;
+import com.alipay.antchain.l2.relayer.commons.enums.ProveTypeEnum;
 import com.alipay.antchain.l2.relayer.commons.enums.TransactionTypeEnum;
 import com.alipay.antchain.l2.relayer.commons.l2basic.BatchHeader;
 import com.alipay.antchain.l2.relayer.commons.l2basic.Chunk;
@@ -75,7 +93,7 @@ public class CoreCommands extends BaseCommands {
                         InitAnchorBatchReq.newBuilder()
                                 .setBatchHeaderInfo(
                                         BatchHeaderInfo.newBuilder()
-                                                .setVersion(batchHeader.getVersion().getValue())
+                                                .setVersion(batchHeader.getVersion().getValueAsUint8())
                                                 .setBatchIndex(batchHeader.getBatchIndex().longValue())
                                                 .setDataHash(HexUtil.encodeHexStr(batchHeader.getDataHash()))
                                                 .setParentBatchHash(HexUtil.encodeHexStr(batchHeader.getParentBatchHash()))
@@ -137,11 +155,7 @@ public class CoreCommands extends BaseCommands {
 
         BatchHeader batchHeader = BatchHeader.deserializeFrom(response.getGetRawBatchResp().getBatchHeader().toByteArray());
         List<Chunk> chunks = response.getGetRawBatchResp().getChunksList().stream()
-                .map(x -> {
-                    Chunk chunk = Chunk.deserializeFrom(x.getRawChunk().toByteArray());
-                    chunk.setHash(HexUtil.decodeHex(x.getHash()));
-                    return chunk;
-                }).toList();
+                .map(x -> batchHeader.getVersion().getChunkCodec().deserialize(x.getRawChunk().toByteArray())).toList();
         var daInfo = response.getGetRawBatchResp().getDaInfo();
 
         JSONObject res = new JSONObject();
@@ -278,6 +292,150 @@ public class CoreCommands extends BaseCommands {
         jsonObj.put("l1-legacy", response.getQueryRelayerAddressResp().getL1LegacyAddress());
         jsonObj.put("l2", response.getQueryRelayerAddressResp().getL2Address());
         return JSON.toJSONString(jsonObj, SerializerFeature.PrettyFormat);
+    }
+
+    @ShellMethod("Waste eth account nonce")
+    Object wasteEthAccountNonce(
+            @ShellOption(help = "Chain type of rollup transaction", valueProvider = EnumValueProvider.class, defaultValue = "L1") ChainType chainType,
+            @ShellOption(help = "Address of eth account") String address,
+            @ShellOption(help = "Nonce of eth account") long nonce
+    ) {
+        // Display confirmation prompt using Java 17 text block
+        System.out.printf("""
+        
+        ========== CONFIRMATION REQUIRED ==========
+        Chain Type: %s
+        Account Address: %s
+        Nonce Value: %d
+        ===========================================
+        
+        Do you want to proceed with this operation? (yes/no): \
+        """, chainType, address, nonce);
+
+        // Read user confirmation from standard input
+        var scanner = new Scanner(System.in);
+        var confirm = scanner.nextLine().trim().toLowerCase();
+        if (!"yes".equalsIgnoreCase(confirm) && !"y".equalsIgnoreCase(confirm)) {
+            return "Operation cancelled";
+        }
+
+        var response = adminServiceBlockingStub.wasteEthAccountNonce(
+                WasteEthAccountNonceReq.newBuilder()
+                        .setChainType(chainType)
+                        .setAddress(address)
+                        .setNonce(nonce)
+                        .build()
+        );
+        if (response.getCode() != 0) {
+            return "failed: " + response.getErrorMsg();
+        }
+        return "successful to waste eth account nonce with txhash: " + response.getWasteEthAccountNonceResp().getTxHash();
+    }
+
+    @ShellMethod("Commit batch manually")
+    Object commitBatchManually(
+            @ShellOption(help = "Index of batch") long batchIndex
+    ) {
+        // Display confirmation prompt using Java 17 text block
+        System.out.printf("""
+        
+        ========== CONFIRMATION REQUIRED ==========
+        Batch Index: %d
+        ===========================================
+        
+        Commit batch manually will send tx to Ethereum, please be aware of what you doing now.
+        Do you want to proceed with this operation? (yes/no): \
+        """, batchIndex);
+
+        // Read user confirmation from standard input
+        var scanner = new Scanner(System.in);
+        var confirm = scanner.nextLine().trim().toLowerCase();
+        if (!"yes".equalsIgnoreCase(confirm) && !"y".equalsIgnoreCase(confirm)) {
+            return "Operation cancelled";
+        }
+
+        var response = adminServiceBlockingStub.commitBatchManually(CommitBatchManuallyReq.newBuilder().setBatchIndex(batchIndex).build());
+        if (response.getCode() != 0) {
+            return "failed: " + response.getErrorMsg();
+        }
+        return "success with tx: " + response.getCommitBatchManuallyResp().getTxHash();
+    }
+
+    @ShellMethod("Commit proof manually")
+    Object commitProofManually(
+            @ShellOption(help = "Index of batch") long batchIndex,
+            @ShellOption(help = "Type of proof", valueProvider = EnumValueProvider.class) ProofType proofType
+    ) {
+        // Display confirmation prompt using Java 17 text block
+        System.out.printf("""
+        
+        ========== CONFIRMATION REQUIRED ==========
+        Batch Index: %d
+        Proof Type: %s
+        ===========================================
+        
+        Commit proof manually will send tx to Ethereum, please be aware of what you doing now.
+        Do you want to proceed with this operation? (yes/no): \
+        """, batchIndex, proofType);
+        // Read user confirmation from standard input
+        var scanner = new Scanner(System.in);
+        var confirm = scanner.nextLine().trim().toLowerCase();
+        if (!"yes".equalsIgnoreCase(confirm) && !"y".equalsIgnoreCase(confirm)) {
+            return "Operation cancelled";
+        }
+
+        var response = adminServiceBlockingStub.commitProofManually(CommitProofManuallyReq.newBuilder()
+                .setProofType(proofType).setBatchIndex(batchIndex).build());
+        if (response.getCode() != 0) {
+            return "failed: " + response.getErrorMsg();
+        }
+        return "success with tx: " + response.getCommitProofManuallyResp().getTxHash();
+    }
+
+    @ShellMethod("Query the relayer account current nonce")
+    Object queryRelayerAccountNonce(
+            @ShellOption(help = "Chain type, default is L1", valueProvider = EnumValueProvider.class, defaultValue = "L1") ChainType chainType,
+            @ShellOption(help = "Account type, e.g. BLOB", valueProvider = EnumValueProvider.class) AccType accType
+    ) {
+        var response = adminServiceBlockingStub.queryCurrNonce(QueryCurrNonceReq.newBuilder()
+                .setChainType(chainType).setAccType(accType).build());
+        if (response.getCode() != 0) {
+            return "failed: " + response.getErrorMsg();
+        }
+        return "nonce is " + response.getQueryCurrNonceResp().getNonce();
+    }
+
+    @ShellMethod("Update the relayer nonce, only supports local cached nonce for now")
+    Object updateRelayerAccountNonceManually(
+            @ShellOption(help = "Chain type, default is L1", valueProvider = EnumValueProvider.class, defaultValue = "L1") ChainType chainType,
+            @ShellOption(help = "Account type, e.g. BLOB", valueProvider = EnumValueProvider.class) AccType accType,
+            @ShellOption(help = "New nonce") long nonce
+    ) {
+        var response = adminServiceBlockingStub.updateNonceManually(UpdateNonceManuallyReq.newBuilder()
+                .setChainType(chainType).setAccType(accType).setNonce(nonce).build());
+        if (response.getCode() != 0) {
+            return "failed: " + response.getErrorMsg();
+        }
+        return "successful to update nonce";
+    }
+
+    @ShellMethod(value = "Refetch batch proofs")
+    Object refetchProof(
+            @ShellOption(help = "Type of proof", valueProvider = EnumValueProvider.class, defaultValue = "TEE_PROOF") ProveTypeEnum proofType,
+            @ShellOption(help = "Index of from batch") String fromBatchIndex,
+            @ShellOption(help = "Index of to batch, included") String toBatchIndex
+    ) {
+        var response = adminServiceBlockingStub.refetchProof(
+                RefetchProofReq.newBuilder()
+                        .setProofType(proofType.name())
+                        .setFromBatchIndex(fromBatchIndex)
+                        .setToBatchIndex(toBatchIndex)
+                        .build()
+        );
+        if (response.getCode() != 0) {
+            return "failed: " + response.getErrorMsg();
+        }
+        return "successful to refetch batch proofs";
     }
 
     private Object saveToFileAndReturn(@ShellOption(help = "File to save the batch json", valueProvider = FileValueProvider.class, defaultValue = "") String filePath, JSONObject res) {

@@ -1,3 +1,19 @@
+/*
+ * Copyright 2026 Ant Group
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.alipay.antchain.l2.relayer.commons.l2basic;
 
 import java.io.ByteArrayOutputStream;
@@ -5,6 +21,8 @@ import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 import cn.hutool.core.lang.Assert;
 import cn.hutool.core.util.ArrayUtil;
@@ -15,52 +33,128 @@ import com.alipay.antchain.l2.relayer.commons.utils.RollupUtils;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.tuweni.bytes.Bytes;
 import org.bouncycastle.jcajce.provider.digest.Keccak;
 import org.web3j.crypto.Blob;
 import org.web3j.crypto.BlobUtils;
 
+/**
+ * Implementation of Data Availability (DA) data using EIP-4844 blobs.
+ * <p>
+ * This class manages the encoding and decoding of batch data into Ethereum blobs
+ * for data availability purposes. It supports multiple DA versions and batch versions,
+ * with optional compression for efficient storage.
+ * <p>
+ * Key features:
+ * <ul>
+ *   <li>Encodes batch payload into EIP-4844 blobs</li>
+ *   <li>Decodes blobs back to batch payload</li>
+ *   <li>Supports data compression (DA version 2)</li>
+ *   <li>Computes data hash for verification</li>
+ * </ul>
+ */
 @Getter
 @Slf4j
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public class BlobsDaData implements IDaData {
 
+    /**
+     * The number of usable bytes per 32-byte word in a blob.
+     * One byte is reserved for encoding purposes.
+     */
     public static final int CAPACITY_BYTE_LEN_PER_WORD = 31;
 
+    /**
+     * The total capacity in bytes per blob.
+     * Calculated as usable bytes per word multiplied by the number of words per blob.
+     */
     public static final int CAPACITY_BYTE_PER_BLOB = CAPACITY_BYTE_LEN_PER_WORD * EthBlobs.WORDS_NUM_PER_BLOB;
 
+    /**
+     * The size in bytes of the DA data metadata header.
+     * Includes batch version (1 byte) and data length (3 bytes).
+     */
     public static final int DA_DATA_META_LEN_SIZE = 4;
 
+    /**
+     * The size in bytes used to store the data length in the DA metadata.
+     */
     public static final int DATA_LEN_SIZE_OF_DA_META = 3;
 
+    /**
+     * Builds BlobsDaData from a batch payload.
+     * <p>
+     * This method encodes the batch payload into blobs, applying compression
+     * if supported by the batch version and beneficial.
+     *
+     * @param version the batch version
+     * @param payload the batch payload to encode
+     * @return a new BlobsDaData instance containing the encoded blobs
+     */
     public static BlobsDaData buildFrom(BatchVersionEnum version, IBatchPayload payload) {
         return new BlobsDaData(version, payload);
     }
 
+    /**
+     * Builds BlobsDaData from existing blobs.
+     * <p>
+     * This method decodes the blobs to extract the batch payload.
+     *
+     * @param blobs the EIP-4844 blobs containing encoded batch data
+     * @return a new BlobsDaData instance with decoded batch payload
+     */
     public static BlobsDaData buildFrom(EthBlobs blobs) {
         return new BlobsDaData(blobs);
     }
 
+    /**
+     * Lazily builds BlobsDaData from existing blobs.
+     * <p>
+     * This method creates a BlobsDaData instance without immediately decoding
+     * the batch payload. The payload will be decoded on first access.
+     *
+     * @param blobs the EIP-4844 blobs containing encoded batch data
+     * @return a new BlobsDaData instance with lazy payload decoding
+     */
     public static BlobsDaData lazyBuildFrom(EthBlobs blobs) {
         var daData = new BlobsDaData();
         daData.blobs = blobs;
         return daData;
     }
 
+    /**
+     * The Data Availability version used for encoding.
+     */
     private DaVersion daVersion;
 
+    /**
+     * The batch version of the encoded data.
+     */
     private BatchVersionEnum batchVersion;
 
+    /**
+     * The length of the actual data (excluding metadata).
+     */
     private int dataLen;
-    
+
+    /**
+     * The decoded batch payload.
+     */
     private IBatchPayload batchPayload;
 
+    /**
+     * The EIP-4844 blobs containing the encoded data.
+     */
     private EthBlobs blobs;
 
     /**
-     * Use this constructor to decode the batch from DA data.
-     * 
-     * @param blobs
+     * Constructs BlobsDaData by decoding blobs to batch payload.
+     * <p>
+     * This constructor is used when reconstructing batch data from existing blobs.
+     *
+     * @param blobs the EIP-4844 blobs to decode
      */
     private BlobsDaData(EthBlobs blobs) {
         this.blobs = blobs;
@@ -68,10 +162,18 @@ public class BlobsDaData implements IDaData {
     }
 
     /**
-     * Use this constructor to sink the batch into DA data.
-     * 
-     * @param version batch version
-     * @param payload batch payload
+     * Constructs BlobsDaData by encoding batch payload into blobs.
+     * <p>
+     * This constructor handles the encoding process, including:
+     * <ul>
+     *   <li>Serializing the batch payload</li>
+     *   <li>Applying compression if supported and beneficial</li>
+     *   <li>Adding metadata (version and data length)</li>
+     *   <li>Encoding into EIP-4844 blobs</li>
+     * </ul>
+     *
+     * @param version the batch version
+     * @param payload the batch payload to encode
      */
     private BlobsDaData(BatchVersionEnum version, IBatchPayload payload) {
         this.batchVersion = version;
@@ -81,7 +183,7 @@ public class BlobsDaData implements IDaData {
         log.info("try to build the blob DA data for batch of version {} and blocks from {} to {}",
                 version, payload.getStartBlockNumber(), payload.getEndBlockNumber());
         // If batch version supports batch data compression, try to compress the batch body
-        if (batchVersion == BatchVersionEnum.BATCH_V1) {
+        if (batchVersion.isBatchDataCompressionSupport()) {
             var compressed = batchVersion.getDaCompressor().compress(rawPayload);
             byte[] data;
             if (compressed.length < rawPayload.length) {
@@ -108,21 +210,58 @@ public class BlobsDaData implements IDaData {
             );
             // copy the data into the rest of the bytes
             System.arraycopy(data, 0, rawPayload, DA_DATA_META_LEN_SIZE, this.dataLen);
-        } else if (batchVersion == BatchVersionEnum.BATCH_V0) {
+        } else {
             this.dataLen = rawPayload.length;
         }
 
         this.blobs = new EthBlobs(sinkIntoBlobs(rawPayload));
     }
 
+    /**
+     * Computes the data hash for this DA data.
+     * <p>
+     * The hash is computed from the versioned hashes of all blob commitments.
+     * This involves:
+     * <ul>
+     *   <li>Computing KZG commitments for each blob</li>
+     *   <li>Converting commitments to versioned hashes</li>
+     *   <li>Concatenating all versioned hashes</li>
+     *   <li>Computing Keccak-256 hash of the concatenated data</li>
+     * </ul>
+     *
+     * @return the 32-byte data hash
+     */
     @Override
+    @SneakyThrows
     public byte[] dataHash() {
         var versionedHashesStream = new ByteArrayOutputStream();
-        blobs.blobs().stream().map(BlobUtils::getCommitment).map(BlobUtils::kzgToVersionedHash)
+        var futures = new ArrayList<CompletableFuture<Bytes>>();
+        for (var blob : blobs.blobs()) {
+            futures.add(CompletableFuture.supplyAsync(() -> BlobUtils.getCommitment(blob)));
+        }
+        var commitments = new ArrayList<Bytes>();
+        for (var future : futures) {
+            commitments.add(future.get(10, TimeUnit.SECONDS));
+        }
+        commitments.stream().map(BlobUtils::kzgToVersionedHash)
                 .forEach(versionedHash -> versionedHashesStream.writeBytes(versionedHash.toArray()));
         return new Keccak.Digest256().digest(versionedHashesStream.toByteArray());
     }
 
+    /**
+     * Decodes the blobs to extract the batch payload.
+     * <p>
+     * This method handles different DA versions:
+     * <ul>
+     *   <li>DA_0: Direct decoding without metadata</li>
+     *   <li>DA_1: Decoding with metadata, no compression</li>
+     *   <li>DA_2: Decoding with metadata and decompression</li>
+     * </ul>
+     * The result is cached for subsequent calls.
+     *
+     * @return the decoded batch payload
+     * @throws IllegalArgumentException if blobs are empty
+     */
     @Override
     public IBatchPayload toBatchPayload() {
         if (ObjectUtil.isNotNull(batchPayload)) {
@@ -148,29 +287,42 @@ public class BlobsDaData implements IDaData {
                 buf.put(realData);
             }
         }
-        this.batchPayload = new ChunksPayload(RollupUtils.deserializeChunks(
-                switch (this.daVersion) {
-                    case DA_0 -> {
-                        this.batchVersion = BatchVersionEnum.BATCH_V0;
-                        yield buf.array();
-                    }
-                    case DA_1 -> {
-                        var rawDaData = buf.array();
-                        this.batchVersion = BatchVersionEnum.from(rawDaData[0]);
-                        this.dataLen = BytesUtils.getUint24(rawDaData, 1);
-                        yield ArrayUtil.sub(rawDaData, DA_DATA_META_LEN_SIZE, DA_DATA_META_LEN_SIZE + this.dataLen);
-                    }
-                    case DA_2 -> {
-                        var rawDaData = buf.array();
-                        this.batchVersion = BatchVersionEnum.from(rawDaData[0]);
-                        this.dataLen = BytesUtils.getUint24(rawDaData, 1);
-                        yield this.batchVersion.getDaCompressor().decompress(ArrayUtil.sub(rawDaData, DA_DATA_META_LEN_SIZE, DA_DATA_META_LEN_SIZE + this.dataLen));
-                    }
-                }
-        ));
+        var rawChunks = switch (this.daVersion) {
+            case DA_0 -> {
+                this.batchVersion = BatchVersionEnum.BATCH_V0;
+                yield buf.array();
+            }
+            case DA_1 -> {
+                var rawDaData = buf.array();
+                this.batchVersion = BatchVersionEnum.from(rawDaData[0]);
+                this.dataLen = BytesUtils.getUint24(rawDaData, 1);
+                yield ArrayUtil.sub(rawDaData, DA_DATA_META_LEN_SIZE, DA_DATA_META_LEN_SIZE + this.dataLen);
+            }
+            case DA_2 -> {
+                var rawDaData = buf.array();
+                this.batchVersion = BatchVersionEnum.from(rawDaData[0]);
+                this.dataLen = BytesUtils.getUint24(rawDaData, 1);
+                yield this.batchVersion.getDaCompressor().decompress(ArrayUtil.sub(rawDaData, DA_DATA_META_LEN_SIZE, DA_DATA_META_LEN_SIZE + this.dataLen));
+            }
+        };
+        this.batchPayload = new ChunksPayload(batchVersion, RollupUtils.deserializeChunks(batchVersion, rawChunks));
         return batchPayload;
     }
 
+    /**
+     * Encodes raw payload data into EIP-4844 blobs.
+     * <p>
+     * The encoding process:
+     * <ul>
+     *   <li>Splits data into 31-byte chunks (one byte reserved per 32-byte word)</li>
+     *   <li>First byte of first word contains DA version</li>
+     *   <li>Pads the last word if necessary</li>
+     *   <li>Groups words into 128KB blobs</li>
+     * </ul>
+     *
+     * @param rawPayload the raw data to encode
+     * @return a list of EIP-4844 blobs containing the encoded data
+     */
     private List<Blob> sinkIntoBlobs(byte[] rawPayload) {
         var blobs = new ArrayList<Blob>();
         var wordsNum = (int) Math.ceil(rawPayload.length / (double) CAPACITY_BYTE_LEN_PER_WORD);

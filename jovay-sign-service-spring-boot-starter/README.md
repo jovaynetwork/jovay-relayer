@@ -1,21 +1,12 @@
-<div align="center">
-  <img alt="am logo" src="https://mdn.alipayobjects.com/huamei_hsbbrh/afts/img/A*HhJlTLtDKywAAAAAQVAAAAgAeiOMAQ/original" width="250" >
-  <h1 align="center">Jovay Sign Service</h1>
-  <p align="center">
-    <a href="http://makeapullrequest.com">
-      <img alt="pull requests welcome badge" src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat">
-    </a>
-    <a href="https://www.java.com">
-      <img alt="Language" src="https://img.shields.io/badge/Language-Java-blue.svg?style=flat">
-    </a>
-  </p>
-</div>
+# Jovay Sign Service Spring Boot Starter
 
-# 使用方法
+> [中文文档](README_CN.md)
 
-## 1.Maven依赖
+A Spring Boot starter that provides automatic injection of `TxSignService` instances via the `@JovayTxSignService` annotation. Supports both **Web3j native signing** (hex private key) and **Alibaba Cloud KMS** signing out of the box.
 
-在pom.xml中添加下面依赖，版本按需选择。
+## Quick Start
+
+### 1. Maven Dependency
 
 ```xml
 <dependency>
@@ -25,106 +16,263 @@
 </dependency>
 ```
 
-## 2.创建TxSignService
+### 2. Configuration
 
-在代码中，通过注解`@JovayTxSignService("your_service")`标注成员变量，可以创建TxSignService实例并注入给成员变量。
-
-```java
-import org.springframework.context.annotation.Configuration;
-import org.springframework.stereotype.Component;
-import org.springframework.stereotype.Service;
-
-//or @Component or @Configuration, it has to be a bean in spring context.
-@Service
-class YourClass {
-    @JovayTxSignService("your_service")
-    private TxSignService yourService;
-}
-```
-
-- 成员变量归属的类必须要作为Spring的Bean；
-- 注解`@JovayTxSignService`的value必须要填入确定的值，含义为你的service的名字，需要和配置对应；
-- 配置properties中，需要按照格式填入你的service的配置；
-
-也可以注解在方法上，创建TxSignService：
-
-```java
-import com.alipay.antchain.l2.relayer.signservice.inject.JovayTxSignService;
-import org.springframework.stereotype.Service;
-import org.web3j.service.TxSignService;
-
-//or @Component or @Configuration, it has to be a bean in spring context.
-@Service
-class YourClass {
-    @JovayTxSignService("your_service")
-    private void setYourService(TxSignService yourService) {
-//        yourService.sign();
-    }
-}
-```
-
-## 3.详细配置
-
-在你的springboot应用配置文件中，添加如下配置。
+Add the signing service configuration to your `application.yml`. Each service is identified by a unique name under `jovay.sign-service`:
 
 ```yaml
 jovay:
   sign-service:
-    # 你注解里面的service name
-    your_service:
-      type: web3j_native
+    myService:
+      type: web3j_native          # or aliyun_kms
       web3j-native:
         private-key: 7ff1a4c1d57e...f5ef924856
-      kms:
-        endpoint: ${L1_CLIENT_LEGACY_POOL_KMS_ENDPOINT:}
-        access-key-id: ${L1_CLIENT_LEGACY_POOL_KMS_ACCESS_KEY_ID:}
-        access-key-secret: ${L1_CLIENT_LEGACY_POOL_KMS_ACCESS_KEY_SECRET:}
-        private-key-id: ${L1_CLIENT_LEGACY_POOL_KMS_PRIVATE_KEY_ID:}
-        private-key-version-id: ${L1_CLIENT_LEGACY_POOL_KMS_PRIVATE_KEY_VERSION_ID:}
-        public-key: ${L1_CLIENT_LEGACY_POOL_KMS_PUBLIC_KEY:}
-        ca: |
-          ${L1_CLIENT_LEGACY_POOL_KMS_CA:}
 ```
 
-- jovay.sign-service.your_service.type：your_service实例对应的类型，支持web3j_native和aliyun_kms两种类型
-- 如果类型是web3j_native
-  - jovay.sign-service.your_service.web3j-native.private-key: hex格式的私钥；
-- 如果类型是aliyun_kms
-  - jovay.sign-service.your_service.kms.endpoint：阿里云KMS服务的endpoint；
-  - jovay.sign-service.your_service.kms.access-key-id：阿里云KMS服务的access-key-id；
-  - jovay.sign-service.your_service.kms.access-key-secret：阿里云KMS服务的access-key-secret；
-  - jovay.sign-service.your_service.kms.private-key-id：阿里云KMS服务的private-key-id；
-  - jovay.sign-service.your_service.kms.private-key-version-id：阿里云KMS服务的private-key的version id，如果不配置会尝试自动获取，但是kms服务未必支持该接口；
-  - jovay.sign-service.your_service.kms.public-key：阿里云KMS服务的public-key，这里可以不用填，会自动从阿里云KMS服务获取；
-  - jovay.sign-service.your_service.kms.ca：阿里云KMS服务server的TLS证书，这里一般从网页下载即可；
+### 3. Inject via Annotation
 
-## 4.用于Web3j
+Annotate a field in any Spring-managed bean with `@JovayTxSignService`:
 
 ```java
-import com.alipay.antchain.l2.relayer.signservice.inject.JovayTxSignService;
-import org.springframework.stereotype.Service;
-import org.web3j.protocol.Web3j;
-import org.web3j.protocol.http.HttpService;
-import org.web3j.tx.RawTransactionManager;
-import org.web3j.tx.gas.DynamicEIP1559GasProvider;
-
-//or @Component or @Configuration, it has to be a bean in spring context.
 @Service
-class YourClass {
-    @JovayTxSignService("your_service")
-    private TxSignService yourService;
+public class MyBlockchainService {
 
-    public void test() {
+    @JovayTxSignService("myService")
+    private TxSignService txSignService;
+
+    public void sendTransaction() {
         var web3j = Web3j.build(new HttpService("http://localhost:8545"));
         var chainId = web3j.ethChainId().send().getChainId().longValue();
-        // Rollup is the contract abi class
+        var txManager = new RawTransactionManager(web3j, txSignService, chainId);
+        // use txManager to deploy contracts, send transactions, etc.
+    }
+}
+```
+
+---
+
+## `@JovayTxSignService` Annotation Reference
+
+The annotation can be applied to **fields**, **methods**, or **parameters** in any Spring bean.
+
+### Attributes
+
+| Attribute | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `value` | `String` | `""` | Service name — must match a key under `jovay.sign-service` in your configuration |
+| `conditionalProperty` | `String[]` | `{}` | Spring property names that must match for injection to occur. If empty, always inject. Multiple properties use AND logic. |
+| `conditionalPropertyHavingValue` | `String` | `""` | Expected value of the conditional property. If empty, any non-null value satisfies the condition. |
+| `conditionalPropertyMatchIfMissing` | `boolean` | `false` | If `true`, inject even when the conditional property is missing from the environment |
+
+### Basic Field Injection
+
+The simplest usage — always inject the named signing service:
+
+```java
+@Service
+public class MyService {
+
+    @JovayTxSignService("mySignService")
+    private TxSignService txSignService;
+}
+```
+
+### Method Injection
+
+The annotation can also be placed on a setter method. The method must accept exactly one `TxSignService` parameter:
+
+```java
+@Service
+public class MyService {
+
+    @JovayTxSignService("mySignService")
+    private void setTxSignService(TxSignService txSignService) {
+        // custom initialization logic
+    }
+}
+```
+
+### Conditional Injection
+
+Injection can be made conditional on Spring Environment properties, similar to `@ConditionalOnProperty`. This is useful when a signing service is only needed under certain configurations.
+
+**Example**: Only inject when `l2-relayer.rollup.da-type` is `BLOBS`:
+
+```java
+@JovayTxSignService(
+    value = "l1BlobPoolTxSignService",
+    conditionalProperty = "l2-relayer.rollup.da-type",
+    conditionalPropertyHavingValue = "BLOBS"
+)
+private TxSignService blobPoolTxSignService;
+```
+
+In this case, `blobPoolTxSignService` will be `null` if the property is not `BLOBS`.
+
+**Example**: Inject by default, skip only when the property explicitly has a different value:
+
+```java
+@JovayTxSignService(
+    value = "l1BlobPoolTxSignService",
+    conditionalProperty = "l2-relayer.rollup.da-type",
+    conditionalPropertyHavingValue = "BLOBS",
+    conditionalPropertyMatchIfMissing = true
+)
+private TxSignService blobPoolTxSignService;
+```
+
+Here, the service is injected when:
+- `l2-relayer.rollup.da-type` is set to `BLOBS`, **or**
+- `l2-relayer.rollup.da-type` is not present at all (missing from config)
+
+It is **not** injected when the property exists but has a different value (e.g., `DAS`).
+
+**Example**: Multiple conditional properties (AND logic):
+
+```java
+@JovayTxSignService(
+    value = "specialService",
+    conditionalProperty = {"feature.enabled", "environment.type"},
+    conditionalPropertyHavingValue = "true"
+)
+private TxSignService specialService;
+```
+
+Both `feature.enabled` and `environment.type` must equal `"true"` for injection to occur.
+
+### Real-World Usage in Relayer
+
+The L2-Relayer project defines three signing services:
+
+```java
+// L1 Legacy Pool — always injected (for Proof commits via EIP-1559)
+@JovayTxSignService("l1LegacyPoolTxSignService")
+private TxSignService l1LegacyPoolTxSignService;
+
+// L1 Blob Pool — conditional (for Batch commits via EIP-4844, only when DA type is BLOBS)
+@JovayTxSignService(
+    value = "l1BlobPoolTxSignService",
+    conditionalProperty = "l2-relayer.rollup.da-type",
+    conditionalPropertyHavingValue = "BLOBS",
+    conditionalPropertyMatchIfMissing = true
+)
+private TxSignService l1BlobPoolTxSignService;
+
+// L2 — always injected (for L2 transactions)
+@JovayTxSignService("l2TxSignService")
+private TxSignService l2TxSignService;
+```
+
+---
+
+## Signing Service Types
+
+### Web3j Native (`web3j_native`)
+
+Uses a hex-encoded private key directly with Web3j's `Credentials`. Simple and suitable for development or environments where plaintext keys are acceptable.
+
+```yaml
+jovay:
+  sign-service:
+    myService:
+      type: web3j_native
+      web3j-native:
+        private-key: 7ff1a4c1d57e5f1e...f5ef924856
+```
+
+| Property | Description |
+|----------|-------------|
+| `type` | Must be `web3j_native` |
+| `web3j-native.private-key` | Hex-encoded private key (without 0x prefix) |
+
+### Alibaba Cloud KMS (`aliyun_kms`)
+
+Uses Alibaba Cloud KMS for secure private key management. The private key never leaves KMS — all signing operations are performed remotely via the KMS API.
+
+```yaml
+jovay:
+  sign-service:
+    myService:
+      type: aliyun_kms
+      kms:
+        endpoint: kst-xxx.cryptoservice.kms.aliyuncs.com
+        access-key-id: LTAI5t...
+        access-key-secret: Gwv...
+        private-key-id: key-xxx
+        private-key-version-id: v1     # optional, auto-fetched if not set
+        public-key: ""                  # optional, auto-fetched from KMS
+        ca: |                           # KMS server TLS certificate
+          -----BEGIN CERTIFICATE-----
+          ...
+          -----END CERTIFICATE-----
+```
+
+| Property | Required | Description |
+|----------|----------|-------------|
+| `type` | Yes | Must be `aliyun_kms` |
+| `kms.endpoint` | Yes | KMS service endpoint |
+| `kms.access-key-id` | Yes | Alibaba Cloud access key ID |
+| `kms.access-key-secret` | Yes | Alibaba Cloud access key secret |
+| `kms.private-key-id` | Yes | KMS private key ID |
+| `kms.private-key-version-id` | No | Key version ID (auto-fetched if omitted, but not all KMS instances support this) |
+| `kms.public-key` | No | Public key in PEM format (auto-fetched from KMS if omitted) |
+| `kms.ca` | Yes | TLS certificate for the KMS server (download from Alibaba Cloud console) |
+
+---
+
+## Using with Web3j
+
+Once injected, the `TxSignService` can be used with Web3j's `RawTransactionManager` to sign and send transactions:
+
+```java
+@Service
+public class ContractService {
+
+    @JovayTxSignService("myService")
+    private TxSignService txSignService;
+
+    public void deployContract() {
+        var web3j = Web3j.build(new HttpService("http://localhost:8545"));
+        var chainId = web3j.ethChainId().send().getChainId().longValue();
         var rollupContract = Rollup.deploy(
-                web3j,
-                new RawTransactionManager(web3j, yourService, chainId),
-                new DynamicEIP1559GasProvider(web3j, chainId)
+            web3j,
+            new RawTransactionManager(web3j, txSignService, chainId),
+            new DynamicEIP1559GasProvider(web3j, chainId)
         ).send();
     }
 }
+```
 
+---
+
+## Module Structure
 
 ```
+jovay-sign-service-spring-boot-starter/
+├── src/main/java/.../signservice/
+│   ├── autocofigure/
+│   │   └── TxSignServiceAutoConfiguration.java   # Spring Boot auto-configuration
+│   ├── config/
+│   │   ├── TxSignServicesProperties.java          # Root config: jovay.sign-service.*
+│   │   ├── TxSignServiceProperties.java           # Per-service config (type, kms, web3j-native)
+│   │   ├── NativeConfig.java                      # Web3j native key config
+│   │   └── KmsConfig.java                         # Alibaba Cloud KMS config
+│   ├── core/
+│   │   ├── TxSignServiceFactory.java              # Creates and caches TxSignService instances
+│   │   ├── TxSignServiceType.java                 # Enum: WEB3J_NATIVE, ALIYUN_KMS
+│   │   ├── Web3jTxSignService.java                # TxSignService impl using Credentials
+│   │   └── KmsTxSignService.java                  # TxSignService impl using KMS
+│   └── inject/
+│       ├── JovayTxSignService.java                # Annotation definition
+│       └── TxSignServiceBeanPostProcessor.java    # BeanPostProcessor that handles injection
+└── src/main/resources/META-INF/spring/
+    └── org.springframework.boot.autoconfigure.AutoConfiguration.imports
+```
+
+## How It Works
+
+1. Spring Boot auto-configures `TxSignServiceAutoConfiguration`, which registers the `TxSignServiceBeanPostProcessor` and `TxSignServiceFactory`
+2. The `TxSignServiceBeanPostProcessor` runs during bean initialization and scans all fields and methods for the `@JovayTxSignService` annotation
+3. For each annotated field/method, it evaluates conditional properties (if any)
+4. If conditions are met, it looks up the named service configuration from `jovay.sign-service.<name>` and creates the appropriate `TxSignService` instance via `TxSignServiceFactory`
+5. The factory caches instances — the same service name always returns the same `TxSignService` object

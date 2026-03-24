@@ -1,3 +1,19 @@
+/*
+ * Copyright 2026 Ant Group
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.alipay.antchain.l2.relayer.core.blockchain;
 
 import java.io.IOException;
@@ -8,20 +24,20 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
-import cn.hutool.core.collection.ListUtil;
 import cn.hutool.core.util.ObjectUtil;
 import cn.hutool.core.util.StrUtil;
+import com.alipay.antchain.l2.relayer.commons.abi.L1GasOracle;
+import com.alipay.antchain.l2.relayer.commons.abi.L2CoinBase;
+import com.alipay.antchain.l2.relayer.commons.abi.L2Mailbox;
 import com.alipay.antchain.l2.relayer.commons.exceptions.L2RelayerErrorCodeEnum;
 import com.alipay.antchain.l2.relayer.commons.exceptions.L2RelayerException;
 import com.alipay.antchain.l2.relayer.commons.exceptions.TxNotFoundButRetryException;
 import com.alipay.antchain.l2.relayer.commons.exceptions.TxSimulateException;
 import com.alipay.antchain.l2.relayer.commons.l2basic.L1MsgTransaction;
 import com.alipay.antchain.l2.relayer.commons.models.TransactionInfo;
-import com.alipay.antchain.l2.relayer.core.blockchain.abi.L1GasOracle;
-import com.alipay.antchain.l2.relayer.core.blockchain.abi.L2CoinBase;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.BaseRawTransactionManager;
-import com.alipay.antchain.l2.relayer.core.blockchain.helper.model.GasLimitPolicyEnum;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.IGasPriceProvider;
+import com.alipay.antchain.l2.relayer.core.blockchain.helper.model.GasLimitPolicyEnum;
 import com.alipay.antchain.l2.relayer.core.layer2.economic.NopeChecker;
 import io.opentelemetry.instrumentation.annotations.WithSpan;
 import lombok.SneakyThrows;
@@ -89,8 +105,23 @@ public class L2Client extends AbstractWeb3jClient implements L2ClientInterface {
     @Override
     @SneakyThrows
     public TransactionInfo sendL1MsgTx(L1MsgTransaction l1MsgTransaction) {
-        var result = getLegacyPoolTxManager().sendL1MsgTx(l1MsgTransaction.getGasLimit(), l1MsgTransaction.getNonce(), l1MsgTransaction.getData());
+        var result = sendL1MsgTx(l1MsgTransaction.getGasLimit(), l1MsgTransaction.getData());
         log.debug("sendL1MsgTx with tx: {}", result.getEthSendTransaction().getTransactionHash());
+        dealWithTxResult(result);
+        return TransactionInfo.builder()
+                .rawTx(Numeric.hexStringToByteArray(result.getRawTxHex()))
+                .txHash(result.getEthSendTransaction().getTransactionHash())
+                .nonce(result.getNonce())
+                .senderAccount(L1MsgTransaction.L1_MAILBOX_AS_SENDER.toString())
+                .sendTxTime(result.getTxSendTime())
+                .build();
+    }
+
+    @Override
+    @SneakyThrows
+    public TransactionInfo resendL1MsgTx(L1MsgTransaction l1MsgTransaction) {
+        var result = resendL1MsgTx(l1MsgTransaction.getGasLimit(), l1MsgTransaction.getNonce(), l1MsgTransaction.getData());
+        log.debug("resendL1MsgTx with tx: {}", result.getEthSendTransaction().getTransactionHash());
         dealWithTxResult(result);
         return TransactionInfo.builder()
                 .rawTx(Numeric.hexStringToByteArray(result.getRawTxHex()))
@@ -114,13 +145,15 @@ public class L2Client extends AbstractWeb3jClient implements L2ClientInterface {
     }
 
     @Override
-    public BigInteger queryL2MailboxPendingNonce() {
-        return queryTxCount(L1MsgTransaction.L1_MAILBOX_AS_SENDER.toString(), DefaultBlockParameterName.PENDING).subtract(BigInteger.ONE);
-    }
-
-    @Override
-    public BigInteger queryL2MailboxLatestNonce() {
-        return queryTxCount(L1MsgTransaction.L1_MAILBOX_AS_SENDER.toString(), DefaultBlockParameterName.LATEST).subtract(BigInteger.ONE);
+    public BigInteger queryFinalizeL1MsgNonce() {
+        BigInteger finalizeL1MsgNonce;
+        try {
+            finalizeL1MsgNonce = this.getL2MailboxForEthCall().finalizeL1MsgNonce().send();
+        } catch (Exception e) {
+            throw new RuntimeException("failed to query finalize l1 msg nonce", e);
+        }
+        log.debug("🔗 finalize l1 msg nonce : {}", finalizeL1MsgNonce);
+        return finalizeL1MsgNonce;
     }
 
     @Override
@@ -350,6 +383,15 @@ public class L2Client extends AbstractWeb3jClient implements L2ClientInterface {
     private L1GasOracle getL1GasOracleForEthCall() {
         return L1GasOracle.load(
                 gasOracleContractAddress,
+                this.getWeb3j(),
+                this.getLegacyPoolTxManager(),
+                null
+        );
+    }
+
+    private L2Mailbox getL2MailboxForEthCall() {
+        return L2Mailbox.load(
+                L1MsgTransaction.L2_MAILBOX_AS_RECEIVER.toString(),
                 this.getWeb3j(),
                 this.getLegacyPoolTxManager(),
                 null

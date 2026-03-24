@@ -5,29 +5,6 @@
     "stateMutability": "nonpayable"
   },
   {
-    "type": "receive",
-    "stateMutability": "payable"
-  },
-  {
-    "type": "function",
-    "name": "_branches",
-    "inputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
     "type": "function",
     "name": "addBridge",
     "inputs": [
@@ -35,6 +12,39 @@
         "name": "_bridge",
         "type": "address",
         "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "approveMsg",
+    "inputs": [
+      {
+        "name": "sender_",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "target_",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "value_",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "nonce_",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "msg_",
+        "type": "bytes",
+        "internalType": "bytes"
       }
     ],
     "outputs": [],
@@ -55,7 +65,44 @@
   },
   {
     "type": "function",
-    "name": "claimAmount",
+    "name": "branches",
+    "inputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "claimERC20",
+    "inputs": [
+      {
+        "name": "nonce_",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "msgHash_",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "claimETH",
     "inputs": [
       {
         "name": "refundAddress_",
@@ -102,6 +149,19 @@
   },
   {
     "type": "function",
+    "name": "finalizeL1MsgNonce",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "initialize",
     "inputs": [
       {
@@ -128,7 +188,7 @@
     "name": "isBridge",
     "inputs": [
       {
-        "name": "",
+        "name": "bridgeAddress",
         "type": "address",
         "internalType": "address"
       }
@@ -145,6 +205,19 @@
   {
     "type": "function",
     "name": "l1MailBox",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "msgOracle",
     "inputs": [],
     "outputs": [
       {
@@ -203,7 +276,7 @@
   },
   {
     "type": "function",
-    "name": "receiveMsgMap",
+    "name": "pendingMsgMap",
     "inputs": [
       {
         "name": "",
@@ -222,10 +295,10 @@
   },
   {
     "type": "function",
-    "name": "receiveMsgStatus",
+    "name": "receiveMsgMap",
     "inputs": [
       {
-        "name": "",
+        "name": "msgHash",
         "type": "bytes32",
         "internalType": "bytes32"
       }
@@ -233,6 +306,25 @@
     "outputs": [
       {
         "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "receiveMsgStatus",
+    "inputs": [
+      {
+        "name": "msgHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "status",
         "type": "bool",
         "internalType": "bool"
       }
@@ -343,7 +435,7 @@
     "name": "sendMsgMap",
     "inputs": [
       {
-        "name": "",
+        "name": "msgHash",
         "type": "bytes32",
         "internalType": "bytes32"
       }
@@ -372,10 +464,23 @@
   },
   {
     "type": "function",
-    "name": "setL1MailBox",
+    "name": "setFinalizeL1MsgNonce",
     "inputs": [
       {
-        "name": "l1MailBox_",
+        "name": "_finalizeL1MsgNonce",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setMsgOracle",
+    "inputs": [
+      {
+        "name": "msgOracle_",
         "type": "address",
         "internalType": "address"
       }
@@ -402,6 +507,19 @@
     "inputs": [],
     "outputs": [],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "version",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "event",
@@ -443,45 +561,33 @@
   },
   {
     "type": "event",
+    "name": "BridgeAdded",
+    "inputs": [
+      {
+        "name": "bridge",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "BridgeRemoved",
+    "inputs": [
+      {
+        "name": "bridge",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "ClaimMsg",
-    "inputs": [
-      {
-        "name": "hash",
-        "type": "bytes32",
-        "indexed": true,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "nonce",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "FinalizeDepositETHFailed",
-    "inputs": [
-      {
-        "name": "hash",
-        "type": "bytes32",
-        "indexed": true,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "nonce",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "FinalizeDepositETHSuccess",
     "inputs": [
       {
         "name": "hash",
@@ -507,6 +613,31 @@
         "type": "uint8",
         "indexed": false,
         "internalType": "uint8"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "Initialized",
+    "inputs": [
+      {
+        "name": "l1MailBox",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "owner",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "baseFee",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
       }
     ],
     "anonymous": false
@@ -539,6 +670,81 @@
         "type": "address",
         "indexed": false,
         "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "PendingMsg",
+    "inputs": [
+      {
+        "name": "_sender",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "_target",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "_value",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "_nonce",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "_msg",
+        "type": "bytes",
+        "indexed": false,
+        "internalType": "bytes"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "RelayMsgFailed",
+    "inputs": [
+      {
+        "name": "hash",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "nonce",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "RelayMsgSuccess",
+    "inputs": [
+      {
+        "name": "hash",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "nonce",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
       }
     ],
     "anonymous": false
@@ -645,6 +851,32 @@
   },
   {
     "type": "event",
+    "name": "SetFinalizeL1MsgNonce",
+    "inputs": [
+      {
+        "name": "_finalizeL1MsgNonce",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "SetMsgOracle",
+    "inputs": [
+      {
+        "name": "_msgOracle",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "Unpaused",
     "inputs": [
       {
@@ -658,12 +890,27 @@
   },
   {
     "type": "error",
+    "name": "ErrorL1MsgNonce",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "InvalidInitAddress",
     "inputs": []
   },
   {
     "type": "error",
     "name": "InvalidL2GasLimit",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NotSupportDownGrade",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NotSupportOracle",
     "inputs": []
   },
   {

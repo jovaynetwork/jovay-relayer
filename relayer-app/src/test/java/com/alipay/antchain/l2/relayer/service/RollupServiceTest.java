@@ -1,3 +1,19 @@
+/*
+ * Copyright 2026 Ant Group
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.alipay.antchain.l2.relayer.service;
 
 import java.math.BigInteger;
@@ -6,9 +22,6 @@ import java.util.Date;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import ch.qos.logback.classic.Logger;
-import ch.qos.logback.classic.spi.ILoggingEvent;
-import ch.qos.logback.core.read.ListAppender;
 import cn.hutool.core.collection.ListUtil;
 import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.RandomUtil;
@@ -16,7 +29,10 @@ import cn.hutool.core.util.ReflectUtil;
 import com.alibaba.fastjson.JSON;
 import com.alipay.antchain.l2.relayer.TestBase;
 import com.alipay.antchain.l2.relayer.commons.enums.*;
-import com.alipay.antchain.l2.relayer.commons.exceptions.*;
+import com.alipay.antchain.l2.relayer.commons.exceptions.CommitL2BatchException;
+import com.alipay.antchain.l2.relayer.commons.exceptions.CommitL2BatchTeeProofException;
+import com.alipay.antchain.l2.relayer.commons.exceptions.CommitL2BatchZkProofException;
+import com.alipay.antchain.l2.relayer.commons.exceptions.InvalidBatchException;
 import com.alipay.antchain.l2.relayer.commons.l2basic.BatchHeader;
 import com.alipay.antchain.l2.relayer.commons.l2basic.BatchVersionEnum;
 import com.alipay.antchain.l2.relayer.commons.models.*;
@@ -42,7 +58,6 @@ import lombok.SneakyThrows;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
-import org.slf4j.LoggerFactory;
 import org.springframework.test.context.bean.override.mockito.MockReset;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.web3j.abi.datatypes.generated.Bytes32;
@@ -95,12 +110,10 @@ public class RollupServiceTest extends TestBase {
     private BigInteger l1ChainId;
 
     @Before
+    @SneakyThrows
     public void initMock() {
-        when(rollupConfig.getMaxCallDataInChunk()).thenReturn(1000_000L);
-        when(rollupConfig.getOneChunkBlocksLimit()).thenReturn(32L);
-        when(rollupConfig.getMaxTxsInChunks()).thenReturn(1000);
+        when(rollupConfig.getGasPerChunk()).thenReturn(3000_0000);
         when(rollupConfig.getBatchCommitBlobSizeLimit()).thenReturn(4);
-        when(rollupConfig.getChunkZkCycleSumLimit()).thenReturn(940_000L);
         when(rollupConfig.getMaxTimeIntervalBetweenBatches()).thenReturn(3600_000L);
         when(rollupConfig.getZkVerificationStartBatch()).thenReturn(BigInteger.valueOf(0));
         when(rollupConfig.getMaxChunksMemoryUsed()).thenReturn(1073741824);
@@ -112,6 +125,10 @@ public class RollupServiceTest extends TestBase {
         when(blobTxManager.getAddress()).thenReturn("0x5c02cAeB692Bf1b667D20d2B95c49B9DB1583981");
 
         cleanUpGrowingBatchChunksMemCache();
+
+        var gasUsedField = ReflectUtil.getField(BlockHeader.class, "gasUsed_");
+        gasUsedField.setAccessible(true);
+        gasUsedField.set(BASIC_BLOCK_TRACE2.getHeader(), 1);
     }
 
     @Test
@@ -137,19 +154,15 @@ public class RollupServiceTest extends TestBase {
 
     @Test
     public void testPollL2BlocksOnlyBlock() {
-        when(l2Client.queryLatestBlockNumber(any())).thenReturn(BigInteger.valueOf(1));
+        when(traceServiceClient.getLatestProcessedBlock()).thenReturn(BigInteger.valueOf(1));
         when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BLOCK_PROCESSED)))
                 .thenReturn(BigInteger.ZERO);
         when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK)))
                 .thenReturn(BigInteger.ZERO);
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_TX_COUNT)))
-                .thenReturn(BigInteger.ZERO);
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_CALL_DATA_COUNT)))
-                .thenReturn(BigInteger.ZERO);
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.ZK_ROWS_ACCUMULATOR)))
+        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_GAS_ACCUMULATOR)))
                 .thenReturn(BigInteger.ZERO);
         when(rollupRepository.getBatch(eq(BigInteger.ZERO), eq(false))).thenReturn(ZERO_BATCH_WRAPPER);
-        
+
         when(l1Client.lastCommittedBatch()).thenReturn(BigInteger.ZERO);
         when(rollupRepository.getL2BlockTrace(eq(BigInteger.valueOf(1)))).thenReturn(
                 BASIC_BLOCK_TRACE1
@@ -158,7 +171,6 @@ public class RollupServiceTest extends TestBase {
                 ListUtil.toList(BASIC_BLOCK_TRACE1)
         );
         when(rollupRepository.getBatchHeader(eq(BigInteger.ZERO))).thenReturn(ZERO_BATCH_HEADER);
-        when(rollupConfig.getChunkZkCycleSumLimit()).thenReturn(940_000_000L);
         rollupService.pollL2Blocks();
         verify(rollupRepository).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BLOCK_PROCESSED), eq(BigInteger.ONE));
         verify(proverControllerClient).notifyBlock(eq(BigInteger.ONE), eq(0L), eq(BigInteger.ONE));
@@ -166,131 +178,15 @@ public class RollupServiceTest extends TestBase {
     }
 
     @Test
-    public void testPollL2BlocksWithNewChunkBorn_OverZkLimit() {
-        when(l2Client.queryLatestBlockNumber(any())).thenReturn(BigInteger.valueOf(2));
+    public void testPollL2BlocksWithNewChunkBorn_OverGasSumRecommendedInChunk() {
+        when(traceServiceClient.getLatestProcessedBlock()).thenReturn(BigInteger.valueOf(2));
         when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BLOCK_PROCESSED)))
                 .thenReturn(BigInteger.ZERO, BigInteger.ONE);
         when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK)))
                 .thenReturn(BigInteger.ZERO);
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_TX_COUNT)))
-                .thenReturn(BigInteger.ZERO, BigInteger.valueOf(BASIC_BLOCK_TRACE1.getTransactionsCount()));
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_CALL_DATA_COUNT)))
-                .thenReturn(BigInteger.ZERO, BigInteger.valueOf(BASIC_BLOCK_TRACE1.getTransactions(0).getLegacyTx().getData().toByteArray().length));
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.ZK_ROWS_ACCUMULATOR)))
-                .thenReturn(BigInteger.ZERO, BigInteger.valueOf(BASIC_BLOCK_TRACE1.getZkCycles()));
-        when(rollupRepository.getBatch(eq(BigInteger.ZERO), eq(false))).thenReturn(ZERO_BATCH_WRAPPER);
-        
-        when(l1Client.lastCommittedBatch()).thenReturn(BigInteger.ZERO);
-        when(rollupRepository.getL2BlockTrace(eq(BigInteger.valueOf(1)))).thenReturn(
-                BASIC_BLOCK_TRACE1
-        );
-        BasicBlockTrace trace2WithZkCycles = BasicBlockTrace.newBuilder()
-                .setChainId(BASIC_BLOCK_TRACE2.getChainId())
-                .setHeader(BASIC_BLOCK_TRACE2.getHeader())
-                .addAllTransactions(BASIC_BLOCK_TRACE2.getTransactionsList())
-                .addAllGroups(BASIC_BLOCK_TRACE2.getGroupsList())
-                .setStorageTrace(BASIC_BLOCK_TRACE2.getStorageTrace())
-                .setStartL1QueueIndex(BASIC_BLOCK_TRACE2.getStartL1QueueIndex())
-                .setZkCycles(2).build();
-        when(rollupRepository.getL2BlockTrace(eq(BigInteger.valueOf(2)))).thenReturn(
-                trace2WithZkCycles
-        );
-        when(rollupRepository.getL2BlockTraceRange(eq(BigInteger.valueOf(1)), eq(BigInteger.valueOf(2)))).thenReturn(
-                ListUtil.toList(BASIC_BLOCK_TRACE1, trace2WithZkCycles)
-        );
-        when(rollupRepository.getL2BlockTraceRange(eq(BigInteger.valueOf(1)), eq(BigInteger.valueOf(1)))).thenReturn(
-                ListUtil.toList(BASIC_BLOCK_TRACE1)
-        );
-        when(rollupRepository.getBatchHeader(eq(BigInteger.ZERO))).thenReturn(ZERO_BATCH_HEADER);
-        when(rollupConfig.getChunkZkCycleSumLimit()).thenReturn(BASIC_BLOCK_TRACE1.getZkCycles() + 1);
+        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_GAS_ACCUMULATOR)))
+                .thenReturn(BigInteger.ZERO, BigInteger.valueOf(BASIC_BLOCK_TRACE1.getHeader().getGasUsed()));
 
-        rollupService.pollL2Blocks();
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BLOCK_PROCESSED), eq(BigInteger.ONE));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BLOCK_PROCESSED), eq(BigInteger.valueOf(2)));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.ZK_ROWS_ACCUMULATOR), eq(BigInteger.valueOf(BASIC_BLOCK_TRACE1.getZkCycles())));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.ZK_ROWS_ACCUMULATOR), eq(BigInteger.valueOf(2)));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK), eq(BigInteger.ONE));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_TX_COUNT), eq(BigInteger.ONE));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_TX_COUNT), eq(BigInteger.ZERO));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_CALL_DATA_COUNT), eq(BigInteger.valueOf(4)));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_CALL_DATA_COUNT), eq(BigInteger.ZERO));
-        verify(proverControllerClient, times(1)).notifyBlock(eq(BigInteger.ONE), eq(0L), eq(BigInteger.ONE));
-        verify(proverControllerClient, times(1)).notifyBlock(eq(BigInteger.ONE), eq(1L), eq(BigInteger.valueOf(2)));
-        verify(rollupRepository).saveChunk(argThat(argument -> argument.getChunkIndex() == 0));
-        verify(proverControllerClient, times(1)).notifyChunk(eq(BigInteger.ONE), eq(0L), eq(BigInteger.ONE), eq(BigInteger.ONE));
-    }
-
-    @Test
-    public void testPollL2BlocksWithNewChunkBorn_OverMaxTxInChunk() {
-        when(l2Client.queryLatestBlockNumber(any())).thenReturn(BigInteger.valueOf(2));
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BLOCK_PROCESSED)))
-                .thenReturn(BigInteger.ZERO, BigInteger.ONE);
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK)))
-                .thenReturn(BigInteger.ZERO);
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_TX_COUNT)))
-                .thenReturn(BigInteger.ZERO, BigInteger.valueOf(BASIC_BLOCK_TRACE1.getTransactionsCount()));
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_CALL_DATA_COUNT)))
-                .thenReturn(BigInteger.ZERO, BigInteger.valueOf(BASIC_BLOCK_TRACE1.getTransactions(0).getLegacyTx().getData().toByteArray().length));
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.ZK_ROWS_ACCUMULATOR)))
-                .thenReturn(BigInteger.ZERO, BigInteger.valueOf(BASIC_BLOCK_TRACE1.getZkCycles()));
-        
-        when(l1Client.lastCommittedBatch()).thenReturn(BigInteger.ZERO);
-        when(rollupRepository.getL2BlockTrace(eq(BigInteger.valueOf(1)))).thenReturn(
-                BASIC_BLOCK_TRACE1
-        );
-        BasicBlockTrace trace2With2Tx = BasicBlockTrace.newBuilder()
-                .setChainId(BASIC_BLOCK_TRACE2.getChainId())
-                .setHeader(BASIC_BLOCK_TRACE2.getHeader())
-                .addTransactions(BASIC_BLOCK_TRACE1.getTransactionsList().get(0))
-                .addTransactions(BASIC_BLOCK_TRACE1.getTransactionsList().get(0))
-                .addAllGroups(BASIC_BLOCK_TRACE2.getGroupsList())
-                .setStorageTrace(BASIC_BLOCK_TRACE2.getStorageTrace())
-                .setStartL1QueueIndex(BASIC_BLOCK_TRACE2.getStartL1QueueIndex())
-                .setZkCycles(0).build();
-        when(rollupRepository.getL2BlockTrace(eq(BigInteger.valueOf(2)))).thenReturn(
-                trace2With2Tx
-        );
-        when(rollupRepository.getL2BlockTraceRange(eq(BigInteger.valueOf(1)), eq(BigInteger.valueOf(2)))).thenReturn(
-                ListUtil.toList(BASIC_BLOCK_TRACE1, trace2With2Tx)
-        );
-        when(rollupRepository.getL2BlockTraceRange(eq(BigInteger.valueOf(1)), eq(BigInteger.valueOf(1)))).thenReturn(
-                ListUtil.toList(BASIC_BLOCK_TRACE1)
-        );
-        when(rollupRepository.getBatch(eq(BigInteger.ZERO), eq(false))).thenReturn(ZERO_BATCH_WRAPPER);
-        when(rollupRepository.getBatchHeader(eq(BigInteger.ZERO))).thenReturn(ZERO_BATCH_HEADER);
-        when(rollupConfig.getChunkZkCycleSumLimit()).thenReturn(31140325L * 2);
-        when(rollupConfig.getMaxTxsInChunks()).thenReturn(2);
-
-        rollupService.pollL2Blocks();
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BLOCK_PROCESSED), eq(BigInteger.ONE));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BLOCK_PROCESSED), eq(BigInteger.valueOf(2)));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.ZK_ROWS_ACCUMULATOR), eq(BigInteger.valueOf(BASIC_BLOCK_TRACE1.getZkCycles())));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.ZK_ROWS_ACCUMULATOR), eq(BigInteger.ZERO));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK), eq(BigInteger.ONE));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_TX_COUNT), eq(BigInteger.ONE));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_TX_COUNT), eq(BigInteger.valueOf(2)));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_CALL_DATA_COUNT), eq(BigInteger.valueOf(4)));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_CALL_DATA_COUNT), eq(BigInteger.valueOf(8)));
-        verify(proverControllerClient, times(1)).notifyBlock(eq(BigInteger.ONE), eq(0L), eq(BigInteger.ONE));
-        verify(proverControllerClient, times(1)).notifyBlock(eq(BigInteger.ONE), eq(1L), eq(BigInteger.valueOf(2)));
-        verify(rollupRepository).saveChunk(argThat(argument -> argument.getChunkIndex() == 0));
-        verify(proverControllerClient, times(1)).notifyChunk(eq(BigInteger.ONE), eq(0L), eq(BigInteger.ONE), eq(BigInteger.ONE));
-    }
-
-    @Test
-    public void testPollL2BlocksWithNewChunkBorn_OverMaxCallDataSizeInChunk() {
-        when(l2Client.queryLatestBlockNumber(any())).thenReturn(BigInteger.valueOf(2));
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BLOCK_PROCESSED)))
-                .thenReturn(BigInteger.ZERO, BigInteger.ONE);
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK)))
-                .thenReturn(BigInteger.ZERO);
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_TX_COUNT)))
-                .thenReturn(BigInteger.ZERO, BigInteger.valueOf(BASIC_BLOCK_TRACE1.getTransactionsCount()));
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_CALL_DATA_COUNT)))
-                .thenReturn(BigInteger.ZERO, BigInteger.valueOf(BASIC_BLOCK_TRACE1.getTransactions(0).getLegacyTx().getData().toByteArray().length));
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.ZK_ROWS_ACCUMULATOR)))
-                .thenReturn(BigInteger.ZERO, BigInteger.valueOf(BASIC_BLOCK_TRACE1.getZkCycles()));
-        
         when(l1Client.lastCommittedBatch()).thenReturn(BigInteger.ZERO);
         when(rollupRepository.getL2BlockTrace(eq(BigInteger.valueOf(1)))).thenReturn(
                 BASIC_BLOCK_TRACE1
@@ -312,19 +208,19 @@ public class RollupServiceTest extends TestBase {
         when(rollupRepository.getL2BlockTraceRange(eq(BigInteger.valueOf(1)), eq(BigInteger.valueOf(1)))).thenReturn(
                 ListUtil.toList(BASIC_BLOCK_TRACE1)
         );
+        when(rollupRepository.getL2BlockTraceRange(eq(BigInteger.valueOf(2)), eq(BigInteger.valueOf(2)))).thenReturn(
+                ListUtil.toList(trace2WithTx)
+        );
         when(rollupRepository.getBatch(eq(BigInteger.ZERO), eq(false))).thenReturn(ZERO_BATCH_WRAPPER);
         when(rollupRepository.getBatchHeader(eq(BigInteger.ZERO))).thenReturn(ZERO_BATCH_HEADER);
-        when(rollupConfig.getChunkZkCycleSumLimit()).thenReturn(31140325L * 2);
-        when(rollupConfig.getMaxCallDataInChunk()).thenReturn(6L);
+        when(rollupConfig.getGasPerChunk()).thenReturn(1879773);
 
         rollupService.pollL2Blocks();
         verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BLOCK_PROCESSED), eq(BigInteger.ONE));
         verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BLOCK_PROCESSED), eq(BigInteger.valueOf(2)));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.ZK_ROWS_ACCUMULATOR), eq(BigInteger.valueOf(BASIC_BLOCK_TRACE1.getZkCycles())));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.ZK_ROWS_ACCUMULATOR), eq(BigInteger.ZERO));
+        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_GAS_ACCUMULATOR), eq(BigInteger.valueOf(BASIC_BLOCK_TRACE1.getHeader().getGasUsed())));
+        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_GAS_ACCUMULATOR), eq(BigInteger.valueOf(BASIC_BLOCK_TRACE2.getHeader().getGasUsed())));
         verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK), eq(BigInteger.ONE));
-        verify(rollupRepository, times(2)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_TX_COUNT), eq(BigInteger.ONE));
-        verify(rollupRepository, times(2)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_CALL_DATA_COUNT), eq(BigInteger.valueOf(4)));
         verify(proverControllerClient, times(1)).notifyBlock(eq(BigInteger.ONE), eq(0L), eq(BigInteger.ONE));
         verify(proverControllerClient, times(1)).notifyBlock(eq(BigInteger.ONE), eq(1L), eq(BigInteger.valueOf(2)));
         verify(rollupRepository).saveChunk(argThat(argument -> argument.getChunkIndex() == 0));
@@ -333,17 +229,13 @@ public class RollupServiceTest extends TestBase {
 
     @Test
     public void testPollL2BlocksWithNewBatchBorn_OverMaxTimeIntervalBetweenBatches() {
-        when(l2Client.queryLatestBlockNumber(any())).thenReturn(BigInteger.valueOf(2));
+        when(traceServiceClient.getLatestProcessedBlock()).thenReturn(BigInteger.valueOf(2));
         when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BLOCK_PROCESSED)))
                 .thenReturn(BigInteger.ZERO, BigInteger.ONE);
         when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK)))
                 .thenReturn(BigInteger.ZERO);
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_TX_COUNT)))
-                .thenReturn(BigInteger.ZERO, BigInteger.valueOf(BASIC_BLOCK_TRACE1.getTransactionsCount()));
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_CALL_DATA_COUNT)))
-                .thenReturn(BigInteger.ZERO, BigInteger.valueOf(BASIC_BLOCK_TRACE1.getTransactions(0).getLegacyTx().getData().toByteArray().length));
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.ZK_ROWS_ACCUMULATOR)))
-                .thenReturn(BigInteger.ZERO, BigInteger.valueOf(BASIC_BLOCK_TRACE1.getZkCycles()));
+        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_GAS_ACCUMULATOR)))
+                .thenReturn(BigInteger.ZERO);
 
         when(l1Client.lastCommittedBatch()).thenReturn(BigInteger.ZERO);
         when(rollupRepository.getL2BlockTrace(eq(BigInteger.valueOf(1)))).thenReturn(
@@ -368,25 +260,19 @@ public class RollupServiceTest extends TestBase {
         );
         when(rollupRepository.getChunks(eq(BigInteger.ONE))).thenReturn(
                 ListUtil.toList(
-                        new ChunkWrapper(BigInteger.ONE, 0, ListUtil.toList(BASIC_BLOCK_TRACE1, trace2WithTx), 4)
+                        new ChunkWrapper(BatchVersionEnum.BATCH_V0, BigInteger.ONE, 0, ListUtil.toList(BASIC_BLOCK_TRACE1, trace2WithTx))
                 )
         );
         when(rollupRepository.getBatch(eq(BigInteger.ZERO), eq(false))).thenReturn(ZERO_BATCH_WRAPPER);
         when(rollupRepository.getBatchHeader(eq(BigInteger.ZERO))).thenReturn(ZERO_BATCH_HEADER);
-        when(rollupConfig.getChunkZkCycleSumLimit()).thenReturn(31140325L * 2);
-        when(rollupConfig.getMaxCallDataInChunk()).thenReturn(8L);
         when(rollupConfig.getMaxTimeIntervalBetweenBatches()).thenReturn(3008L);
 
         rollupService.pollL2Blocks();
         verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BLOCK_PROCESSED), eq(BigInteger.ONE));
         verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BLOCK_PROCESSED), eq(BigInteger.valueOf(2)));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.ZK_ROWS_ACCUMULATOR), eq(BigInteger.valueOf(BASIC_BLOCK_TRACE1.getZkCycles())));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.ZK_ROWS_ACCUMULATOR), eq(BigInteger.ZERO));
+        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_GAS_ACCUMULATOR), eq(BigInteger.valueOf(BASIC_BLOCK_TRACE1.getHeader().getGasUsed())));
+        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_GAS_ACCUMULATOR), eq(BigInteger.ZERO));
         verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK), eq(BigInteger.ZERO));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_TX_COUNT), eq(BigInteger.valueOf(trace2WithTx.getTransactionsCount())));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_TX_COUNT), eq(BigInteger.ZERO));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_CALL_DATA_COUNT), eq(BigInteger.valueOf(4)));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_CALL_DATA_COUNT), eq(BigInteger.ZERO));
         verify(proverControllerClient, times(1)).notifyBlock(eq(BigInteger.ONE), eq(0L), eq(BigInteger.ONE));
         verify(proverControllerClient, times(1)).notifyBlock(eq(BigInteger.ONE), eq(0L), eq(BigInteger.valueOf(2)));
         verify(rollupRepository).saveChunk(argThat(argument -> argument.getChunkIndex() == 0));
@@ -401,21 +287,17 @@ public class RollupServiceTest extends TestBase {
         try (var mockedZstd = mockStatic(Zstd.class)) {
             mockedZstd.when(() -> Zstd.compress(any()))
                     .then(invocationOnMock -> invocationOnMock.getArguments()[0]);
-            when(l2Client.queryLatestBlockNumber(any())).thenReturn(BigInteger.valueOf(2));
+            when(traceServiceClient.getLatestProcessedBlock()).thenReturn(BigInteger.valueOf(2));
             when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BLOCK_PROCESSED)))
                     .thenReturn(BigInteger.ZERO, BigInteger.ONE);
             when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK)))
                     .thenReturn(BigInteger.ZERO);
-            when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_TX_COUNT)))
-                    .thenReturn(BigInteger.ZERO, BigInteger.valueOf(BASIC_BLOCK_TRACE1.getTransactionsCount()));
-            when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_CALL_DATA_COUNT)))
-                    .thenReturn(BigInteger.ZERO, BigInteger.valueOf(BASIC_BLOCK_TRACE1.getTransactions(0).getLegacyTx().getData().toByteArray().length));
-            when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.ZK_ROWS_ACCUMULATOR)))
-                    .thenReturn(BigInteger.ZERO, BigInteger.valueOf(BASIC_BLOCK_TRACE1.getZkCycles()));
-            int maxTxsInChunks = rollupConfig.getMaxTxsInChunks();
+            when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_GAS_ACCUMULATOR)))
+                    .thenReturn(BigInteger.ZERO, BigInteger.valueOf(BASIC_BLOCK_TRACE1.getHeader().getGasUsed()));
+
             when(rollupRepository.getChunks(eq(BigInteger.ONE)))
                     .thenReturn(ListUtil.toList(
-                            new ChunkWrapper(BigInteger.ONE, 0, ListUtil.toList(BASIC_BLOCK_TRACE1), maxTxsInChunks)
+                            new ChunkWrapper(BatchVersionEnum.BATCH_V0, BigInteger.ONE, 0, ListUtil.toList(BASIC_BLOCK_TRACE1))
                     ));
 
             when(l1Client.lastCommittedBatch()).thenReturn(BigInteger.ZERO);
@@ -445,17 +327,13 @@ public class RollupServiceTest extends TestBase {
             );
             when(rollupRepository.getBatchHeader(eq(BigInteger.ZERO))).thenReturn(ZERO_BATCH_HEADER);
             when(rollupRepository.getBatch(eq(BigInteger.ZERO), eq(false))).thenReturn(ZERO_BATCH_WRAPPER);
-            when(rollupConfig.getChunkZkCycleSumLimit()).thenReturn(31140325L * 2);
 
             rollupService.pollL2Blocks();
             verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BLOCK_PROCESSED), eq(BigInteger.ONE));
             verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BLOCK_PROCESSED), eq(BigInteger.valueOf(2)));
-            verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.ZK_ROWS_ACCUMULATOR), eq(BigInteger.valueOf(BASIC_BLOCK_TRACE1.getZkCycles())));
-            verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.ZK_ROWS_ACCUMULATOR), eq(BigInteger.ZERO));
+            verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_GAS_ACCUMULATOR), eq(BigInteger.valueOf(BASIC_BLOCK_TRACE1.getHeader().getGasUsed())));
+            verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_GAS_ACCUMULATOR), eq(BigInteger.valueOf(BASIC_BLOCK_TRACE2.getHeader().getGasUsed())));
             verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK), eq(BigInteger.ZERO));
-            verify(rollupRepository, times(2)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_TX_COUNT), eq(BigInteger.ONE));
-            verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_CALL_DATA_COUNT), eq(BigInteger.valueOf(4)));
-            verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_CALL_DATA_COUNT), eq(BigInteger.valueOf(4 * EthBlobs.BLOB_SIZE)));
             verify(proverControllerClient, times(1)).notifyBlock(eq(BigInteger.ONE), eq(0L), eq(BigInteger.ONE));
             verify(proverControllerClient, times(1)).notifyBlock(eq(BigInteger.valueOf(2)), eq(0L), eq(BigInteger.valueOf(2)));
             verify(rollupRepository).saveChunk(argThat(argument -> argument.getChunkIndex() == 0));
@@ -478,21 +356,18 @@ public class RollupServiceTest extends TestBase {
                     .map(x -> ChunkWrapper.decodeFromJson(x.toString())).collect(Collectors.toList());
             chunks154.get(0).getChunk().setL2Transactions(new byte[0]);
 
-            when(l2Client.queryLatestBlockNumber(any())).thenReturn(BigInteger.valueOf(11022));
+            when(traceServiceClient.getLatestProcessedBlock()).thenReturn(BigInteger.valueOf(11022));
             when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BLOCK_PROCESSED)))
                     .thenReturn(BigInteger.valueOf(11021));
             when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK)))
                     .thenReturn(BigInteger.valueOf(13));
             when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_BATCH)))
                     .thenReturn(BigInteger.valueOf(154));
-            when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_TX_COUNT)))
-                    .thenReturn(BigInteger.ZERO);
-            when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_CALL_DATA_COUNT)))
-                    .thenReturn(BigInteger.ZERO);
-            when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.ZK_ROWS_ACCUMULATOR)))
+            when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_GAS_ACCUMULATOR)))
                     .thenReturn(BigInteger.ZERO);
 
             for (ChunkWrapper wrapper : chunks154) {
+                wrapper.setBatchVersion(BatchVersionEnum.BATCH_V0);
                 when(rollupRepository.getChunk(eq(wrapper.getBatchIndex()), eq(wrapper.getChunkIndex()))).thenReturn(wrapper);
             }
 
@@ -547,7 +422,7 @@ public class RollupServiceTest extends TestBase {
             when(lastBatchWrapper.getBatchHeader()).thenReturn(lastBatchHeader);
 
             when(rollupRepository.getBatch(eq(BigInteger.valueOf(153)), eq(false))).thenReturn(lastBatchWrapper);
-            when(rollupConfig.getChunkZkCycleSumLimit()).thenReturn(8000000L);
+            when(rollupConfig.getGasPerChunk()).thenReturn((int) BASIC_BLOCK_TRACE_11021.getHeader().getGasUsed());
 
             Assert.assertThrows(InvalidBatchException.class, () -> rollupService.pollL2Blocks());
 
@@ -568,240 +443,17 @@ public class RollupServiceTest extends TestBase {
     }
 
     @Test
-    public void testPollL2BlocksWithNewChunkBorn_ZkEquals() {
-        when(l2Client.queryLatestBlockNumber(any())).thenReturn(BigInteger.valueOf(2));
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BLOCK_PROCESSED)))
-                .thenReturn(BigInteger.ZERO, BigInteger.ONE);
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK)))
-                .thenReturn(BigInteger.ZERO);
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_TX_COUNT)))
-                .thenReturn(BigInteger.ZERO, BigInteger.valueOf(BASIC_BLOCK_TRACE1.getTransactionsCount()));
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_CALL_DATA_COUNT)))
-                .thenReturn(BigInteger.ZERO, BigInteger.valueOf(BASIC_BLOCK_TRACE1.getTransactions(0).getLegacyTx().getData().toByteArray().length));
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.ZK_ROWS_ACCUMULATOR)))
-                .thenReturn(BigInteger.ZERO, BigInteger.valueOf(BASIC_BLOCK_TRACE1.getZkCycles()));
-        when(rollupRepository.getBatch(eq(BigInteger.ZERO), eq(false))).thenReturn(ZERO_BATCH_WRAPPER);
-        when(l1Client.lastCommittedBatch()).thenReturn(BigInteger.ZERO);
-        when(rollupRepository.getL2BlockTrace(eq(BigInteger.valueOf(1)))).thenReturn(
-                BASIC_BLOCK_TRACE1
-        );
-        BasicBlockTrace trace2WithTx = BasicBlockTrace.newBuilder()
-                .setChainId(BASIC_BLOCK_TRACE2.getChainId())
-                .setHeader(BASIC_BLOCK_TRACE2.getHeader())
-                .addTransactions(BASIC_BLOCK_TRACE1.getTransactionsList().get(0))
-                .addAllGroups(BASIC_BLOCK_TRACE2.getGroupsList())
-                .setStorageTrace(BASIC_BLOCK_TRACE2.getStorageTrace())
-                .setStartL1QueueIndex(BASIC_BLOCK_TRACE2.getStartL1QueueIndex())
-                .setZkCycles(1).build();
-        when(rollupRepository.getL2BlockTrace(eq(BigInteger.valueOf(2)))).thenReturn(
-                trace2WithTx
-        );
-        when(rollupRepository.getL2BlockTraceRange(eq(BigInteger.valueOf(1)), eq(BigInteger.valueOf(2)))).thenReturn(
-                ListUtil.toList(BASIC_BLOCK_TRACE1, trace2WithTx)
-        );
-        when(rollupRepository.getL2BlockTraceRange(eq(BigInteger.valueOf(1)), eq(BigInteger.valueOf(1)))).thenReturn(
-                ListUtil.toList(BASIC_BLOCK_TRACE1)
-        );
-        when(rollupRepository.getBatchHeader(eq(BigInteger.ZERO))).thenReturn(ZERO_BATCH_HEADER);
-        when(rollupConfig.getChunkZkCycleSumLimit()).thenReturn(BASIC_BLOCK_TRACE1.getZkCycles() + 1);
-
-        rollupService.pollL2Blocks();
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BLOCK_PROCESSED), eq(BigInteger.ONE));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BLOCK_PROCESSED), eq(BigInteger.valueOf(2)));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.ZK_ROWS_ACCUMULATOR), eq(BigInteger.valueOf(BASIC_BLOCK_TRACE1.getZkCycles())));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.ZK_ROWS_ACCUMULATOR), eq(BigInteger.ZERO));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK), eq(BigInteger.ONE));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_TX_COUNT), eq(BigInteger.ONE));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_TX_COUNT), eq(BigInteger.ZERO));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_CALL_DATA_COUNT), eq(BigInteger.valueOf(4)));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_CALL_DATA_COUNT), eq(BigInteger.ZERO));
-        verify(proverControllerClient, times(1)).notifyBlock(eq(BigInteger.ONE), eq(0L), eq(BigInteger.ONE));
-        verify(proverControllerClient, times(1)).notifyBlock(eq(BigInteger.ONE), eq(0L), eq(BigInteger.valueOf(2)));
-        verify(rollupRepository).saveChunk(argThat(argument -> argument.getChunkIndex() == 0 && argument.getChunk().getEndBlockNumber().equals(BigInteger.valueOf(2))));
-        verify(proverControllerClient, times(1)).notifyChunk(eq(BigInteger.ONE), eq(0L), eq(BigInteger.ONE), eq(BigInteger.valueOf(2)));
-    }
-
-    @Test
-    public void testPollL2BlocksWithNewChunkBorn_TxCountEquals() {
-        when(l2Client.queryLatestBlockNumber(any())).thenReturn(BigInteger.valueOf(2));
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BLOCK_PROCESSED)))
-                .thenReturn(BigInteger.ZERO, BigInteger.ONE);
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK)))
-                .thenReturn(BigInteger.ZERO);
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_TX_COUNT)))
-                .thenReturn(BigInteger.ZERO, BigInteger.valueOf(BASIC_BLOCK_TRACE1.getTransactionsCount()));
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_CALL_DATA_COUNT)))
-                .thenReturn(BigInteger.ZERO, BigInteger.valueOf(BASIC_BLOCK_TRACE1.getTransactions(0).getLegacyTx().getData().toByteArray().length));
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.ZK_ROWS_ACCUMULATOR)))
-                .thenReturn(BigInteger.ZERO, BigInteger.valueOf(BASIC_BLOCK_TRACE1.getZkCycles()));
-        when(rollupRepository.getBatch(eq(BigInteger.ZERO), eq(false))).thenReturn(ZERO_BATCH_WRAPPER);
-        when(l1Client.lastCommittedBatch()).thenReturn(BigInteger.ZERO);
-        when(rollupRepository.getL2BlockTrace(eq(BigInteger.valueOf(1)))).thenReturn(
-                BASIC_BLOCK_TRACE1
-        );
-        BasicBlockTrace trace2WithTx = BasicBlockTrace.newBuilder()
-                .setChainId(BASIC_BLOCK_TRACE2.getChainId())
-                .setHeader(BASIC_BLOCK_TRACE2.getHeader())
-                .addTransactions(BASIC_BLOCK_TRACE1.getTransactionsList().get(0))
-                .addAllGroups(BASIC_BLOCK_TRACE2.getGroupsList())
-                .setStorageTrace(BASIC_BLOCK_TRACE2.getStorageTrace())
-                .setStartL1QueueIndex(BASIC_BLOCK_TRACE2.getStartL1QueueIndex())
-                .setZkCycles(0).build();
-        when(rollupRepository.getL2BlockTrace(eq(BigInteger.valueOf(2)))).thenReturn(
-                trace2WithTx
-        );
-        when(rollupRepository.getL2BlockTraceRange(eq(BigInteger.valueOf(1)), eq(BigInteger.valueOf(2)))).thenReturn(
-                ListUtil.toList(BASIC_BLOCK_TRACE1, trace2WithTx)
-        );
-        when(rollupRepository.getL2BlockTraceRange(eq(BigInteger.valueOf(1)), eq(BigInteger.valueOf(1)))).thenReturn(
-                ListUtil.toList(BASIC_BLOCK_TRACE1)
-        );
-        when(rollupRepository.getBatchHeader(eq(BigInteger.ZERO))).thenReturn(ZERO_BATCH_HEADER);
-        when(rollupConfig.getChunkZkCycleSumLimit()).thenReturn(31140325L);
-        when(rollupConfig.getMaxTxsInChunks()).thenReturn(2);
-
-        rollupService.pollL2Blocks();
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BLOCK_PROCESSED), eq(BigInteger.ONE));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BLOCK_PROCESSED), eq(BigInteger.valueOf(2)));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.ZK_ROWS_ACCUMULATOR), eq(BigInteger.valueOf(BASIC_BLOCK_TRACE1.getZkCycles())));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.ZK_ROWS_ACCUMULATOR), eq(BigInteger.ZERO));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK), eq(BigInteger.ONE));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_TX_COUNT), eq(BigInteger.ONE));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_TX_COUNT), eq(BigInteger.ZERO));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_CALL_DATA_COUNT), eq(BigInteger.valueOf(4)));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_CALL_DATA_COUNT), eq(BigInteger.ZERO));
-        verify(proverControllerClient, times(1)).notifyBlock(eq(BigInteger.ONE), eq(0L), eq(BigInteger.ONE));
-        verify(proverControllerClient, times(1)).notifyBlock(eq(BigInteger.ONE), eq(0L), eq(BigInteger.valueOf(2)));
-        verify(rollupRepository).saveChunk(argThat(argument -> argument.getChunkIndex() == 0 && argument.getChunk().getEndBlockNumber().equals(BigInteger.valueOf(2))));
-        verify(proverControllerClient, times(1)).notifyChunk(eq(BigInteger.ONE), eq(0L), eq(BigInteger.ONE), eq(BigInteger.valueOf(2)));
-    }
-
-    @Test
-    public void testPollL2BlocksWithNewChunkBorn_CallDataSizeEquals() {
-        when(l2Client.queryLatestBlockNumber(any())).thenReturn(BigInteger.valueOf(2));
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BLOCK_PROCESSED)))
-                .thenReturn(BigInteger.ZERO, BigInteger.ONE);
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK)))
-                .thenReturn(BigInteger.ZERO);
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_TX_COUNT)))
-                .thenReturn(BigInteger.ZERO, BigInteger.valueOf(BASIC_BLOCK_TRACE1.getTransactionsCount()));
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_CALL_DATA_COUNT)))
-                .thenReturn(BigInteger.ZERO, BigInteger.valueOf(BASIC_BLOCK_TRACE1.getTransactions(0).getLegacyTx().getData().toByteArray().length));
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.ZK_ROWS_ACCUMULATOR)))
-                .thenReturn(BigInteger.ZERO, BigInteger.valueOf(BASIC_BLOCK_TRACE1.getZkCycles()));
-        when(rollupRepository.getBatch(eq(BigInteger.ZERO), eq(false))).thenReturn(ZERO_BATCH_WRAPPER);
-        when(l1Client.lastCommittedBatch()).thenReturn(BigInteger.ZERO);
-        when(rollupRepository.getL2BlockTrace(eq(BigInteger.valueOf(1)))).thenReturn(
-                BASIC_BLOCK_TRACE1
-        );
-        BasicBlockTrace trace2WithTx = BasicBlockTrace.newBuilder()
-                .setChainId(BASIC_BLOCK_TRACE2.getChainId())
-                .setHeader(BASIC_BLOCK_TRACE2.getHeader())
-                .addTransactions(BASIC_BLOCK_TRACE1.getTransactionsList().get(0))
-                .addAllGroups(BASIC_BLOCK_TRACE2.getGroupsList())
-                .setStorageTrace(BASIC_BLOCK_TRACE2.getStorageTrace())
-                .setStartL1QueueIndex(BASIC_BLOCK_TRACE2.getStartL1QueueIndex())
-                .setZkCycles(0).build();
-        when(rollupRepository.getL2BlockTrace(eq(BigInteger.valueOf(2)))).thenReturn(
-                trace2WithTx
-        );
-        when(rollupRepository.getL2BlockTraceRange(eq(BigInteger.valueOf(1)), eq(BigInteger.valueOf(2)))).thenReturn(
-                ListUtil.toList(BASIC_BLOCK_TRACE1, trace2WithTx)
-        );
-        when(rollupRepository.getL2BlockTraceRange(eq(BigInteger.valueOf(1)), eq(BigInteger.valueOf(1)))).thenReturn(
-                ListUtil.toList(BASIC_BLOCK_TRACE1)
-        );
-        when(rollupRepository.getBatchHeader(eq(BigInteger.ZERO))).thenReturn(ZERO_BATCH_HEADER);
-        when(rollupConfig.getChunkZkCycleSumLimit()).thenReturn(31140325L);
-        when(rollupConfig.getMaxCallDataInChunk()).thenReturn(8L);
-
-        rollupService.pollL2Blocks();
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BLOCK_PROCESSED), eq(BigInteger.ONE));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BLOCK_PROCESSED), eq(BigInteger.valueOf(2)));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.ZK_ROWS_ACCUMULATOR), eq(BigInteger.valueOf(BASIC_BLOCK_TRACE1.getZkCycles())));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.ZK_ROWS_ACCUMULATOR), eq(BigInteger.ZERO));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK), eq(BigInteger.ONE));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_TX_COUNT), eq(BigInteger.ONE));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_TX_COUNT), eq(BigInteger.ZERO));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_CALL_DATA_COUNT), eq(BigInteger.valueOf(4)));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_CALL_DATA_COUNT), eq(BigInteger.ZERO));
-        verify(proverControllerClient, times(1)).notifyBlock(eq(BigInteger.ONE), eq(0L), eq(BigInteger.ONE));
-        verify(proverControllerClient, times(1)).notifyBlock(eq(BigInteger.ONE), eq(0L), eq(BigInteger.valueOf(2)));
-        verify(rollupRepository).saveChunk(argThat(argument -> argument.getChunkIndex() == 0 && argument.getChunk().getEndBlockNumber().equals(BigInteger.valueOf(2))));
-        verify(proverControllerClient, times(1)).notifyChunk(eq(BigInteger.ONE), eq(0L), eq(BigInteger.ONE), eq(BigInteger.valueOf(2)));
-    }
-
-    @Test
-    public void testPollL2BlocksWithNewChunkBorn_BlockNumSatisfied() {
-        when(l2Client.queryLatestBlockNumber(any())).thenReturn(BigInteger.valueOf(2));
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BLOCK_PROCESSED)))
-                .thenReturn(BigInteger.ZERO, BigInteger.ONE);
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK)))
-                .thenReturn(BigInteger.ZERO);
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_TX_COUNT)))
-                .thenReturn(BigInteger.ZERO, BigInteger.valueOf(BASIC_BLOCK_TRACE1.getTransactionsCount()));
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_CALL_DATA_COUNT)))
-                .thenReturn(BigInteger.ZERO, BigInteger.valueOf(BASIC_BLOCK_TRACE1.getTransactions(0).getLegacyTx().getData().toByteArray().length));
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.ZK_ROWS_ACCUMULATOR)))
-                .thenReturn(BigInteger.ZERO, BigInteger.valueOf(BASIC_BLOCK_TRACE1.getZkCycles()));
-        when(rollupRepository.getBatch(eq(BigInteger.ZERO), eq(false))).thenReturn(ZERO_BATCH_WRAPPER);
-        when(l1Client.lastCommittedBatch()).thenReturn(BigInteger.ZERO);
-        when(rollupRepository.getL2BlockTrace(eq(BigInteger.valueOf(1)))).thenReturn(
-                BASIC_BLOCK_TRACE1
-        );
-        BasicBlockTrace trace2WithTx = BasicBlockTrace.newBuilder()
-                .setChainId(BASIC_BLOCK_TRACE2.getChainId())
-                .setHeader(BASIC_BLOCK_TRACE2.getHeader())
-                .addTransactions(BASIC_BLOCK_TRACE1.getTransactionsList().get(0))
-                .addAllGroups(BASIC_BLOCK_TRACE2.getGroupsList())
-                .setStorageTrace(BASIC_BLOCK_TRACE2.getStorageTrace())
-                .setStartL1QueueIndex(BASIC_BLOCK_TRACE2.getStartL1QueueIndex())
-                .setZkCycles(0).build();
-        when(rollupRepository.getL2BlockTrace(eq(BigInteger.valueOf(2)))).thenReturn(
-                trace2WithTx
-        );
-        when(rollupRepository.getL2BlockTraceRange(eq(BigInteger.valueOf(1)), eq(BigInteger.valueOf(2)))).thenReturn(
-                ListUtil.toList(BASIC_BLOCK_TRACE1, trace2WithTx)
-        );
-        when(rollupRepository.getL2BlockTraceRange(eq(BigInteger.valueOf(1)), eq(BigInteger.valueOf(1)))).thenReturn(
-                ListUtil.toList(BASIC_BLOCK_TRACE1)
-        );
-        when(rollupRepository.getBatchHeader(eq(BigInteger.ZERO))).thenReturn(ZERO_BATCH_HEADER);
-        when(rollupConfig.getChunkZkCycleSumLimit()).thenReturn(31140325L);
-        when(rollupConfig.getOneChunkBlocksLimit()).thenReturn(2L);
-
-        rollupService.pollL2Blocks();
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BLOCK_PROCESSED), eq(BigInteger.ONE));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BLOCK_PROCESSED), eq(BigInteger.valueOf(2)));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.ZK_ROWS_ACCUMULATOR), eq(BigInteger.valueOf(BASIC_BLOCK_TRACE1.getZkCycles())));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.ZK_ROWS_ACCUMULATOR), eq(BigInteger.ZERO));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK), eq(BigInteger.ONE));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_TX_COUNT), eq(BigInteger.ONE));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_TX_COUNT), eq(BigInteger.ZERO));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_CALL_DATA_COUNT), eq(BigInteger.valueOf(4)));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_CALL_DATA_COUNT), eq(BigInteger.ZERO));
-        verify(proverControllerClient, times(1)).notifyBlock(eq(BigInteger.ONE), eq(0L), eq(BigInteger.ONE));
-        verify(proverControllerClient, times(1)).notifyBlock(eq(BigInteger.ONE), eq(0L), eq(BigInteger.valueOf(2)));
-        verify(rollupRepository).saveChunk(argThat(argument -> argument.getChunkIndex() == 0 && argument.getChunk().getEndBlockNumber().equals(BigInteger.valueOf(2))));
-        verify(proverControllerClient, times(1)).notifyChunk(eq(BigInteger.ONE), eq(0L), eq(BigInteger.ONE), eq(BigInteger.valueOf(2)));
-    }
-
-    @Test
     public void testPollL2BlocksWithNewChunkBorn_BatchBlobsLimitEquals_BatchV1() {
         try (var mockedZstd = mockStatic(Zstd.class)) {
             mockedZstd.when(() -> Zstd.compress(any()))
                     .then(invocationOnMock -> invocationOnMock.getArguments()[0]);
-            when(l2Client.queryLatestBlockNumber(any())).thenReturn(BigInteger.valueOf(2));
+            when(traceServiceClient.getLatestProcessedBlock()).thenReturn(BigInteger.valueOf(2));
             when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BLOCK_PROCESSED)))
                     .thenReturn(BigInteger.ZERO, BigInteger.ONE);
             when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK)))
                     .thenReturn(BigInteger.ZERO);
-            when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_TX_COUNT)))
-                    .thenReturn(BigInteger.ZERO, BigInteger.valueOf(BASIC_BLOCK_TRACE1.getTransactionsCount()));
-            when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_CALL_DATA_COUNT)))
-                    .thenReturn(BigInteger.ZERO, BigInteger.valueOf(BASIC_BLOCK_TRACE1.getTransactions(0).getLegacyTx().getData().toByteArray().length));
-            when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.ZK_ROWS_ACCUMULATOR)))
-                    .thenReturn(BigInteger.ZERO, BigInteger.valueOf(BASIC_BLOCK_TRACE1.getZkCycles()));
+            when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_GAS_ACCUMULATOR)))
+                    .thenReturn(BigInteger.ZERO, BigInteger.valueOf(BASIC_BLOCK_TRACE1.getHeader().getGasUsed()));
             when(rollupRepository.getBatch(eq(BigInteger.ZERO), eq(false))).thenReturn(ZERO_BATCH_WRAPPER);
             when(l1Client.lastCommittedBatch()).thenReturn(BigInteger.ZERO);
             var trace1 = BasicBlockTrace.newBuilder()
@@ -834,24 +486,18 @@ public class RollupServiceTest extends TestBase {
             when(rollupRepository.getL2BlockTraceRange(eq(BigInteger.valueOf(1)), eq(BigInteger.valueOf(1)))).thenReturn(
                     ListUtil.toList(trace1)
             );
-            int maxTxsInChunks = rollupConfig.getMaxTxsInChunks();
             when(rollupRepository.getChunks(eq(BigInteger.ONE)))
                     .thenReturn(ListUtil.toList(
-                            new ChunkWrapper(BigInteger.ONE, 0, ListUtil.toList(trace1, trace2WithTx), maxTxsInChunks)
+                            new ChunkWrapper(BatchVersionEnum.BATCH_V0, BigInteger.ONE, 0, ListUtil.toList(trace1, trace2WithTx))
                     ));
             when(rollupRepository.getBatchHeader(eq(BigInteger.ZERO))).thenReturn(ZERO_BATCH_HEADER);
-            when(rollupConfig.getChunkZkCycleSumLimit()).thenReturn(31140325L);
 
             rollupService.pollL2Blocks();
             verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BLOCK_PROCESSED), eq(BigInteger.ONE));
             verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BLOCK_PROCESSED), eq(BigInteger.valueOf(2)));
-            verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.ZK_ROWS_ACCUMULATOR), eq(BigInteger.valueOf(trace1.getZkCycles())));
-            verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.ZK_ROWS_ACCUMULATOR), eq(BigInteger.ZERO));
+            verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_GAS_ACCUMULATOR), eq(BigInteger.valueOf(trace1.getHeader().getGasUsed())));
+            verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_GAS_ACCUMULATOR), eq(BigInteger.ZERO));
             verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK), eq(BigInteger.ZERO));
-            verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_TX_COUNT), eq(BigInteger.ONE));
-            verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_TX_COUNT), eq(BigInteger.ZERO));
-            verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_CALL_DATA_COUNT), eq(BigInteger.valueOf(4)));
-            verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_CALL_DATA_COUNT), eq(BigInteger.ZERO));
             verify(proverControllerClient, times(1)).notifyBlock(eq(BigInteger.ONE), eq(0L), eq(BigInteger.ONE));
             verify(proverControllerClient, times(1)).notifyBlock(eq(BigInteger.ONE), eq(0L), eq(BigInteger.valueOf(2)));
             verify(rollupRepository).saveChunk(argThat(argument -> argument.getChunkIndex() == 0 && argument.getChunk().getEndBlockNumber().equals(BigInteger.valueOf(2))));
@@ -872,17 +518,13 @@ public class RollupServiceTest extends TestBase {
             return specs.getFork(curr);
         });
 
-        when(l2Client.queryLatestBlockNumber(any())).thenReturn(BigInteger.valueOf(2));
+        when(traceServiceClient.getLatestProcessedBlock()).thenReturn(BigInteger.valueOf(2));
         when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BLOCK_PROCESSED)))
                 .thenReturn(BigInteger.ZERO, BigInteger.ONE);
         when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK)))
                 .thenReturn(BigInteger.ZERO);
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_TX_COUNT)))
-                .thenReturn(BigInteger.ZERO, BigInteger.valueOf(BASIC_BLOCK_TRACE1.getTransactionsCount()));
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_CALL_DATA_COUNT)))
-                .thenReturn(BigInteger.ZERO, BigInteger.valueOf(BASIC_BLOCK_TRACE1.getTransactions(0).getLegacyTx().getData().toByteArray().length));
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.ZK_ROWS_ACCUMULATOR)))
-                .thenReturn(BigInteger.ZERO, BigInteger.valueOf(BASIC_BLOCK_TRACE1.getZkCycles()));
+        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_GAS_ACCUMULATOR)))
+                .thenReturn(BigInteger.ZERO, BigInteger.valueOf(BASIC_BLOCK_TRACE1.getHeader().getGasUsed()));
         when(rollupRepository.getBatch(eq(BigInteger.ZERO), eq(false))).thenReturn(ZERO_BATCH_WRAPPER);
         when(l1Client.lastCommittedBatch()).thenReturn(BigInteger.ZERO);
         var trace1 = BasicBlockTrace.newBuilder()
@@ -915,24 +557,18 @@ public class RollupServiceTest extends TestBase {
         when(rollupRepository.getL2BlockTraceRange(eq(BigInteger.valueOf(1)), eq(BigInteger.valueOf(1)))).thenReturn(
                 ListUtil.toList(trace1)
         );
-        int maxTxsInChunks = rollupConfig.getMaxTxsInChunks();
         when(rollupRepository.getChunks(eq(BigInteger.ONE)))
                 .thenReturn(ListUtil.toList(
-                        new ChunkWrapper(BigInteger.ONE, 0, ListUtil.toList(trace1, trace2WithTx), maxTxsInChunks)
+                        new ChunkWrapper(BatchVersionEnum.BATCH_V0, BigInteger.ONE, 0, ListUtil.toList(trace1, trace2WithTx))
                 ));
         when(rollupRepository.getBatchHeader(eq(BigInteger.ZERO))).thenReturn(ZERO_BATCH_HEADER);
-        when(rollupConfig.getChunkZkCycleSumLimit()).thenReturn(31140325L);
 
         rollupService.pollL2Blocks();
         verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BLOCK_PROCESSED), eq(BigInteger.ONE));
         verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BLOCK_PROCESSED), eq(BigInteger.valueOf(2)));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.ZK_ROWS_ACCUMULATOR), eq(BigInteger.valueOf(trace1.getZkCycles())));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.ZK_ROWS_ACCUMULATOR), eq(BigInteger.ZERO));
+        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_GAS_ACCUMULATOR), eq(BigInteger.valueOf(trace1.getHeader().getGasUsed())));
+        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_GAS_ACCUMULATOR), eq(BigInteger.ZERO));
         verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK), eq(BigInteger.ZERO));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_TX_COUNT), eq(BigInteger.ONE));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_TX_COUNT), eq(BigInteger.ZERO));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_CALL_DATA_COUNT), eq(BigInteger.valueOf(4)));
-        verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_CALL_DATA_COUNT), eq(BigInteger.ZERO));
         verify(proverControllerClient, times(1)).notifyBlock(eq(BigInteger.ONE), eq(0L), eq(BigInteger.ONE));
         verify(proverControllerClient, times(1)).notifyBlock(eq(BigInteger.ONE), eq(0L), eq(BigInteger.valueOf(2)));
         verify(rollupRepository).saveChunk(argThat(argument -> argument.getChunkIndex() == 0 && argument.getChunk().getEndBlockNumber().equals(BigInteger.valueOf(2))));
@@ -973,27 +609,26 @@ public class RollupServiceTest extends TestBase {
         when(l1Client.lastCommittedBatch()).thenReturn(BigInteger.ZERO);
         when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BATCH_COMMITTED)))
                 .thenReturn(BigInteger.ZERO);
-        int maxTxsInChunks = rollupConfig.getMaxTxsInChunks();
         var batchOne = BatchWrapper.createBatch(
                 BatchVersionEnum.BATCH_V0, BigInteger.ONE, ZERO_BATCH_WRAPPER, BASIC_BLOCK_TRACE2.getHeader().getStateRoot().toByteArray(),
                 BASIC_BLOCK_TRACE2.getL1MsgRollingHash().getValue().toByteArray(),
                 Bytes32.DEFAULT.getValue(),
                 0,
-                ListUtil.toList(new ChunkWrapper(BigInteger.ONE, 0, ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2), maxTxsInChunks))
+                ListUtil.toList(new ChunkWrapper(BatchVersionEnum.BATCH_V0, BigInteger.ONE, 0, ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2)))
         );
         var batchTwo = BatchWrapper.createBatch(
                 BatchVersionEnum.BATCH_V0, BigInteger.TWO, batchOne, BASIC_BLOCK_TRACE2.getHeader().getStateRoot().toByteArray(),
                 BASIC_BLOCK_TRACE2.getL1MsgRollingHash().getValue().toByteArray(),
                 Bytes32.DEFAULT.getValue(),
                 0,
-                ListUtil.toList(new ChunkWrapper(BigInteger.TWO, 0, ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2), maxTxsInChunks))
+                ListUtil.toList(new ChunkWrapper(BatchVersionEnum.BATCH_V0, BigInteger.TWO, 0, ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2)))
         );
         var batchThree = BatchWrapper.createBatch(
                 BatchVersionEnum.BATCH_V0, BigInteger.valueOf(3), batchTwo, BASIC_BLOCK_TRACE2.getHeader().getStateRoot().toByteArray(),
                 BASIC_BLOCK_TRACE2.getL1MsgRollingHash().getValue().toByteArray(),
                 Bytes32.DEFAULT.getValue(),
                 0,
-                ListUtil.toList(new ChunkWrapper(BigInteger.valueOf(3), 0, ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2), maxTxsInChunks))
+                ListUtil.toList(new ChunkWrapper(BatchVersionEnum.BATCH_V0, BigInteger.valueOf(3), 0, ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2)))
         );
         when(rollupRepository.getBatch(eq(BigInteger.ONE)))
                 .thenReturn(batchOne);
@@ -1005,7 +640,7 @@ public class RollupServiceTest extends TestBase {
         when(rollupRepository.getBatchHeader(eq(BigInteger.ONE))).thenReturn(batchOne.getBatchHeader());
         when(rollupRepository.getBatchHeader(eq(BigInteger.TWO))).thenReturn(batchTwo.getBatchHeader());
 
-        when(l1Client.commitBatch(notNull(), notNull())).thenReturn(transactionInfo);
+        when(l1Client.commitBatch(notNull())).thenReturn(transactionInfo);
         rollupService.commitL2Batch();
 
         verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BATCH_COMMITTED), eq(BigInteger.ONE));
@@ -1031,17 +666,16 @@ public class RollupServiceTest extends TestBase {
                 .senderAccount("0x5c02cAeB692Bf1b667D20d2B95c49B9DB1583981")
                 .sendTxTime(new Date())
                 .build();
-        int maxTxsInChunks = rollupConfig.getMaxTxsInChunks();
         when(rollupRepository.getBatch(eq(BigInteger.ONE)))
                 .thenReturn(BatchWrapper.createBatch(
                 BatchVersionEnum.BATCH_V0,         BigInteger.ONE, ZERO_BATCH_WRAPPER, BASIC_BLOCK_TRACE2.getHeader().getStateRoot().toByteArray(),
                         BASIC_BLOCK_TRACE2.getL1MsgRollingHash().getValue().toByteArray(),
                         Bytes32.DEFAULT.getValue(),
                         0,
-                        ListUtil.toList(new ChunkWrapper(BigInteger.ONE, 0, ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2), maxTxsInChunks))
+                        ListUtil.toList(new ChunkWrapper(BatchVersionEnum.BATCH_V0, BigInteger.ONE, 0, ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2)))
                 ));
         when(rollupRepository.getBatchHeader(eq(BigInteger.ZERO))).thenReturn(ZERO_BATCH_HEADER);
-        when(l1Client.commitBatch(notNull(), notNull())).thenReturn(transactionInfo);
+        when(l1Client.commitBatch(notNull())).thenReturn(transactionInfo);
 
         rollupService.commitL2Batch();
 
@@ -1068,32 +702,30 @@ public class RollupServiceTest extends TestBase {
                 .senderAccount("0x5c02cAeB692Bf1b667D20d2B95c49B9DB1583981")
                 .sendTxTime(new Date())
                 .build();
-        int maxTxsInChunks = rollupConfig.getMaxTxsInChunks();
         var batchOne = BatchWrapper.createBatch(
                 BatchVersionEnum.BATCH_V0, BigInteger.ONE, ZERO_BATCH_WRAPPER, BASIC_BLOCK_TRACE2.getHeader().getStateRoot().toByteArray(),
                 BASIC_BLOCK_TRACE2.getL1MsgRollingHash().getValue().toByteArray(),
                 Bytes32.DEFAULT.getValue(),
                 0,
-                ListUtil.toList(new ChunkWrapper(BigInteger.ONE, 0, ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2), maxTxsInChunks))
+                ListUtil.toList(new ChunkWrapper(BatchVersionEnum.BATCH_V0, BigInteger.ONE, 0, ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2)))
         );
         var batchTwo = BatchWrapper.createBatch(
                 BatchVersionEnum.BATCH_V0, BigInteger.TWO, batchOne, BASIC_BLOCK_TRACE2.getHeader().getStateRoot().toByteArray(),
                 BASIC_BLOCK_TRACE2.getL1MsgRollingHash().getValue().toByteArray(),
                 Bytes32.DEFAULT.getValue(),
                 0,
-                ListUtil.toList(new ChunkWrapper(BigInteger.TWO, 0, ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2), maxTxsInChunks))
+                ListUtil.toList(new ChunkWrapper(BatchVersionEnum.BATCH_V0, BigInteger.TWO, 0, ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2)))
         );
         when(rollupRepository.getBatch(eq(BigInteger.ONE)))
                 .thenReturn(batchOne);
         when(rollupRepository.getBatch(eq(BigInteger.TWO)))
                 .thenReturn(batchTwo);
-        when(rollupRepository.getBatchHeader(eq(BigInteger.ZERO))).thenReturn(ZERO_BATCH_HEADER);
-        when(l1Client.commitBatch(notNull(), notNull())).thenReturn(transactionInfo);
+        when(l1Client.commitBatch(notNull())).thenReturn(transactionInfo);
 
         Assert.assertThrows(CommitL2BatchException.class, () -> rollupService.commitL2Batch());
 
         verify(rollupRepository, times(1)).updateRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BATCH_COMMITTED), eq(BigInteger.ONE));
-        verify(rollupRepository, times(1)).updateReliableTransaction(argThat(argument -> argument.getOriginalTxHash().equals(transactionInfo.getTxHash())));
+        verify(rollupRepository, times(2)).updateReliableTransaction(argThat(argument -> argument.getOriginalTxHash().equals(transactionInfo.getTxHash())));
     }
 
     @Test
@@ -1103,14 +735,13 @@ public class RollupServiceTest extends TestBase {
                 .thenReturn(BigInteger.valueOf(0));
         rollupService.commitL2Batch();
 
-        int maxTxsInChunks = rollupConfig.getMaxTxsInChunks();
         when(rollupRepository.getBatch(eq(BigInteger.valueOf(2))))
                 .thenReturn(BatchWrapper.createBatch(
                 BatchVersionEnum.BATCH_V0,         BigInteger.valueOf(2), ZERO_BATCH_WRAPPER, BASIC_BLOCK_TRACE2.getHeader().getStateRoot().toByteArray(),
                         BASIC_BLOCK_TRACE2.getL1MsgRollingHash().getValue().toByteArray(),
                         Bytes32.DEFAULT.getValue(),
                         0,
-                        ListUtil.toList(new ChunkWrapper(BigInteger.valueOf(2), 0, ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2), maxTxsInChunks))
+                        ListUtil.toList(new ChunkWrapper(BatchVersionEnum.BATCH_V0, BigInteger.valueOf(2), 0, ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2)))
                 ));
         when(rollupRepository.getBatchHeader(eq(BigInteger.ONE))).thenReturn(ZERO_BATCH_HEADER);
         TransactionInfo transactionInfo = TransactionInfo.builder()
@@ -1120,7 +751,7 @@ public class RollupServiceTest extends TestBase {
                 .senderAccount("0x5c02cAeB692Bf1b667D20d2B95c49B9DB1583981")
                 .sendTxTime(new Date())
                 .build();
-        when(l1Client.commitBatch(notNull(), notNull())).thenReturn(transactionInfo);
+        when(l1Client.commitBatch(notNull())).thenReturn(transactionInfo);
 
         rollupService.commitL2Batch();
 
@@ -1140,20 +771,19 @@ public class RollupServiceTest extends TestBase {
         when(rollupRepository.getBatchProveRequest(notNull(), notNull())).thenReturn(
                 BatchProveRequestDO.builder().proof("a".getBytes()).state(BatchProveRequestStateEnum.PROVE_READY).build()
         );
-        int maxTxsInChunks = rollupConfig.getMaxTxsInChunks();
         var batchOne = BatchWrapper.createBatch(
                 BatchVersionEnum.BATCH_V0, BigInteger.valueOf(1), ZERO_BATCH_WRAPPER, BASIC_BLOCK_TRACE2.getHeader().getStateRoot().toByteArray(),
                 BASIC_BLOCK_TRACE2.getL1MsgRollingHash().getValue().toByteArray(),
                 Bytes32.DEFAULT.getValue(),
                 0,
-                ListUtil.toList(new ChunkWrapper(BigInteger.valueOf(1), 0, ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2), maxTxsInChunks))
+                ListUtil.toList(new ChunkWrapper(BatchVersionEnum.BATCH_V0, BigInteger.valueOf(1), 0, ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2)))
         );
         var batchTwo = BatchWrapper.createBatch(
                 BatchVersionEnum.BATCH_V0, BigInteger.valueOf(2), batchOne, BASIC_BLOCK_TRACE2.getHeader().getStateRoot().toByteArray(),
                 BASIC_BLOCK_TRACE2.getL1MsgRollingHash().getValue().toByteArray(),
                 Bytes32.DEFAULT.getValue(),
                 0,
-                ListUtil.toList(new ChunkWrapper(BigInteger.valueOf(2), 0, ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2), maxTxsInChunks))
+                ListUtil.toList(new ChunkWrapper(BatchVersionEnum.BATCH_V0, BigInteger.valueOf(2), 0, ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2)))
         );
         when(rollupRepository.getBatch(eq(BigInteger.valueOf(1))))
                 .thenReturn(batchOne);
@@ -1204,20 +834,19 @@ public class RollupServiceTest extends TestBase {
         when(rollupRepository.getBatchProveRequest(notNull(), notNull())).thenReturn(
                 BatchProveRequestDO.builder().proof("a".getBytes()).state(BatchProveRequestStateEnum.PROVE_READY).build()
         );
-        int maxTxsInChunks = rollupConfig.getMaxTxsInChunks();
         var batchOne = BatchWrapper.createBatch(
                 BatchVersionEnum.BATCH_V0, BigInteger.valueOf(1), ZERO_BATCH_WRAPPER, BASIC_BLOCK_TRACE2.getHeader().getStateRoot().toByteArray(),
                 BASIC_BLOCK_TRACE2.getL1MsgRollingHash().getValue().toByteArray(),
                 Bytes32.DEFAULT.getValue(),
                 0,
-                ListUtil.toList(new ChunkWrapper(BigInteger.valueOf(1), 0, ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2), maxTxsInChunks))
+                ListUtil.toList(new ChunkWrapper(BatchVersionEnum.BATCH_V0, BigInteger.valueOf(1), 0, ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2)))
         );
         var batchTwo = BatchWrapper.createBatch(
                 BatchVersionEnum.BATCH_V0, BigInteger.valueOf(2), batchOne, BASIC_BLOCK_TRACE2.getHeader().getStateRoot().toByteArray(),
                 BASIC_BLOCK_TRACE2.getL1MsgRollingHash().getValue().toByteArray(),
                 Bytes32.DEFAULT.getValue(),
                 0,
-                ListUtil.toList(new ChunkWrapper(BigInteger.valueOf(2), 0, ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2), maxTxsInChunks))
+                ListUtil.toList(new ChunkWrapper(BatchVersionEnum.BATCH_V0, BigInteger.valueOf(2), 0, ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2)))
         );
         when(rollupRepository.getBatch(eq(BigInteger.valueOf(1))))
                 .thenReturn(batchOne);
@@ -1265,284 +894,5 @@ public class RollupServiceTest extends TestBase {
         var m = ReflectUtil.getMethod(mem.getClass(), "reset");
         m.setAccessible(true);
         m.invoke(mem);
-    }
-
-    // ==================== Negative Test Cases: Exception Handling ====================
-
-    /**
-     * Test commit L2 batch when L1 client throws network exception
-     */
-    @Test
-    public void testCommitL2Batch_NetworkException() {
-        when(l1Client.lastCommittedBatch()).thenThrow(new RuntimeException("Network timeout"));
-
-        try {
-            rollupService.commitL2Batch();
-        } catch (Exception e) {
-            Assert.assertTrue(e.getMessage().contains("Network timeout"));
-        }
-    }
-
-    /**
-     * Test commit L2 batch when batch retrieval fails
-     */
-    @Test
-    public void testCommitL2Batch_BatchRetrievalFailure() {
-        when(l1Client.lastCommittedBatch()).thenReturn(BigInteger.ZERO);
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BATCH_COMMITTED)))
-                .thenReturn(BigInteger.ONE);
-        when(rollupRepository.getReliableTransaction(notNull(), notNull(), notNull())).thenReturn(null);
-        when(rollupRepository.getBatch(eq(BigInteger.ONE))).thenReturn(null);
-
-        try {
-            rollupService.commitL2Batch();
-            Assert.fail("Expected CommitL2BatchException not thrown");
-        } catch (CommitL2BatchException e) {
-            Assert.assertTrue(e.getMessage().contains("null batch for 1"));
-        }
-    }
-
-    /**
-     * Test commit L2 batch when commit transaction fails
-     */
-    @Test
-    public void testCommitL2Batch_CommitTransactionFailure() {
-        when(l1Client.lastCommittedBatch()).thenReturn(BigInteger.ZERO);
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BATCH_COMMITTED)))
-                .thenReturn(BigInteger.ONE);
-        when(rollupRepository.getReliableTransaction(notNull(), notNull(), notNull())).thenReturn(null);
-
-        int maxTxsInChunks = rollupConfig.getMaxTxsInChunks();
-        when(rollupRepository.getBatch(eq(BigInteger.ONE)))
-                .thenReturn(BatchWrapper.createBatch(
-                        BatchVersionEnum.BATCH_V0, BigInteger.ONE, ZERO_BATCH_WRAPPER,
-                        BASIC_BLOCK_TRACE2.getHeader().getStateRoot().toByteArray(),
-                        BASIC_BLOCK_TRACE2.getL1MsgRollingHash().getValue().toByteArray(),
-                        Bytes32.DEFAULT.getValue(), 0,
-                        ListUtil.toList(new ChunkWrapper(BigInteger.ONE, 0,
-                                ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2), maxTxsInChunks))
-                ));
-        when(rollupRepository.getBatchHeader(eq(BigInteger.ZERO))).thenReturn(ZERO_BATCH_HEADER);
-        when(l1Client.commitBatch(notNull(), notNull())).thenThrow(new RuntimeException("Transaction failed"));
-
-        try {
-            rollupService.commitL2Batch();
-        } catch (Exception e) {
-            Assert.assertTrue(e.getMessage().contains("Transaction failed"));
-        }
-    }
-
-    /**
-     * Test commit TEE proof when L1 client query fails
-     */
-    @Test
-    public void testCommitL2TeeProof_QueryFailure() {
-        when(l1Client.lastTeeVerifiedBatch()).thenThrow(new RuntimeException("RPC error"));
-
-        try {
-            rollupService.commitL2TeeProof();
-        } catch (Exception e) {
-            Assert.assertTrue(e.getMessage().contains("RPC error"));
-        }
-    }
-
-    /**
-     * Test commit TEE proof when proof is not ready
-     */
-    @Test
-    public void testCommitL2TeeProof_ProofNotReady() {
-        when(l1Client.lastTeeVerifiedBatch()).thenReturn(BigInteger.ZERO);
-        when(l1Client.lastCommittedBatch(notNull())).thenReturn(BigInteger.ONE);
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BATCH_COMMITTED)))
-                .thenReturn(BigInteger.ONE);
-        when(rollupRepository.getBatchProveRequest(notNull(), notNull())).thenReturn(
-                BatchProveRequestDO.builder().state(BatchProveRequestStateEnum.PENDING).build()
-        );
-
-        rollupService.commitL2TeeProof();
-
-        // Should not attempt to verify when proof is not ready
-        verify(l1Client, never()).verifyBatch(any(), any());
-    }
-
-    /**
-     * Test commit TEE proof when verify batch throws exception
-     */
-    @Test
-    public void testCommitL2TeeProof_VerifyBatchException() {
-        when(l1Client.lastTeeVerifiedBatch()).thenReturn(BigInteger.ZERO);
-        when(l1Client.lastCommittedBatch(notNull())).thenReturn(BigInteger.ONE);
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BATCH_COMMITTED)))
-                .thenReturn(BigInteger.ONE);
-        when(rollupRepository.getBatchProveRequest(notNull(), notNull())).thenReturn(
-                BatchProveRequestDO.builder().proof("a".getBytes()).state(BatchProveRequestStateEnum.PROVE_READY).build()
-        );
-
-        int maxTxsInChunks = rollupConfig.getMaxTxsInChunks();
-        when(rollupRepository.getBatch(eq(BigInteger.ONE)))
-                .thenReturn(BatchWrapper.createBatch(
-                        BatchVersionEnum.BATCH_V0, BigInteger.ONE, ZERO_BATCH_WRAPPER,
-                        BASIC_BLOCK_TRACE2.getHeader().getStateRoot().toByteArray(),
-                        BASIC_BLOCK_TRACE2.getL1MsgRollingHash().getValue().toByteArray(),
-                        Bytes32.DEFAULT.getValue(), 0,
-                        ListUtil.toList(new ChunkWrapper(BigInteger.ONE, 0,
-                                ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2), maxTxsInChunks))
-                ));
-        when(l1Client.verifyBatch(notNull(), notNull())).thenThrow(new RuntimeException("Gas estimation failed"));
-
-        try {
-            rollupService.commitL2TeeProof();
-        } catch (Exception e) {
-            Assert.assertTrue(e.getMessage().contains("Gas estimation failed"));
-        }
-    }
-
-    /**
-     * Test commit ZK proof when L1 client query fails
-     */
-    @Test
-    public void testCommitL2ZkProof_QueryFailure() {
-        when(l1Client.lastZkVerifiedBatch()).thenThrow(new RuntimeException("Connection refused"));
-
-        try {
-            rollupService.commitL2ZkProof();
-        } catch (Exception e) {
-            Assert.assertTrue(e.getMessage().contains("Connection refused"));
-        }
-    }
-
-    /**
-     * Test commit ZK proof when proof is not ready
-     */
-    @Test
-    public void testCommitL2ZkProof_ProofNotReady() {
-        when(l1Client.lastZkVerifiedBatch()).thenReturn(BigInteger.ZERO);
-        when(l1Client.lastCommittedBatch(notNull())).thenReturn(BigInteger.ONE);
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BATCH_COMMITTED)))
-                .thenReturn(BigInteger.ONE);
-        when(rollupRepository.getBatchProveRequest(notNull(), notNull())).thenReturn(
-                BatchProveRequestDO.builder().state(BatchProveRequestStateEnum.PENDING).build()
-        );
-
-        rollupService.commitL2ZkProof();
-
-        // Should not attempt to verify when proof is not ready
-        verify(l1Client, never()).verifyBatch(any(), any());
-    }
-
-    /**
-     * Test commit ZK proof when verify batch throws exception
-     */
-    @Test
-    public void testCommitL2ZkProof_VerifyBatchException() {
-        when(l1Client.lastZkVerifiedBatch()).thenReturn(BigInteger.ZERO);
-        when(l1Client.lastCommittedBatch(notNull())).thenReturn(BigInteger.ONE);
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BATCH_COMMITTED)))
-                .thenReturn(BigInteger.ONE);
-        when(rollupRepository.getBatchProveRequest(notNull(), notNull())).thenReturn(
-                BatchProveRequestDO.builder().proof("a".getBytes()).state(BatchProveRequestStateEnum.PROVE_READY).build()
-        );
-
-        int maxTxsInChunks = rollupConfig.getMaxTxsInChunks();
-        when(rollupRepository.getBatch(eq(BigInteger.ONE)))
-                .thenReturn(BatchWrapper.createBatch(
-                        BatchVersionEnum.BATCH_V0, BigInteger.ONE, ZERO_BATCH_WRAPPER,
-                        BASIC_BLOCK_TRACE2.getHeader().getStateRoot().toByteArray(),
-                        BASIC_BLOCK_TRACE2.getL1MsgRollingHash().getValue().toByteArray(),
-                        Bytes32.DEFAULT.getValue(), 0,
-                        ListUtil.toList(new ChunkWrapper(BigInteger.ONE, 0,
-                                ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2), maxTxsInChunks))
-                ));
-        when(l1Client.verifyBatch(notNull(), notNull())).thenThrow(new RuntimeException("Invalid proof"));
-
-        try {
-            rollupService.commitL2ZkProof();
-        } catch (Exception e) {
-            Assert.assertTrue(e.getMessage().contains("Invalid proof"));
-        }
-    }
-
-    /**
-     * Test poll L2 blocks when L2 client throws exception
-     */
-    @Test
-    public void testPollL2Blocks_L2ClientException() {
-        when(l2Client.queryLatestBlockNumber(notNull())).thenThrow(new RuntimeException("L2 node unavailable"));
-
-        try {
-            rollupService.pollL2Blocks();
-        } catch (Exception e) {
-            Assert.assertTrue(e.getMessage().contains("L2 node unavailable"));
-        }
-    }
-
-    /**
-     * Test prove TEE L2 batch when batch retrieval fails
-     */
-    @Test
-    public void testProveTeeL2Batch_BatchRetrievalFailure() {
-        Logger logger = (Logger) LoggerFactory.getLogger(RollupServiceImpl.class);
-        ListAppender<ILoggingEvent> listAppender = new ListAppender<>();
-        listAppender.start();
-        logger.addAppender(listAppender);
-        try {
-            when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_BATCH)))
-                    .thenReturn(BigInteger.ONE);
-            when(rollupRepository.peekPendingBatchProveRequest(anyInt(), eq(ProveTypeEnum.TEE_PROOF)))
-                    .thenReturn(ListUtil.toList(BatchProveRequestDO.builder()
-                            .proveType(ProveTypeEnum.TEE_PROOF)
-                            .batchIndex(BigInteger.ONE)
-                            .state(BatchProveRequestStateEnum.PENDING).build()));
-            when(proverControllerClient.getBatchProof(eq(ProveTypeEnum.TEE_PROOF), eq(BigInteger.ONE)))
-                    .thenThrow(new ProofNotReadyException(ProveTypeEnum.TEE_PROOF, BigInteger.ONE));
-
-            rollupService.proveTeeL2Batch();
-
-            boolean foundInfoLog = listAppender.list.stream()
-                    .anyMatch(event -> event.getFormattedMessage().contains("proof is not ready"));
-            Assert.assertTrue("Expected info log not found", foundInfoLog);
-        } finally {
-            logger.detachAppender(listAppender);
-        }
-
-    }
-
-    /**
-     * Test repository update failure during commit
-     */
-    @Test
-    public void testCommitL2Batch_RepositoryUpdateFailure() {
-        when(l1Client.lastCommittedBatch()).thenReturn(BigInteger.ZERO);
-        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.BATCH_COMMITTED)))
-                .thenReturn(BigInteger.ONE);
-        when(rollupRepository.getReliableTransaction(notNull(), notNull(), notNull())).thenReturn(null);
-
-        int maxTxsInChunks = rollupConfig.getMaxTxsInChunks();
-        when(rollupRepository.getBatch(eq(BigInteger.ONE)))
-                .thenReturn(BatchWrapper.createBatch(
-                        BatchVersionEnum.BATCH_V0, BigInteger.ONE, ZERO_BATCH_WRAPPER,
-                        BASIC_BLOCK_TRACE2.getHeader().getStateRoot().toByteArray(),
-                        BASIC_BLOCK_TRACE2.getL1MsgRollingHash().getValue().toByteArray(),
-                        Bytes32.DEFAULT.getValue(), 0,
-                        ListUtil.toList(new ChunkWrapper(BigInteger.ONE, 0,
-                                ListUtil.toList(BASIC_BLOCK_TRACE1, BASIC_BLOCK_TRACE2), maxTxsInChunks))
-                ));
-        when(rollupRepository.getBatchHeader(eq(BigInteger.ZERO))).thenReturn(ZERO_BATCH_HEADER);
-
-        TransactionInfo transactionInfo = TransactionInfo.builder()
-                .txHash(Numeric.toHexString(RandomUtil.randomBytes(32)))
-                .nonce(BigInteger.ONE)
-                .rawTx("tx".getBytes())
-                .senderAccount("0x5c02cAeB692Bf1b667D20d2B95c49B9DB1583981")
-                .sendTxTime(new Date())
-                .build();
-        when(l1Client.commitBatch(notNull(), notNull())).thenReturn(transactionInfo);
-        doThrow(new RuntimeException("Database error")).when(rollupRepository).updateRollupNumberRecord(any(), any(), any());
-
-        try {
-            rollupService.commitL2Batch();
-        } catch (Exception e) {
-            Assert.assertTrue(e.getMessage().contains("Database error"));
-        }
     }
 }

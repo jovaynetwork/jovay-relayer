@@ -1,3 +1,19 @@
+/*
+ * Copyright 2026 Ant Group
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.alipay.antchain.l2.relayer.core.blockchain;
 
 import java.io.IOException;
@@ -8,6 +24,7 @@ import java.net.SocketTimeoutException;
 import cn.hutool.core.util.ObjectUtil;
 import cn.hutool.core.util.StrUtil;
 import com.alipay.antchain.l2.relayer.commons.exceptions.L2RelayerException;
+import com.alipay.antchain.l2.relayer.commons.l2basic.L1MsgTransaction;
 import com.alipay.antchain.l2.relayer.commons.models.EthBlobs;
 import com.alipay.antchain.l2.relayer.commons.models.TransactionInfo;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.*;
@@ -172,6 +189,32 @@ public abstract class AbstractWeb3jClient implements BasicBlockchainClient {
         }
     }
 
+    @SneakyThrows
+    public EthSendTransaction sendTransferValueTx(String from, String to, BigInteger nonce, BigInteger value) {
+        BaseRawTransactionManager txManager;
+        if (StrUtil.equalsIgnoreCase(from, blobPoolTxManager.getAddress())) {
+            log.info("going to send transfer value tx from blob pool tx manager");
+            txManager = blobPoolTxManager;
+        } else if (StrUtil.equalsIgnoreCase(from, legacyPoolTxManager.getAddress())) {
+            log.info("going to send transfer value tx from legacy pool tx manager");
+            txManager = legacyPoolTxManager;
+        } else {
+            throw new RuntimeException("unknown from address: " + from);
+        }
+        var result = txManager.sendTx(
+                gasPriceProvider.getEip1559GasPrice(),
+                new EstimateGasLimitProvider(web3j, txManager.getAddress(), to, "", extraGas).getGasLimit(),
+                to,
+                "",
+                nonce,
+                value,
+                false
+        );
+        log.info("send transfer value tx success with txhash {} : (from: {}, to: {}, value: {}, nonce: {})",
+                result.getEthSendTransaction().getTransactionHash(), from, to, value, nonce);
+        return result.getEthSendTransaction();
+    }
+
     protected IGasLimitProvider createEthCallGasLimitProvider(String toAddr, Function function) {
         return switch (gasLimitPolicy) {
             case ESTIMATE ->
@@ -279,7 +322,7 @@ public abstract class AbstractWeb3jClient implements BasicBlockchainClient {
     }
 
     @SneakyThrows
-    protected EthCall ethCall(String to, Transaction4844 transaction4844) {
+    protected EthCall ethCall(Transaction4844 transaction4844) {
         return this.getWeb3j().ethCall(
                 EthCallTransaction.createEthCallTransaction(this.blobPoolTxManager.getAddress(), transaction4844),
                 DefaultBlockParameterName.LATEST
@@ -294,6 +337,33 @@ public abstract class AbstractWeb3jClient implements BasicBlockchainClient {
                 ethCallGasLimitProvider.getGasLimit(encodedFunc),
                 to,
                 encodedFunc,
+                BigInteger.ZERO,
+                false
+        );
+        dealWithTxResult(result);
+        return result;
+    }
+
+    protected SendTxResult sendL1MsgTx(BigInteger gasLimit, String data) throws IOException {
+        var result = this.getLegacyPoolTxManager().sendTx(
+                null,
+                gasLimit,
+                L1MsgTransaction.L2_MAILBOX_AS_RECEIVER.toString(),
+                data,
+                BigInteger.ZERO,
+                false
+        );
+        dealWithTxResult(result);
+        return result;
+    }
+
+    protected SendTxResult resendL1MsgTx(BigInteger gasLimit, BigInteger nonce, String data) throws IOException {
+        var result = this.getLegacyPoolTxManager().sendTx(
+                null,
+                gasLimit,
+                L1MsgTransaction.L2_MAILBOX_AS_RECEIVER.toString(),
+                data,
+                nonce,
                 BigInteger.ZERO,
                 false
         );

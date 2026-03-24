@@ -1,5 +1,22 @@
+/*
+ * Copyright 2026 Ant Group
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.alipay.antchain.l2.relayer.cli.commands;
 
+import java.io.ByteArrayInputStream;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -11,19 +28,19 @@ import cn.hutool.core.util.ReflectUtil;
 import cn.hutool.core.util.StrUtil;
 import com.alibaba.fastjson.JSON;
 import com.alipay.antchain.l2.relayer.commons.enums.ChainTypeEnum;
+import com.alipay.antchain.l2.relayer.commons.enums.ProveTypeEnum;
 import com.alipay.antchain.l2.relayer.commons.enums.TransactionTypeEnum;
 import com.alipay.antchain.l2.relayer.server.grpc.*;
 import com.google.protobuf.ByteString;
 import lombok.SneakyThrows;
 import org.junit.Assert;
 import org.junit.Test;
-import org.web3j.abi.datatypes.generated.Bytes32;
 import org.web3j.crypto.Keys;
 import org.web3j.utils.Numeric;
 
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.notNull;
+import static org.mockito.Mockito.*;
 
 public class CommandsTest {
 
@@ -71,7 +88,7 @@ public class CommandsTest {
                 GetRawBatchResp.newBuilder()
                         .setBatchHeader(ByteString.copyFrom(HexUtil.decodeHex("00000000000000000000000000000000000000000000000000bac4320768bc80b363e3d087c8decdd621f65f9c335e4603bc63525ed57aaa7c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000")))
                         .addChunks(
-                                RawChunkInfo.newBuilder().setHash(HexUtil.encodeHexStr(Bytes32.DEFAULT.getValue()))
+                                RawChunkInfo.newBuilder()
                                         .setRawChunk(ByteString.copyFrom(HexUtil.decodeHex("2000000000000000010000019482FD29860000000000000000000000000000000000000000000000000000000000000000000000003B9ACA000000000000000000000000020000019482FD354E0000000000000000000000000000000000000000000000000000000000000000000000003B9ACA000000000000000000000000030000019482FD410D0000000000000000000000000000000000000000000000000000000000000000000000003B9ACA000000000000000000000000040000019482FD4CD60000000000000000000000000000000000000000000000000000000000000000000000003B9ACA000000000000000000000000050000019482FD589D0000000000000000000000000000000000000000000000000000000000000000000000003B9ACA000000000000000000000000060000019482FD64660000000000000000000000000000000000000000000000000000000000000000000000003B9ACA000000000000000000000000070000019482FD702E0000000000000000000000000000000000000000000000000000000000000000000000003B9ACA000000000000000000000000080000019482FD7BF60000000000000000000000000000000000000000000000000000000000000000000000003B9ACA000000000000000000000000090000019482FD87BE0000000000000000000000000000000000000000000000000000000000000000000000003B9ACA0000000000000000000000000A0000019482FD93860000000000000000000000000000000000000000000000000000000000000000000000003B9ACA0000000000000000000000000B0000019482FD9F4E0000000000000000000000000000000000000000000000000000000000000000000000003B9ACA0000000000000000000000000C0000019482FDAB170000000000000000000000000000000000000000000000000000000000000000000000003B9ACA0000000000000000000000000D0000019482FDB6DF0000000000000000000000000000000000000000000000000000000000000000000000003B9ACA0000000000000000000000000E0000019482FDC2A80000000000000000000000000000000000000000000000000000000000000000000000003B9ACA0000000000000000000000000F0000019482FDCE700000000000000000000000000000000000000000000000000000000000000000000000003B9ACA000000000000000000000000100000019482FDDA380000000000000000000000000000000000000000000000000000000000000000000000003B9ACA000000000000000000000000110000019482FDE6000000000000000000000000000000000000000000000000000000000000000000000000003B9ACA000000000000000000000000120000019482FDF1C90000000000000000000000000000000000000000000000000000000000000000000000003B9ACA000000000000000000000000130000019482FDFD910000000000000000000000000000000000000000000000000000000000000000000000003B9ACA000000000000000000000000140000019482FE095A0000000000000000000000000000000000000000000000000000000000000000000000003B9ACA000000000000000000000000150000019482FE15220000000000000000000000000000000000000000000000000000000000000000000000003B9ACA000000000000000000000000160000019482FE20EB0000000000000000000000000000000000000000000000000000000000000000000000003B9ACA000000000000000000000000170000019482FE2CB20000000000000000000000000000000000000000000000000000000000000000000000003B9ACA000000000000000000000000180000019482FE387B0000000000000000000000000000000000000000000000000000000000000000000000003B9ACA000000000000000000000000190000019482FE44440000000000000000000000000000000000000000000000000000000000000000000000003B9ACA0000000000000000000000001A0000019482FE4D920000000000000000000000000000000000000000000000000000000000000000000000003B9ACA0000010000000000000000001B0000019482FE4E000000000000000000000000000000000000000000000000000000000000000000000000003B9ACA0000000000000000000000001C0000019482FE4E6E0000000000000000000000000000000000000000000000000000000000000000000000003B9ACA0000000000000000000000001D0000019482FE4EDC0000000000000000000000000000000000000000000000000000000000000000000000003B9ACA0000000000000000000000001E0000019482FE4F4B0000000000000000000000000000000000000000000000000000000000000000000000003B9ACA0000000000000000000000001F0000019482FE4FB90000000000000000000000000000000000000000000000000000000000000000000000003B9ACA000000000000000000000000200000019482FE50270000000000000000000000000000000000000000000000000000000000000000000000003B9ACA0000000000000007E2F907DF80843B9ACA00835B8D808064B90786000007820061736D0100000001130460037F7F7F0060027F7F0060017F0060000002630603656E760C63616C6C44617461436F7079000003656E760B73746F726167654C6F6164000103656E760C73746F7261676553746F7265000103656E760967657443616C6C6572000203656E7606726576657274000103656E760666696E6973680001030302030305030100020608017F0141D089040B071A03066D656D6F727902000463616C6C0006066465706C6F7900070AA40D029E0D01037F41A0888080004100410410808080800002400240024041002D00A088808000220041A901460D00200041F000460D01200041C000470D024120210041B0888080004104412010808080800041D0888080004124412010808080800041B08880800041F088808000108180808000410021010340200041EF888080006A2202200120022D00006A200041CF888080006A2D00006A22013A0000200041EE888080006A2202200141FF014B20022D00006A200041CE888080006A2D00006A22013A0000200141FF014B21012000417E6A22000D000B41B08880800041F0888080001082808080000F0B4120210041B0888080004104412010808080800041D08880800041244120108080808000419C8980800010838080800041908980800041F088808000108180808000410041002D008F8980800041002D00EF888080006B22013A008F8980800041002001411F7541002D008E898080006A41002D00EE888080006B22013A008E8980800041002001411F7541002D008D898080006A41002D00ED888080006B22013A008D8980800041002001411F7541002D008C898080006A41002D00EC888080006B22013A008C8980800041002001411F7541002D008B898080006A41002D00EB888080006B22013A008B8980800041002001411F7541002D008A898080006A41002D00EA888080006B22013A008A8980800041002001411F7541002D0089898080006A41002D00E9888080006B22013A00898980800041002001411F7541002D0088898080006A41002D00E8888080006B22013A00888980800041002001411F7541002D0087898080006A41002D00E7888080006B22013A00878980800041002001411F7541002D0086898080006A41002D00E6888080006B22013A00868980800041002001411F7541002D0085898080006A41002D00E5888080006B22013A00858980800041002001411F7541002D0084898080006A41002D00E4888080006B22013A00848980800041002001411F7541002D0083898080006A41002D00E3888080006B22013A00838980800041002001411F7541002D0082898080006A41002D00E2888080006B22013A00828980800041002001411F7541002D0081898080006A41002D00E1888080006B22013A00818980800041002001411F7541002D0080898080006A41002D00E0888080006B22013A00808980800041002001411F7541002D00FF888080006A41002D00DF888080006B22013A00FF8880800041002001411F7541002D00FE888080006A41002D00DE888080006B22013A00FE8880800041002001411F7541002D00FD888080006A41002D00DD888080006B22013A00FD8880800041002001411F7541002D00FC888080006A41002D00DC888080006B22013A00FC8880800041002001411F7541002D00FB888080006A41002D00DB888080006B22013A00FB8880800041002001411F7541002D00FA888080006A41002D00DA888080006B22013A00FA8880800041002001411F7541002D00F9888080006A41002D00D9888080006B22013A00F98880800041002001411F7541002D00F8888080006A41002D00D8888080006B22013A00F88880800041002001411F7541002D00F7888080006A41002D00D7888080006B22013A00F78880800041002001411F7541002D00F6888080006A41002D00D6888080006B22013A00F68880800041002001411F7541002D00F5888080006A41002D00D5888080006B22013A00F58880800041002001411F7541002D00F4888080006A41002D00D4888080006B22013A00F48880800041002001411F7541002D00F3888080006A41002D00D3888080006B22013A00F38880800041002001411F7541002D00F2888080006A41002D00D2888080006B22013A00F28880800041002001411F7541002D00F1888080006A41002D00D1888080006B22013A00F18880800041002001411F7541002D00F0888080006A41002D00D0888080006B22013A00F08880800002402001417F4A0D0041F08880800041201084808080000F0B41908980800041F08880800010828080800041B08880800041F088808000108180808000410021010340200041EF888080006A2202200120022D00006A200041CF888080006A2D00006A22013A0000200041EE888080006A2202200141FF014B20022D00006A200041CE888080006A2D00006A22013A0000200141FF014B21012000417E6A22000D000B41B08880800041F0888080001082808080000F0B41B0898080004104412010808080800041B08980800041F08880800010818080800041F08880800041201085808080000F0B41808880800041201084808080000B02000B0B2701004180080B2001020304050607080102030405060708010203040506070801020304050607088718E5BB3ABD109FA0DD34B828D7DF62F48CAC6A80C2D85FE837479114647473A4251AAD0F6A4D7C0FA01DB497518E5E27A39EF96B425B4EC7B52D848FC7E10D2A7B32077106FB24B89A"))).build()
                         )
                         .build()
@@ -155,6 +172,15 @@ public class CommandsTest {
     }
 
     @Test
+    public void testRefetchProof() {
+        coreCommands = new CoreCommands();
+        var stub = mock(AdminServiceGrpc.AdminServiceBlockingStub.class);
+        when(stub.refetchProof(notNull())).thenReturn(Response.newBuilder().setCode(0).build());
+        ReflectUtil.setFieldValue(coreCommands, "adminServiceBlockingStub", stub);
+        coreCommands.refetchProof(ProveTypeEnum.TEE_PROOF, "1", "3");
+    }
+
+    @Test
     public void testQueryBatchTxInfo() {
         var txhash = Numeric.toHexString(RandomUtil.randomBytes(32));
         coreCommands = new CoreCommands();
@@ -199,5 +225,468 @@ public class CommandsTest {
         Assert.assertTrue(
                 StrUtil.contains((String) coreCommands.queryBatchDaInfo(1L), "compressionRatio\":2.3")
         );
+    }
+
+    @Test
+    public void testWasteEthAccountNonce() {
+        coreCommands = new CoreCommands();
+        AdminServiceGrpc.AdminServiceBlockingStub stub = mock(AdminServiceGrpc.AdminServiceBlockingStub.class);
+        when(stub.wasteEthAccountNonce(notNull())).thenReturn(
+                Response.newBuilder()
+                        .setCode(0)
+                        .setWasteEthAccountNonceResp(
+                                WasteEthAccountNonceResp.newBuilder()
+                                        .setTxHash("0x1234567890abcdef")
+                                        .build()
+                        )
+                        .build()
+        );
+        ReflectUtil.setFieldValue(coreCommands, "adminServiceBlockingStub", stub);
+
+        // Mock System.in to simulate user input "yes"
+        String userInput = "yes\n";
+        System.setIn(new ByteArrayInputStream(userInput.getBytes()));
+
+        var res = (String) coreCommands.wasteEthAccountNonce(ChainType.L1, "0x863df6bfa4469f3ead0be8f9f2aae51c91a907b4", 100L);
+
+        Assert.assertTrue(StrUtil.contains(res, "successful to waste eth account nonce"));
+        Assert.assertTrue(StrUtil.contains(res, "0x1234567890abcdef"));
+    }
+
+    @Test
+    public void testWasteEthAccountNonceUserCancel() {
+        coreCommands = new CoreCommands();
+        AdminServiceGrpc.AdminServiceBlockingStub stub = mock(AdminServiceGrpc.AdminServiceBlockingStub.class);
+        ReflectUtil.setFieldValue(coreCommands, "adminServiceBlockingStub", stub);
+
+        // Mock System.in to simulate user input "no"
+        String userInput = "no\n";
+        System.setIn(new ByteArrayInputStream(userInput.getBytes()));
+
+        var res = (String) coreCommands.wasteEthAccountNonce(ChainType.L1, "0x863df6bfa4469f3ead0be8f9f2aae51c91a907b4", 100L);
+
+        Assert.assertEquals("Operation cancelled", res);
+        // Verify that the stub method was never called
+        verify(stub, never()).wasteEthAccountNonce(notNull());
+    }
+
+    @Test
+    public void testWasteEthAccountNonceWithYShorthand() {
+        coreCommands = new CoreCommands();
+        AdminServiceGrpc.AdminServiceBlockingStub stub = mock(AdminServiceGrpc.AdminServiceBlockingStub.class);
+        when(stub.wasteEthAccountNonce(notNull())).thenReturn(
+                Response.newBuilder()
+                        .setCode(0)
+                        .setWasteEthAccountNonceResp(
+                                WasteEthAccountNonceResp.newBuilder()
+                                        .setTxHash("0xabcdef1234567890")
+                                        .build()
+                        )
+                        .build()
+        );
+        ReflectUtil.setFieldValue(coreCommands, "adminServiceBlockingStub", stub);
+
+        // Mock System.in to simulate user input "y"
+        String userInput = "y\n";
+        System.setIn(new ByteArrayInputStream(userInput.getBytes()));
+
+        var res = (String) coreCommands.wasteEthAccountNonce(ChainType.L2, "0x863df6bfa4469f3ead0be8f9f2aae51c91a907b4", 50L);
+
+        Assert.assertTrue(StrUtil.contains(res, "successful to waste eth account nonce"));
+        Assert.assertTrue(StrUtil.contains(res, "0xabcdef1234567890"));
+    }
+
+    @Test
+    public void testWasteEthAccountNonceServiceError() {
+        coreCommands = new CoreCommands();
+        AdminServiceGrpc.AdminServiceBlockingStub stub = mock(AdminServiceGrpc.AdminServiceBlockingStub.class);
+        when(stub.wasteEthAccountNonce(notNull())).thenReturn(
+                Response.newBuilder()
+                        .setCode(-1)
+                        .setErrorMsg("Service error occurred")
+                        .build()
+        );
+        ReflectUtil.setFieldValue(coreCommands, "adminServiceBlockingStub", stub);
+
+        // Mock System.in to simulate user input "yes"
+        String userInput = "yes\n";
+        System.setIn(new ByteArrayInputStream(userInput.getBytes()));
+
+        var res = (String) coreCommands.wasteEthAccountNonce(ChainType.L1, "0x863df6bfa4469f3ead0be8f9f2aae51c91a907b4", 100L);
+
+        Assert.assertTrue(StrUtil.contains(res, "failed"));
+        Assert.assertTrue(StrUtil.contains(res, "Service error occurred"));
+    }
+
+    @Test
+    public void testCommitProofManually() {
+        coreCommands = new CoreCommands();
+        AdminServiceGrpc.AdminServiceBlockingStub stub = mock(AdminServiceGrpc.AdminServiceBlockingStub.class);
+        when(stub.commitProofManually(notNull())).thenReturn(
+                Response.newBuilder()
+                        .setCode(0)
+                        .setCommitProofManuallyResp(
+                                CommitProofManuallyResp.newBuilder()
+                                        .setTxHash("0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef")
+                                        .build()
+                        )
+                        .build()
+        );
+        ReflectUtil.setFieldValue(coreCommands, "adminServiceBlockingStub", stub);
+
+        // Mock System.in to simulate user input "yes"
+        String userInput = "yes\n";
+        System.setIn(new ByteArrayInputStream(userInput.getBytes()));
+
+        var res = (String) coreCommands.commitProofManually(1L, ProofType.TEE);
+
+        Assert.assertTrue(StrUtil.contains(res, "success with tx"));
+        Assert.assertTrue(StrUtil.contains(res, "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"));
+
+        // Verify the stub was called with correct parameters
+        verify(stub, times(1)).commitProofManually(argThat(req ->
+                req.getBatchIndex() == 1L && req.getProofType() == ProofType.TEE
+        ));
+    }
+
+    @Test
+    public void testCommitProofManuallyZkProof() {
+        coreCommands = new CoreCommands();
+        AdminServiceGrpc.AdminServiceBlockingStub stub = mock(AdminServiceGrpc.AdminServiceBlockingStub.class);
+        when(stub.commitProofManually(notNull())).thenReturn(
+                Response.newBuilder()
+                        .setCode(0)
+                        .setCommitProofManuallyResp(
+                                CommitProofManuallyResp.newBuilder()
+                                        .setTxHash("0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890")
+                                        .build()
+                        )
+                        .build()
+        );
+        ReflectUtil.setFieldValue(coreCommands, "adminServiceBlockingStub", stub);
+
+        // Mock System.in to simulate user input "yes"
+        String userInput = "yes\n";
+        System.setIn(new ByteArrayInputStream(userInput.getBytes()));
+
+        var res = (String) coreCommands.commitProofManually(2L, ProofType.ZK);
+
+        Assert.assertTrue(StrUtil.contains(res, "success with tx"));
+        Assert.assertTrue(StrUtil.contains(res, "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"));
+
+        // Verify the stub was called with correct parameters
+        verify(stub, times(1)).commitProofManually(argThat(req ->
+                req.getBatchIndex() == 2L && req.getProofType() == ProofType.ZK
+        ));
+    }
+
+    @Test
+    public void testCommitProofManuallyUserCancel() {
+        coreCommands = new CoreCommands();
+        AdminServiceGrpc.AdminServiceBlockingStub stub = mock(AdminServiceGrpc.AdminServiceBlockingStub.class);
+        ReflectUtil.setFieldValue(coreCommands, "adminServiceBlockingStub", stub);
+
+        // Mock System.in to simulate user input "no"
+        String userInput = "no\n";
+        System.setIn(new ByteArrayInputStream(userInput.getBytes()));
+
+        var res = (String) coreCommands.commitProofManually(1L, ProofType.TEE);
+
+        Assert.assertEquals("Operation cancelled", res);
+        // Verify that the stub method was never called
+        verify(stub, never()).commitProofManually(notNull());
+    }
+
+    @Test
+    public void testCommitProofManuallyUserCancelWithN() {
+        coreCommands = new CoreCommands();
+        AdminServiceGrpc.AdminServiceBlockingStub stub = mock(AdminServiceGrpc.AdminServiceBlockingStub.class);
+        ReflectUtil.setFieldValue(coreCommands, "adminServiceBlockingStub", stub);
+
+        // Mock System.in to simulate user input "n"
+        String userInput = "n\n";
+        System.setIn(new ByteArrayInputStream(userInput.getBytes()));
+
+        var res = (String) coreCommands.commitProofManually(3L, ProofType.ZK);
+
+        Assert.assertEquals("Operation cancelled", res);
+        // Verify that the stub method was never called
+        verify(stub, never()).commitProofManually(notNull());
+    }
+
+    @Test
+    public void testCommitProofManuallyWithYShorthand() {
+        coreCommands = new CoreCommands();
+        AdminServiceGrpc.AdminServiceBlockingStub stub = mock(AdminServiceGrpc.AdminServiceBlockingStub.class);
+        when(stub.commitProofManually(notNull())).thenReturn(
+                Response.newBuilder()
+                        .setCode(0)
+                        .setCommitProofManuallyResp(
+                                CommitProofManuallyResp.newBuilder()
+                                        .setTxHash("0x9999999999999999999999999999999999999999999999999999999999999999")
+                                        .build()
+                        )
+                        .build()
+        );
+        ReflectUtil.setFieldValue(coreCommands, "adminServiceBlockingStub", stub);
+
+        // Mock System.in to simulate user input "y"
+        String userInput = "y\n";
+        System.setIn(new ByteArrayInputStream(userInput.getBytes()));
+
+        var res = (String) coreCommands.commitProofManually(5L, ProofType.TEE);
+
+        Assert.assertTrue(StrUtil.contains(res, "success with tx"));
+        Assert.assertTrue(StrUtil.contains(res, "0x9999999999999999999999999999999999999999999999999999999999999999"));
+    }
+
+    @Test
+    public void testCommitProofManuallyServiceError() {
+        coreCommands = new CoreCommands();
+        AdminServiceGrpc.AdminServiceBlockingStub stub = mock(AdminServiceGrpc.AdminServiceBlockingStub.class);
+        when(stub.commitProofManually(notNull())).thenReturn(
+                Response.newBuilder()
+                        .setCode(-1)
+                        .setErrorMsg("Proof commitment failed: invalid batch index")
+                        .build()
+        );
+        ReflectUtil.setFieldValue(coreCommands, "adminServiceBlockingStub", stub);
+
+        // Mock System.in to simulate user input "yes"
+        String userInput = "yes\n";
+        System.setIn(new ByteArrayInputStream(userInput.getBytes()));
+
+        var res = (String) coreCommands.commitProofManually(999L, ProofType.ZK);
+
+        Assert.assertTrue(StrUtil.contains(res, "failed"));
+        Assert.assertTrue(StrUtil.contains(res, "Proof commitment failed: invalid batch index"));
+    }
+
+    @Test
+    public void testCommitProofManuallyWithInvalidInput() {
+        coreCommands = new CoreCommands();
+        AdminServiceGrpc.AdminServiceBlockingStub stub = mock(AdminServiceGrpc.AdminServiceBlockingStub.class);
+        ReflectUtil.setFieldValue(coreCommands, "adminServiceBlockingStub", stub);
+
+        // Mock System.in to simulate user input "maybe"
+        String userInput = "maybe\n";
+        System.setIn(new ByteArrayInputStream(userInput.getBytes()));
+
+        var res = (String) coreCommands.commitProofManually(1L, ProofType.TEE);
+
+        Assert.assertEquals("Operation cancelled", res);
+        // Verify that the stub method was never called
+        verify(stub, never()).commitProofManually(notNull());
+    }
+
+    @Test
+    public void testCommitProofManuallyMultipleBatches() {
+        coreCommands = new CoreCommands();
+        AdminServiceGrpc.AdminServiceBlockingStub stub = mock(AdminServiceGrpc.AdminServiceBlockingStub.class);
+
+        // Setup responses for different batch indices
+        when(stub.commitProofManually(argThat(req -> req != null && req.getBatchIndex() == 1L))).thenReturn(
+                Response.newBuilder()
+                        .setCode(0)
+                        .setCommitProofManuallyResp(CommitProofManuallyResp.newBuilder()
+                                .setTxHash("0x1111111111111111111111111111111111111111111111111111111111111111")
+                                .build())
+                        .build()
+        );
+        when(stub.commitProofManually(argThat(req -> req != null && req.getBatchIndex() == 2L))).thenReturn(
+                Response.newBuilder()
+                        .setCode(0)
+                        .setCommitProofManuallyResp(CommitProofManuallyResp.newBuilder()
+                                .setTxHash("0x2222222222222222222222222222222222222222222222222222222222222222")
+                                .build())
+                        .build()
+        );
+
+        ReflectUtil.setFieldValue(coreCommands, "adminServiceBlockingStub", stub);
+
+        // Mock System.in to simulate user input "yes"
+        String userInput = "yes\n";
+        System.setIn(new ByteArrayInputStream(userInput.getBytes()));
+
+        var res1 = (String) coreCommands.commitProofManually(1L, ProofType.TEE);
+
+        System.setIn(new ByteArrayInputStream(userInput.getBytes()));
+
+        var res2 = (String) coreCommands.commitProofManually(2L, ProofType.ZK);
+
+        Assert.assertTrue(StrUtil.contains(res1, "0x1111111111111111111111111111111111111111111111111111111111111111"));
+        Assert.assertTrue(StrUtil.contains(res2, "0x2222222222222222222222222222222222222222222222222222222222222222"));
+
+        verify(stub, times(2)).commitProofManually(notNull());
+    }
+
+    @Test
+    public void testQueryRelayerAccountNonce() {
+        coreCommands = new CoreCommands();
+        AdminServiceGrpc.AdminServiceBlockingStub stub = mock(AdminServiceGrpc.AdminServiceBlockingStub.class);
+        when(stub.queryCurrNonce(notNull())).thenReturn(
+                Response.newBuilder()
+                        .setCode(0)
+                        .setQueryCurrNonceResp(
+                                QueryCurrNonceResp.newBuilder()
+                                        .setNonce(12345L)
+                                        .build()
+                        )
+                        .build()
+        );
+        ReflectUtil.setFieldValue(coreCommands, "adminServiceBlockingStub", stub);
+
+        var res = (String) coreCommands.queryRelayerAccountNonce(ChainType.L1, AccType.BLOB);
+
+        Assert.assertTrue(StrUtil.contains(res, "nonce is 12345"));
+        verify(stub, times(1)).queryCurrNonce(argThat(req ->
+                req.getChainType() == ChainType.L1 && req.getAccType() == AccType.BLOB
+        ));
+    }
+
+    @Test
+    public void testQueryRelayerAccountNonceL2() {
+        coreCommands = new CoreCommands();
+        AdminServiceGrpc.AdminServiceBlockingStub stub = mock(AdminServiceGrpc.AdminServiceBlockingStub.class);
+        when(stub.queryCurrNonce(notNull())).thenReturn(
+                Response.newBuilder()
+                        .setCode(0)
+                        .setQueryCurrNonceResp(
+                                QueryCurrNonceResp.newBuilder()
+                                        .setNonce(99999L)
+                                        .build()
+                        )
+                        .build()
+        );
+        ReflectUtil.setFieldValue(coreCommands, "adminServiceBlockingStub", stub);
+
+        var res = (String) coreCommands.queryRelayerAccountNonce(ChainType.L2, AccType.LEGACY);
+
+        Assert.assertTrue(StrUtil.contains(res, "nonce is 99999"));
+        verify(stub, times(1)).queryCurrNonce(argThat(req ->
+                req.getChainType() == ChainType.L2 && req.getAccType() == AccType.LEGACY
+        ));
+    }
+
+    @Test
+    public void testQueryRelayerAccountNonceServiceError() {
+        coreCommands = new CoreCommands();
+        AdminServiceGrpc.AdminServiceBlockingStub stub = mock(AdminServiceGrpc.AdminServiceBlockingStub.class);
+        when(stub.queryCurrNonce(notNull())).thenReturn(
+                Response.newBuilder()
+                        .setCode(-1)
+                        .setErrorMsg("Failed to query nonce from service")
+                        .build()
+        );
+        ReflectUtil.setFieldValue(coreCommands, "adminServiceBlockingStub", stub);
+
+        var res = (String) coreCommands.queryRelayerAccountNonce(ChainType.L1, AccType.BLOB);
+
+        Assert.assertTrue(StrUtil.contains(res, "failed"));
+        Assert.assertTrue(StrUtil.contains(res, "Failed to query nonce from service"));
+    }
+
+    @Test
+    public void testUpdateRelayerAccountNonceManually() {
+        coreCommands = new CoreCommands();
+        AdminServiceGrpc.AdminServiceBlockingStub stub = mock(AdminServiceGrpc.AdminServiceBlockingStub.class);
+        when(stub.updateNonceManually(notNull())).thenReturn(
+                Response.newBuilder()
+                        .setCode(0)
+                        .build()
+        );
+        ReflectUtil.setFieldValue(coreCommands, "adminServiceBlockingStub", stub);
+
+        var res = (String) coreCommands.updateRelayerAccountNonceManually(ChainType.L1, AccType.BLOB, 50000L);
+
+        Assert.assertEquals("successful to update nonce", res);
+        verify(stub, times(1)).updateNonceManually(argThat(req ->
+                req.getChainType() == ChainType.L1 && req.getAccType() == AccType.BLOB && req.getNonce() == 50000L
+        ));
+    }
+
+    @Test
+    public void testUpdateRelayerAccountNonceManuallyL2Legacy() {
+        coreCommands = new CoreCommands();
+        AdminServiceGrpc.AdminServiceBlockingStub stub = mock(AdminServiceGrpc.AdminServiceBlockingStub.class);
+        when(stub.updateNonceManually(notNull())).thenReturn(
+                Response.newBuilder()
+                        .setCode(0)
+                        .build()
+        );
+        ReflectUtil.setFieldValue(coreCommands, "adminServiceBlockingStub", stub);
+
+        var res = (String) coreCommands.updateRelayerAccountNonceManually(ChainType.L2, AccType.LEGACY, 100000L);
+
+        Assert.assertEquals("successful to update nonce", res);
+        verify(stub, times(1)).updateNonceManually(argThat(req ->
+                req.getChainType() == ChainType.L2 && req.getAccType() == AccType.LEGACY && req.getNonce() == 100000L
+        ));
+    }
+
+    @Test
+    public void testUpdateRelayerAccountNonceManuallyZeroNonce() {
+        coreCommands = new CoreCommands();
+        AdminServiceGrpc.AdminServiceBlockingStub stub = mock(AdminServiceGrpc.AdminServiceBlockingStub.class);
+        when(stub.updateNonceManually(notNull())).thenReturn(
+                Response.newBuilder()
+                        .setCode(0)
+                        .build()
+        );
+        ReflectUtil.setFieldValue(coreCommands, "adminServiceBlockingStub", stub);
+
+        var res = (String) coreCommands.updateRelayerAccountNonceManually(ChainType.L1, AccType.BLOB, 0L);
+
+        Assert.assertEquals("successful to update nonce", res);
+        verify(stub, times(1)).updateNonceManually(argThat(req ->
+                req.getNonce() == 0L
+        ));
+    }
+
+    @Test
+    public void testUpdateRelayerAccountNonceManuallyServiceError() {
+        coreCommands = new CoreCommands();
+        AdminServiceGrpc.AdminServiceBlockingStub stub = mock(AdminServiceGrpc.AdminServiceBlockingStub.class);
+        when(stub.updateNonceManually(notNull())).thenReturn(
+                Response.newBuilder()
+                        .setCode(-1)
+                        .setErrorMsg("Failed to update nonce")
+                        .build()
+        );
+        ReflectUtil.setFieldValue(coreCommands, "adminServiceBlockingStub", stub);
+
+        var res = (String) coreCommands.updateRelayerAccountNonceManually(ChainType.L1, AccType.BLOB, 50000L);
+
+        Assert.assertTrue(StrUtil.contains(res, "failed"));
+        Assert.assertTrue(StrUtil.contains(res, "Failed to update nonce"));
+    }
+
+    @Test
+    public void testUpdateRelayerAccountNonceManuallyMultipleAccounts() {
+        coreCommands = new CoreCommands();
+        AdminServiceGrpc.AdminServiceBlockingStub stub = mock(AdminServiceGrpc.AdminServiceBlockingStub.class);
+        when(stub.updateNonceManually(notNull())).thenReturn(
+                Response.newBuilder()
+                        .setCode(0)
+                        .build()
+        );
+        ReflectUtil.setFieldValue(coreCommands, "adminServiceBlockingStub", stub);
+
+        // Update nonce for first account
+        var res1 = (String) coreCommands.updateRelayerAccountNonceManually(ChainType.L1, AccType.BLOB, 10000L);
+        Assert.assertEquals("successful to update nonce", res1);
+
+        // Update nonce for second account
+        var res2 = (String) coreCommands.updateRelayerAccountNonceManually(ChainType.L2, AccType.LEGACY, 20000L);
+        Assert.assertEquals("successful to update nonce", res2);
+
+        // Verify both calls were made with correct parameters
+        verify(stub, times(2)).updateNonceManually(notNull());
+        verify(stub, times(1)).updateNonceManually(argThat(req ->
+                req.getChainType() == ChainType.L1 && req.getAccType() == AccType.BLOB && req.getNonce() == 10000L
+        ));
+        verify(stub, times(1)).updateNonceManually(argThat(req ->
+                req.getChainType() == ChainType.L2 && req.getAccType() == AccType.LEGACY && req.getNonce() == 20000L
+        ));
     }
 }

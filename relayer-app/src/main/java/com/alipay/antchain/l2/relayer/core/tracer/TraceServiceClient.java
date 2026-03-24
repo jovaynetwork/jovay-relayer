@@ -1,3 +1,19 @@
+/*
+ * Copyright 2026 Ant Group
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.alipay.antchain.l2.relayer.core.tracer;
 
 import java.math.BigInteger;
@@ -9,7 +25,6 @@ import java.util.stream.Collectors;
 
 import cn.hutool.core.util.ObjectUtil;
 import com.alipay.antchain.l2.relayer.commons.enums.ProveTypeEnum;
-import com.alipay.antchain.l2.relayer.commons.exceptions.BlockTraceNotReadyException;
 import com.alipay.antchain.l2.relayer.commons.exceptions.CallRemoteServiceFailedException;
 import com.alipay.antchain.l2.relayer.commons.exceptions.RemoteServiceRetryException;
 import com.alipay.antchain.l2.relayer.utils.RemoteServiceUtils;
@@ -20,7 +35,6 @@ import io.opentelemetry.instrumentation.annotations.WithSpan;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import net.devh.boot.grpc.client.inject.GrpcClient;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.retry.annotation.EnableRetry;
 import org.springframework.retry.annotation.Retryable;
@@ -36,8 +50,9 @@ public class TraceServiceClient {
     @GrpcClient("tracer-client")
     private TraceServiceGrpc.TraceServiceBlockingStub stub;
 
-    @Value("${l2-relayer.tracer-client.req-retry.max-block-stable-gap:10}")
-    private int maxBlockStableGap;
+    public BigInteger getLatestProcessedBlock() {
+        return BigInteger.valueOf(stub.getLatestProcessedBlock(GetLatestProcessedBlockRequest.newBuilder().build()).getBlockNumber());
+    }
 
     /**
      * Fetch basic block trace from tracer
@@ -86,12 +101,6 @@ public class TraceServiceClient {
                         .build()
         );
         if (response.getStatus().getErrorCode() != L2ErrorCode.L2_OK) {
-            boolean isLatestTraceDelayed = response.getStatus().getErrorCode() == L2ErrorCode.L2_TRACER_ERROR_INVALID_BLOCK_NUMBER
-                                           && blockNumber.compareTo(BigInteger.valueOf(response.getStableBlockNumber() + maxBlockStableGap)) <= 0;
-            if (isLatestTraceDelayed) {
-                log.debug("tracer not catch up the latest height: {}-{}", response.getStatus().getErrorCode().getNumber(), response.getStatus().getErrorMessage());
-                throw new BlockTraceNotReadyException("{} not ready and stable is {}", blockNumber, response.getStableBlockNumber());
-            }
             if (RemoteServiceUtils.isL2StatusRetryable(response.getStatus())) {
                 log.debug("getBasicTrace retry with rpc error: {}-{}", response.getStatus().getErrorCode().getNumber(), response.getStatus().getErrorMessage());
                 throw new RemoteServiceRetryException(

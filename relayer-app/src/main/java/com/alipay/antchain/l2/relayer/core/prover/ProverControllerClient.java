@@ -1,3 +1,19 @@
+/*
+ * Copyright 2026 Ant Group
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.alipay.antchain.l2.relayer.core.prover;
 
 import java.math.BigInteger;
@@ -23,7 +39,6 @@ import com.google.protobuf.ByteString;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import net.devh.boot.grpc.client.inject.GrpcClient;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.retry.annotation.EnableRetry;
 import org.springframework.retry.annotation.Retryable;
@@ -38,9 +53,6 @@ public class ProverControllerClient {
 
     @GrpcClient("prover-client")
     private ProverControllerServerGrpc.ProverControllerServerBlockingStub stub;
-
-    @Value("#{rollupConfig.maxTxsInChunks}")
-    private int maxTxsInChunks;
 
     @Retryable(retryFor = RemoteServiceRetryException.class, backoff = @Backoff(delay = 100, multiplier = 2))
     public void notifyBlock(BigInteger batchIndex, long chunkIndex, BigInteger blockNumber) {
@@ -96,7 +108,7 @@ public class ProverControllerClient {
     public void proveBatch(BatchWrapper batch) {
         log.info("request the prover controller to prove batch (batch: {}) ", batch.getBatch().getBatchIndex());
         BatchInfo batchInfo = BatchInfo.newBuilder()
-                .setBatchVersion(batch.getBatchHeader().getVersion().getValue())
+                .setBatchVersion(batch.getBatchHeader().getVersion().getValueAsUint8())
                 .setBatchId(batch.getBatch().getBatchIndex().longValue())
                 .addAllChunkList(((ChunksPayload) batch.getBatch().getPayload()).chunks().stream().map(
                         chunk -> BasicChunkInfo.newBuilder()
@@ -105,7 +117,6 @@ public class ProverControllerClient {
                                 .build()
                 ).collect(Collectors.toList()))
                 .setParentBatchHash(ByteString.copyFrom(batch.getBatchHeader().getParentBatchHash()))
-                .setMaxTxsInChunk(maxTxsInChunks)
                 .build();
         L2Status status = this.stub.proveBatch(batchInfo);
         if (status.getErrorCode() != L2ErrorCode.L2_OK) {
