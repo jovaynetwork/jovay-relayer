@@ -56,7 +56,7 @@
         <bouncycastle.version>1.76</bouncycastle.version>
         <commons-collections4.version>4.4</commons-collections4.version>
         <spring-shell.version>3.4.1</spring-shell.version>
-        <jasypt-starter.version>3.0.5</jasypt-starter.version>
+        <jasypt-starter.version>4.0.4</jasypt-starter.version>
         <fastjson.version>1.2.83_noneautotype</fastjson.version>
         <web3j.version>4.13.0</web3j.version>
         <beacon-api.version>1.0.0</beacon-api.version>
