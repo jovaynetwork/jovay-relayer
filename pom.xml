@@ -325,10 +325,15 @@
                                 <exclude>**/dal/mapper/**</exclude>
                                 <exclude>**/dal/entities/**</exclude>
                                 <exclude>**/ibatis/**</exclude>
-                                <exclude>**/proto/**</exclude>
                                 <exclude>**/enums/**</exclude>
                                 <exclude>**/exceptions/**</exclude>
                                 <exclude>**/commons/abi/**</exclude>
+                                <!-- protobuf / gRPC generated code -->
+                                <exclude>**/l2/tracer/**</exclude>
+                                <exclude>**/l2/trace/**</exclude>
+                                <exclude>**/l2/prover/**</exclude>
+                                <exclude>**/l2/status/**</exclude>
+                                <exclude>**/server/grpc/**</exclude>
                             </excludes>
                         </configuration>
                         <executions>
