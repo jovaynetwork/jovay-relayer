@@ -51,9 +51,16 @@ jobs:
           title: 'Code Coverage Report'
           update-comment: true
 
-  build:
-    name: Build
+  release:
+    name: Build & Release Docker Images
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      REGISTRY: ghcr.io
     steps:
       - uses: actions/checkout@v4
 
@@ -72,44 +79,19 @@ jobs:
         with:
           name: l2-relayer-tar
           path: relayer-app/target/l2-relayer-*.tar.gz
-          retention-days: 7
+          retention-days: 30
 
       - name: Upload Query Service artifact
         uses: actions/upload-artifact@v4
         with:
           name: query-service-tar
           path: query-service/target/query-service-*.tar.gz
-          retention-days: 7
+          retention-days: 30
 
-  docker:
-    name: Build & Push Docker Images
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    env:
-      REGISTRY: ghcr.io
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download Relayer artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: l2-relayer-tar
-          path: docker/
-
-      - name: Download Query Service artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: query-service-tar
-          path: docker/
-
-      - name: Prepare build context
+      - name: Prepare Docker build context
         run: |
-          cd docker
-          mv l2-relayer-*.tar.gz l2-relayer.tar.gz
-          mv query-service-*.tar.gz query-service.tar.gz
+          cp relayer-app/target/l2-relayer-*.tar.gz docker/l2-relayer.tar.gz
+          cp query-service/target/query-service-*.tar.gz docker/query-service.tar.gz
 
       - name: Determine image tags
         id: meta
@@ -118,17 +100,11 @@ jobs:
           RELAYER_IMAGE="${REGISTRY}/${REPO_OWNER}/jovay-relayer"
           QS_IMAGE="${REGISTRY}/${REPO_OWNER}/jovay-relayer-query-service"
 
-          TAGS_RELAYER="${RELAYER_IMAGE}:${{ github.sha }}"
-          TAGS_QS="${QS_IMAGE}:${{ github.sha }}"
-
-          if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            TAGS_RELAYER="${TAGS_RELAYER},${RELAYER_IMAGE}:${{ github.ref_name }},${RELAYER_IMAGE}:latest"
-            TAGS_QS="${TAGS_QS},${QS_IMAGE}:${{ github.ref_name }},${QS_IMAGE}:latest"
-          fi
+          TAGS_RELAYER="${RELAYER_IMAGE}:${{ github.sha }},${RELAYER_IMAGE}:${{ github.ref_name }},${RELAYER_IMAGE}:latest"
+          TAGS_QS="${QS_IMAGE}:${{ github.sha }},${QS_IMAGE}:${{ github.ref_name }},${QS_IMAGE}:latest"
 
           echo "relayer_tags=${TAGS_RELAYER}" >> "$GITHUB_OUTPUT"
           echo "qs_tags=${TAGS_QS}" >> "$GITHUB_OUTPUT"
-          echo "push=${{ github.ref_type == 'tag' }}" >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -137,7 +113,6 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to GitHub Container Registry
-        if: steps.meta.outputs.push == 'true'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -150,7 +125,7 @@ jobs:
           context: docker
           file: docker/Dockerfile-Relayer-Open
           platforms: linux/amd64,linux/arm64
-          push: ${{ steps.meta.outputs.push }}
+          push: true
           tags: ${{ steps.meta.outputs.relayer_tags }}
 
       - name: Build & push Query Service image
@@ -159,5 +134,5 @@ jobs:
           context: docker
           file: docker/Dockerfile-QS-Open
           platforms: linux/amd64,linux/arm64
-          push: ${{ steps.meta.outputs.push }}
+          push: true
           tags: ${{ steps.meta.outputs.qs_tags }}
