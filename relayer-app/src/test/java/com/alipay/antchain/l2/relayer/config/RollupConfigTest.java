@@ -92,7 +92,7 @@ public class RollupConfigTest extends TestBase {
         Assert.assertEquals(BatchVersionEnum.BATCH_V1, forkInfo.getBatchVersion());
         forkInfo = rollupSpecs.getFork(System.currentTimeMillis());
         Assert.assertNotNull(forkInfo);
-        Assert.assertEquals(BatchVersionEnum.BATCH_V1, forkInfo.getBatchVersion());
+        Assert.assertEquals(BatchVersionEnum.BATCH_V2, forkInfo.getBatchVersion());
     }
 
     @Test
