@@ -6,7 +6,7 @@
     <parent>
         <groupId>com.alipay.antchain.l2</groupId>
         <artifactId>l2-relayer</artifactId>
-        <version>0.11.0</version>
+        <version>0.12.0</version>
     </parent>
 
     <artifactId>jovay-sign-service-spring-boot-starter</artifactId>
@@ -76,6 +76,11 @@
         <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.vintage</groupId>
+            <artifactId>junit-vintage-engine</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>

@@ -18,13 +18,18 @@ package com.alipay.antchain.l2.relayer.config;
 
 import java.math.BigInteger;
 import java.nio.charset.Charset;
+import java.util.stream.Collectors;
 
 import cn.hutool.core.io.resource.ResourceUtil;
 import cn.hutool.core.lang.Assert;
 import cn.hutool.core.util.ObjectUtil;
+import cn.hutool.core.util.StrUtil;
+import com.alipay.antchain.l2.relayer.commons.enums.DaType;
+import com.alipay.antchain.l2.relayer.commons.enums.ParentChainType;
 import com.alipay.antchain.l2.relayer.commons.specs.IRollupSpecs;
 import com.alipay.antchain.l2.relayer.commons.specs.RollupSpecs;
 import com.alipay.antchain.l2.relayer.commons.specs.RollupSpecsNetwork;
+import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Resource;
 import lombok.Getter;
 import lombok.SneakyThrows;
@@ -59,6 +64,51 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 @Getter
 public class RollupConfig {
+
+    /**
+     * The type of parent chain (Layer 1) where rollup batches are committed.
+     * <p>
+     * Determines which blockchain network serves as the settlement layer for the L2 rollup.
+     * Different parent chains may have different transaction formats, gas mechanisms,
+     * and data availability solutions.
+     * </p>
+     * <p>
+     * Supported values:
+     * <ul>
+     *   <li>ETHEREUM: Ethereum mainnet or compatible networks</li>
+     *   <li>JOVAY: Jovay blockchain network</li>
+     * </ul>
+     * </p>
+     * <p>
+     * Default: ETHEREUM
+     * </p>
+     */
+    @Value("${l2-relayer.rollup.config.parent-chain-type:ETHEREUM}")
+    private ParentChainType parentChainType;
+
+    /**
+     * The data availability (DA) type used for storing rollup transaction data.
+     * <p>
+     * Specifies how and where the L2 transaction data is made available for verification.
+     * The DA type must be compatible with the configured parent chain type.
+     * </p>
+     * <p>
+     * Supported values:
+     * <ul>
+     *   <li>BLOBS: EIP-4844 blob transactions (for Ethereum)</li>
+     *   <li>DAS: Data Availability Service (for Jovay and other chains)</li>
+     * </ul>
+     * </p>
+     * <p>
+     * Default: BLOBS
+     * </p>
+     * <p>
+     * Note: The combination of parent chain type and DA type is validated during
+     * initialization to ensure compatibility.
+     * </p>
+     */
+    @Value("${l2-relayer.rollup.da-type:BLOBS}")
+    private DaType daType;
 
     /**
      * Recommended gas limit per chunk.
@@ -160,6 +210,32 @@ public class RollupConfig {
      */
     @Resource
     private BigInteger l1ChainId;
+
+    /**
+     * Validates the compatibility between parent chain type and data availability type.
+     * <p>
+     * This method is automatically invoked after the bean's properties have been set.
+     * It ensures that the configured DA type is supported by the selected parent chain type.
+     * </p>
+     * <p>
+     * For example:
+     * <ul>
+     *   <li>Ethereum parent chain supports BLOBS DA type</li>
+     *   <li>Jovay parent chain supports DAS DA type</li>
+     * </ul>
+     * </p>
+     *
+     * @throws IllegalStateException if the DA type is not supported by the parent chain type
+     */
+    @PostConstruct
+    public void validate() {
+        if (!parentChainType.supportedDaTypes().contains(daType)) {
+            throw new IllegalStateException(StrUtil.format(
+                    "The DA type {} not supported for parent chain {}, and parent chain only supports {}",
+                    daType, parentChainType, parentChainType.supportedDaTypes().stream().map(DaType::name).collect(Collectors.joining(", ", "[", "]"))
+            ));
+        }
+    }
 
     /**
      * Creates and configures the rollup specifications bean based on the network type.

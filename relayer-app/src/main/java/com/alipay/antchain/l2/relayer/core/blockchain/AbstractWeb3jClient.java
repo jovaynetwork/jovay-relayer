@@ -192,7 +192,7 @@ public abstract class AbstractWeb3jClient implements BasicBlockchainClient {
     @SneakyThrows
     public EthSendTransaction sendTransferValueTx(String from, String to, BigInteger nonce, BigInteger value) {
         BaseRawTransactionManager txManager;
-        if (StrUtil.equalsIgnoreCase(from, blobPoolTxManager.getAddress())) {
+        if (ObjectUtil.isNotNull(blobPoolTxManager) && StrUtil.equalsIgnoreCase(from, blobPoolTxManager.getAddress())) {
             log.info("going to send transfer value tx from blob pool tx manager");
             txManager = blobPoolTxManager;
         } else if (StrUtil.equalsIgnoreCase(from, legacyPoolTxManager.getAddress())) {

@@ -611,6 +611,20 @@ public class RollupRepository implements IRollupRepository {
     }
 
     @Override
+    public List<ReliableTransactionDO> getReliableTransactionsByState(ChainTypeEnum chainType, ReliableTransactionStateEnum state, int batchSize) {
+        var entities = reliableTransactionMapper.selectList(
+                new LambdaQueryWrapper<ReliableTransactionEntity>()
+                        .eq(ReliableTransactionEntity::getChainType, chainType)
+                        .eq(ReliableTransactionEntity::getState, state)
+                        .last("limit " + batchSize)
+        );
+        if (ObjectUtil.isEmpty(entities)) {
+            return ListUtil.empty();
+        }
+        return entities.stream().map(x -> BeanUtil.copyProperties(x, ReliableTransactionDO.class)).collect(Collectors.toList());
+    }
+
+    @Override
     public List<ReliableTransactionDO> getFailedReliableTransactions(int batchSize, int retryCountLimit) {
         var entities = reliableTransactionMapper.selectList(
                 new LambdaQueryWrapper<ReliableTransactionEntity>()
@@ -703,5 +717,99 @@ public class RollupRepository implements IRollupRepository {
 
     private String getL2BatchEthBlobsCacheKey(BigInteger batchIndex) {
         return StrUtil.format(L2BATCH_ETH_BLOBS_CACHE_KEY, batchIndex.toString());
+    }
+
+    // ==================== Rollback related methods ====================
+
+    @Override
+    public int deleteBatchesFrom(BigInteger fromBatchIndex) {
+        return batchesMapper.delete(
+                new LambdaQueryWrapper<BatchesEntity>()
+                        .ge(BatchesEntity::getBatchIndex, fromBatchIndex.toString())
+        );
+    }
+
+    @Override
+    public int deleteChunksForRollback(BigInteger targetBatchIndex, long targetChunkIndex) {
+        return chunksMapper.delete(
+                new LambdaQueryWrapper<ChunksEntity>()
+                        .gt(ChunksEntity::getBatchIndex, targetBatchIndex.toString())
+                        .or(wrapper -> wrapper
+                                .eq(ChunksEntity::getBatchIndex, targetBatchIndex.toString())
+                                .ge(ChunksEntity::getChunkIndex, targetChunkIndex)
+                        )
+        );
+    }
+
+    @Override
+    public int deleteBatchProveRequestsFrom(BigInteger fromBatchIndex) {
+        return batchProveRequestMapper.delete(
+                new LambdaQueryWrapper<BatchProveRequestEntity>()
+                        .ge(BatchProveRequestEntity::getBatchIndex, fromBatchIndex)
+        );
+    }
+
+    @Override
+    public int deleteRollupReliableTransactionsFrom(BigInteger fromBatchIndex) {
+        return reliableTransactionMapper.delete(
+                new LambdaQueryWrapper<ReliableTransactionEntity>()
+                        .eq(ReliableTransactionEntity::getChainType, ChainTypeEnum.LAYER_ONE)
+                        .and(wrapper -> wrapper
+                                .eq(ReliableTransactionEntity::getTransactionType, TransactionTypeEnum.BATCH_COMMIT_TX)
+                                .or().eq(ReliableTransactionEntity::getTransactionType, TransactionTypeEnum.BATCH_TEE_PROOF_COMMIT_TX)
+                                .or().eq(ReliableTransactionEntity::getTransactionType, TransactionTypeEnum.BATCH_ZK_PROOF_COMMIT_TX)
+                        )
+                        .ge(ReliableTransactionEntity::getBatchIndex, fromBatchIndex.toString())
+        );
+    }
+
+    @Override
+    public int deleteL1MsgReliableTransactionsAboveNonce(long nonceThreshold) {
+        return reliableTransactionMapper.delete(
+                new LambdaQueryWrapper<ReliableTransactionEntity>()
+                        .eq(ReliableTransactionEntity::getChainType, ChainTypeEnum.LAYER_TWO)
+                        .eq(ReliableTransactionEntity::getTransactionType, TransactionTypeEnum.L1_MSG_TX)
+                        .gt(ReliableTransactionEntity::getNonce, nonceThreshold)
+        );
+    }
+
+    @Override
+    public int deleteOracleBatchFeeFeedTransactionsFrom(BigInteger fromBatchIndex) {
+        return reliableTransactionMapper.delete(
+                new LambdaQueryWrapper<ReliableTransactionEntity>()
+                        .eq(ReliableTransactionEntity::getChainType, ChainTypeEnum.LAYER_TWO)
+                        .eq(ReliableTransactionEntity::getTransactionType, TransactionTypeEnum.L2_ORACLE_BATCH_FEE_FEED_TX)
+                        .ge(ReliableTransactionEntity::getBatchIndex, fromBatchIndex.toString())
+        );
+    }
+
+    @Override
+    public ChunkWrapper findChunkByBlockHeight(BigInteger batchIndex, BigInteger blockHeight) {
+        // Similar optimization for chunks within a specific batch
+        // Since chunks within a batch also have continuous block ranges,
+        // we find the chunk with the smallest chunk_index where end_number >= blockHeight
+        // Use CAST(... AS DECIMAL(65,0)) which is compatible with both MySQL and H2
+        var entity = chunksMapper.selectOne(
+                new LambdaQueryWrapper<ChunksEntity>()
+                        .eq(ChunksEntity::getBatchIndex, batchIndex.toString())
+                        .apply("CAST(end_number AS DECIMAL(65,0)) >= {0}", blockHeight)
+                        .orderByAsc(ChunksEntity::getChunkIndex)
+                        .last("LIMIT 1")
+        );
+        if (ObjectUtil.isNull(entity)) {
+            return null;
+        }
+        // Verify that start_number <= blockHeight
+        var startNumber = new BigInteger(entity.getStartNumber());
+        if (startNumber.compareTo(blockHeight) > 0) {
+            return null;
+        }
+        return new ChunkWrapper(
+                BatchVersionEnum.from(entity.getBatchVersion().byteValue()),
+                new BigInteger(entity.getBatchIndex()),
+                entity.getChunkIndex(),
+                entity.getGasSum(),
+                entity.getRawChunk()
+        );
     }
 }

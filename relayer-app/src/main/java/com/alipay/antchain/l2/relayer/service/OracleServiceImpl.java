@@ -35,6 +35,7 @@ import jakarta.annotation.Resource;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.TransactionCallbackWithoutResult;
@@ -42,32 +43,85 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.web3j.protocol.core.methods.response.TransactionReceipt;
 import org.web3j.utils.Numeric;
 
+/**
+ * Implementation of the Oracle service for L2 gas price feed.
+ * <p>
+ * This service is conditionally enabled only when the parent chain type requires rollup fee feed.
+ * It manages two types of oracle updates:
+ * <ul>
+ *   <li>L1 block updates: Updates base fee and blob base fee scalars based on L1 block information</li>
+ *   <li>L2 batch updates: Updates batch DA fee and execution fee based on batch commit and prove receipts</li>
+ * </ul>
+ * </p>
+ * <p>
+ * The service follows EIP-1559 and EIP-4844 specifications for gas price calculations.
+ * </p>
+ */
+@ConditionalOnProperty(name = "l2-relayer.rollup.config.parent-chain-type", havingValue = "ETHEREUM", matchIfMissing = true)
 @Service
 @Slf4j
 public class OracleServiceImpl implements IOracleService {
+    /**
+     * Repository for oracle-related data operations.
+     */
     @Resource
     private IOracleRepository oracleRepository;
 
+    /**
+     * Repository for rollup-related data operations.
+     */
     @Resource
     private IRollupRepository rollupRepository;
 
+    /**
+     * L2 client for interacting with Layer 2 blockchain.
+     */
     @Resource
     private L2Client l2Client;
 
+    /**
+     * Transaction template for managing database transactions.
+     */
     @Resource
     private TransactionTemplate transactionTemplate;
 
+    /**
+     * Ethereum blob fork configuration for EIP-4844 calculations.
+     */
     @Resource
     private EthBlobForkConfig ethBlobForkConfig;
 
+    /**
+     * Latest oracle fee information cached in memory.
+     */
     private final OracleFeeInfo latestOracleFeeInfo = new OracleFeeInfo();
 
+    /**
+     * Maximum number of oracle requests to process per round.
+     */
     @Value("${l2-relayer.tasks.oracle-gas-feed.oracle-req-number-per-round-limit: 10}")
     private int oracleReqNumberPerRoundLimit;
 
+    /**
+     * Threshold for base fee updates (floating percentage with 100 times magnification).
+     * <p>
+     * For example, a value of 5 means 5% threshold (0.05 in decimal).
+     * </p>
+     */
     @Value("${l2-relayer.tasks.oracle-gas-feed.oracle-base-fee-update-threshold: 0}")
-    private int oracleBaseFeeUpdateThreshold; // floating percentage with 100 times magnification
+    private int oracleBaseFeeUpdateThreshold;
 
+    /**
+     * Initializes the oracle service after bean construction.
+     * <p>
+     * This method:
+     * <ul>
+     *   <li>Loads the latest batch rollup fees from L2 gas oracle contract</li>
+     *   <li>Retrieves the latest batch index from database</li>
+     *   <li>Loads the latest L1 base fee and blob base fee from database</li>
+     * </ul>
+     * </p>
+     */
     @PostConstruct
     public void initService() {
         // initialize batchRollupFee in latestOracleFeeInfo，query from l2's l1GasOracle contract

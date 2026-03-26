@@ -17,9 +17,7 @@
 package com.alipay.antchain.l2.relayer.core.blockchain.helper;
 
 import java.math.BigInteger;
-import java.util.regex.Pattern;
 
-import cn.hutool.core.util.ObjectUtil;
 import cn.hutool.core.util.StrUtil;
 import com.alipay.antchain.l2.relayer.commons.enums.ChainTypeEnum;
 import com.alipay.antchain.l2.relayer.dal.repository.IRollupRepository;
@@ -33,8 +31,6 @@ import org.web3j.protocol.core.methods.response.EthSendTransaction;
 
 @Slf4j
 public class CachedNonceManager implements INonceManager {
-
-    private final static Pattern BLOB_POOL_NONCE_TOO_HIGHT_PATTERN = Pattern.compile("nonce too high: tx nonce (\\d+), gapped nonce (\\d+)");
 
     private final RedissonClient redisson;
 
@@ -50,7 +46,10 @@ public class CachedNonceManager implements INonceManager {
 
     private final IRollupRepository rollupRepository;
 
-    public CachedNonceManager(RedissonClient redisson, Web3j web3j, long chainId, String account, ChainTypeEnum chainType, IRollupRepository rollupRepository) {
+    private final INonceResetChecker nonceResetChecker;
+
+    public CachedNonceManager(RedissonClient redisson, Web3j web3j, long chainId, String account, ChainTypeEnum chainType,
+                              IRollupRepository rollupRepository, INonceResetChecker nonceResetChecker) {
         this.redisson = redisson;
         this.updateNonceLock = redisson.getLock(getEthNonceLockKey(chainId, account));
         this.account = account;
@@ -58,6 +57,7 @@ public class CachedNonceManager implements INonceManager {
         this.web3j = web3j;
         this.rollupRepository = rollupRepository;
         this.chainType = chainType;
+        this.nonceResetChecker = nonceResetChecker;
     }
 
     @Override
@@ -94,22 +94,7 @@ public class CachedNonceManager implements INonceManager {
 
     @Override
     public boolean ifResetNonce(EthSendTransaction result) {
-        if (result.getError().getCode() == -32000 && StrUtil.containsAny(result.getError().getMessage(), "nonce too low")) {
-            return true;
-        }
-        var msgMatcher = BLOB_POOL_NONCE_TOO_HIGHT_PATTERN.matcher(result.getError().getMessage());
-        if (msgMatcher.find()) {
-            log.warn("rpc call to send blob tx returns that nonce too high: {}", result.getError().getMessage());
-            var nonces = parseNonceFromError(result.getError().getMessage());
-            if (ObjectUtil.isEmpty(nonces)) {
-                return false;
-            }
-            log.info("parsed nonces from error message: tx nonce {}, gapped nonce {}", nonces[0], nonces[1]);
-            var latestNonce = rollupRepository.queryLatestNonce(chainType, account);
-            log.info("latest nonce from local storage: {}", latestNonce);
-            return latestNonce.compareTo(nonces[1]) < 0;
-        }
-        return false;
+        return nonceResetChecker.check(result, rollupRepository, chainType, account);
     }
 
     @Override
@@ -147,18 +132,5 @@ public class CachedNonceManager implements INonceManager {
             throw new RuntimeException("failed to query tx count: " + ethGetTransactionCount.getError().getMessage());
         }
         return ethGetTransactionCount.getTransactionCount();
-    }
-
-    private BigInteger[] parseNonceFromError(String errorMessage) {
-        if (errorMessage == null) {
-            return null;
-        }
-        var matcher = BLOB_POOL_NONCE_TOO_HIGHT_PATTERN.matcher(errorMessage);
-        if (matcher.find()) {
-            var txNonce = new BigInteger(matcher.group(1));
-            var gappedNonce = new BigInteger(matcher.group(2));
-            return new BigInteger[]{txNonce, gappedNonce};
-        }
-        return null;
     }
 }

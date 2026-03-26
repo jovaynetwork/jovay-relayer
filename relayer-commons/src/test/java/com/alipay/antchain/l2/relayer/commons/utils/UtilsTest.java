@@ -14,14 +14,12 @@
  * limitations under the License.
  */
 
-package com.alipay.antchain.l2.relayer.commoms;
+package com.alipay.antchain.l2.relayer.commons.utils;
 
 import java.nio.charset.Charset;
 
 import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.RandomUtil;
-import com.alipay.antchain.l2.relayer.commons.utils.EthTxDecoder;
-import com.alipay.antchain.l2.relayer.commons.utils.Utils;
 import com.alipay.antchain.l2.trace.*;
 import com.google.protobuf.ByteString;
 import org.junit.Assert;

@@ -52,8 +52,14 @@ l2-relayer:
   # Rollup Configuration
   # ----------------------------------------------------------------------------
   rollup:
+    da-type: ${ROLLUP_DA_TYPE:BLOBS}
+    da-config:
+      service:
+        type: ${ROLLUP_DA_CONFIG_SERVICE_TYPE:LOCAL}
+
     # Basic rollup parameters
     config:
+      parent-chain-type: ${ROLLUP_CONFIG_PARENT_CHAIN_TYPE:ETHEREUM}
       # Recommended gas limit per chunk (default: 23M gas)
       gas-per-chunk-recommended: ${ROLLUP_CONFIG_GAS_PER_CHUNK_RECOMMENDED:23000000}
       # Maximum memory for serialized chunks in growing batch (default: 1GB)
@@ -288,10 +294,16 @@ l2-relayer:
 
     # Reliable transaction task configuration
     reliable-tx:
+      # Tolerant time (in seconds) for parent chain transaction not found on node (default: 5s)
+      # If a transaction is not found within this time, it will be considered as missed and resubmitted
+      parent-chain-tx-missed-tolerant-time: ${RELIABLE_TX_PARENT_CHAIN_TX_MISSED_TOLERANT_TIME:5}
+      # Tolerant time (in seconds) for subchain transaction not found on node (default: 5s)
+      # If a transaction is not found within this time, it will be considered as missed and resubmitted
+      subchain-tx-missed-tolerant-time: ${RELIABLE_TX_SUBCHAIN_TX_MISSED_TOLERANT_TIME:5}
       # Transaction timeout limit in seconds (default: 600s = 10 minutes)
       tx-timeout-limit: ${RELIABLE_TX_TX_TIMEOUT_LIMIT:600}
-      # Number of transactions to process per batch (default: 32)
-      process-batch-size: ${RELIABLE_TX_PROCESS_BATCH_SIZE:32}
+      # Number of transactions to process per batch (default: 10)
+      process-batch-size: ${RELIABLE_TX_PROCESS_BATCH_SIZE:10}
       # Maximum number of retries for failed transactions (default: 1)
       retry-limit: ${RELIABLE_TX_RETRY_LIMIT:1}
 

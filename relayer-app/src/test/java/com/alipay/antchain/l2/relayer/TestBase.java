@@ -22,17 +22,25 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.List;
 
+import cn.hutool.core.collection.ListUtil;
 import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.HexUtil;
 import com.alibaba.fastjson.JSON;
+import com.alipay.antchain.l2.relayer.commons.enums.BizTaskTypeEnum;
+import com.alipay.antchain.l2.relayer.commons.enums.DaType;
+import com.alipay.antchain.l2.relayer.commons.enums.ParentChainType;
 import com.alipay.antchain.l2.relayer.commons.l2basic.Batch;
 import com.alipay.antchain.l2.relayer.commons.l2basic.BatchHeader;
 import com.alipay.antchain.l2.relayer.commons.l2basic.BatchVersionEnum;
 import com.alipay.antchain.l2.relayer.commons.l2basic.ChunksPayload;
 import com.alipay.antchain.l2.relayer.commons.models.BatchWrapper;
+import com.alipay.antchain.l2.relayer.commons.models.BizDistributedTask;
+import com.alipay.antchain.l2.relayer.commons.models.IDistributedTask;
 import com.alipay.antchain.l2.relayer.commons.specs.IRollupSpecs;
 import com.alipay.antchain.l2.relayer.commons.specs.RollupSpecs;
+import com.alipay.antchain.l2.relayer.config.RollupConfig;
 import com.alipay.antchain.l2.relayer.utils.MyRedisServer;
 import com.alipay.antchain.l2.trace.BasicBlockTrace;
 import com.google.protobuf.InvalidProtocolBufferException;
@@ -53,6 +61,7 @@ import redis.embedded.util.Architecture;
 import redis.embedded.util.OS;
 
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 @Slf4j
@@ -61,7 +70,11 @@ import static org.mockito.Mockito.when;
 @SpringBootTest(
         classes = L2RelayerApplication.class,
         webEnvironment = SpringBootTest.WebEnvironment.NONE,
-        properties = {"l2-relayer.l1-client.eth-network-fork.unknown-network-config-file=bpo/unknown.json"}
+        properties = {
+                "l2-relayer.l1-client.eth-network-fork.unknown-network-config-file=bpo/unknown.json",
+                "l2-relayer.tasks.reliable-tx.subchain-tx-missed-tolerant-time=0",
+                "l2-relayer.tasks.reliable-tx.parent-chain-tx-missed-tolerant-time=0"
+        }
 )
 @DirtiesContext
 public abstract class TestBase {
@@ -144,6 +157,27 @@ public abstract class TestBase {
             Files.delete(dumpFile);
             System.out.println("try to delete redis dump file");
         }
+    }
+
+    private static RollupConfig rollupConfig() {
+        var mockRollupConfig = mock(RollupConfig.class);
+        when(mockRollupConfig.getParentChainType()).thenReturn(ParentChainType.ETHEREUM);
+        when(mockRollupConfig.getDaType()).thenReturn(DaType.BLOBS);
+        return mockRollupConfig;
+    }
+
+    private static List<IDistributedTask> runningTaskList() {
+        return ListUtil.toList(
+                new BizDistributedTask(BizTaskTypeEnum.BLOCK_POLLING_TASK),
+                new BizDistributedTask(BizTaskTypeEnum.BATCH_PROVE_TASK),
+                new BizDistributedTask(BizTaskTypeEnum.BATCH_COMMIT_TASK),
+                new BizDistributedTask(BizTaskTypeEnum.PROOF_COMMIT_TASK),
+                new BizDistributedTask(BizTaskTypeEnum.RELIABLE_TX_TASK),
+                new BizDistributedTask(BizTaskTypeEnum.L1_BLOCK_POLLING_TASK),
+                new BizDistributedTask(BizTaskTypeEnum.L1MSG_PROCESS_TASK),
+                new BizDistributedTask(BizTaskTypeEnum.L2MSG_PROVE_TASK),
+                new BizDistributedTask(BizTaskTypeEnum.ORACLE_GAS_FEED_TASK)
+        );
     }
 
     @MockitoBean

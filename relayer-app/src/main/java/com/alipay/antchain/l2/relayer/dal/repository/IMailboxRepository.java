@@ -130,4 +130,34 @@ public interface IMailboxRepository {
      * @return a list of message hashes in the specified batch
      */
     List<byte[]> getMsgHashes(InterBlockchainMessageTypeEnum type, BigInteger batchIndex);
+
+    // ==================== Rollback related methods ====================
+
+    /**
+     * Resets L1 messages with nonce > threshold to MSG_READY state.
+     *
+     * @param nonceThreshold the nonce threshold
+     * @return the number of updated records
+     */
+    int resetL1MsgsAboveNonce(long nonceThreshold);
+
+    /**
+     * Deletes L2 messages for rollback operation.
+     * Deletes L2 messages where batch_index >= targetBatchIndex AND source_block_height >= targetBlockHeight.
+     *
+     * @param targetBatchIndex the target batch index
+     * @param targetBlockHeight the target block height
+     * @return the number of deleted records
+     */
+    int deleteL2MsgsForRollback(BigInteger targetBatchIndex, BigInteger targetBlockHeight);
+
+    /**
+     * Resets L2 messages to MSG_READY state for rollback operation.
+     * Resets L2 messages where batch_index = targetBatchIndex AND source_block_height < targetBlockHeight.
+     *
+     * @param targetBatchIndex the target batch index
+     * @param targetBlockHeight the target block height
+     * @return the number of updated records
+     */
+    int resetL2MsgsForRollback(BigInteger targetBatchIndex, BigInteger targetBlockHeight);
 }

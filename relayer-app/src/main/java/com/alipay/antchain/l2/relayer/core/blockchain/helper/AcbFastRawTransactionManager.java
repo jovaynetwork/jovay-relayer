@@ -22,12 +22,10 @@ import java.util.List;
 
 import cn.hutool.core.lang.Assert;
 import cn.hutool.core.util.ObjectUtil;
-import com.alipay.antchain.l2.relayer.commons.enums.ChainTypeEnum;
 import com.alipay.antchain.l2.relayer.commons.l2basic.L1MsgTransaction;
 import com.alipay.antchain.l2.relayer.core.blockchain.bpo.EthBlobForkConfig;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.model.IGasPrice;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.model.SendTxResult;
-import com.alipay.antchain.l2.relayer.dal.repository.IRollupRepository;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RedissonClient;
@@ -49,10 +47,11 @@ public class AcbFastRawTransactionManager extends BaseRawTransactionManager impl
     private final CachedNonceManager nonceManager;
 
     public AcbFastRawTransactionManager(Web3j web3j, TxSignService txSignService, long chainId, RedissonClient redisson,
-                                        EthBlobForkConfig ethBlobForkConfig, ChainTypeEnum chainType, IRollupRepository rollupRepository) {
+                                        EthBlobForkConfig ethBlobForkConfig, INonceManager nonceManager) {
         super(web3j, txSignService, chainId, redisson, ethBlobForkConfig);
         this.account = txSignService.getAddress();
-        this.nonceManager = new CachedNonceManager(redisson, web3j, chainId, account, chainType, rollupRepository);
+        Assert.isInstanceOf(CachedNonceManager.class, nonceManager);
+        this.nonceManager = (CachedNonceManager) nonceManager;
     }
 
     @Override

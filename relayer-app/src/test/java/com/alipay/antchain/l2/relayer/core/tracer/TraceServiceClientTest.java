@@ -39,6 +39,7 @@ import com.alipay.antchain.l2.tracer.TraceServiceGrpc;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
+import org.springframework.test.context.bean.override.convention.TestBean;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.web3j.protocol.Web3j;
 
@@ -56,7 +57,7 @@ public class TraceServiceClientTest extends TestBase {
     @MockitoBean
     private DistributedTaskEngine distributedTaskEngine;
 
-    @MockitoBean
+    @TestBean
     private RollupConfig rollupConfig;
 
     @MockitoBean
@@ -68,13 +69,14 @@ public class TraceServiceClientTest extends TestBase {
     @MockitoBean(name = "l1ChainId")
     private BigInteger l1ChainId;
 
-    private TraceServiceGrpc.TraceServiceBlockingStub stub = mock(TraceServiceGrpc.TraceServiceBlockingStub.class);
+    private TraceServiceGrpc.TraceServiceBlockingStub stub;
 
     @Resource
     private TraceServiceClient traceServiceClient;
 
     @Before
     public void init() {
+        stub = mock(TraceServiceGrpc.TraceServiceBlockingStub.class);
         traceServiceClient.setStub(stub);
     }
 
@@ -118,5 +120,125 @@ public class TraceServiceClientTest extends TestBase {
 
         Assert.assertThrows(RemoteServiceRetryException.class, () -> traceServiceClient.getBasicTrace(BigInteger.ONE));
         verify(stub, times(5)).getBasicTrace(notNull());
+    }
+
+    // ==================== Negative Case Tests ====================
+
+    /**
+     * Test fetch basic trace when tracer service is unavailable
+     */
+    @Test
+    public void testFetchBasicTrace_ServiceUnavailable() {
+        when(stub.fetchBasicTrace(notNull())).thenThrow(new RuntimeException("Tracer service unavailable"));
+
+        Assert.assertThrows(RuntimeException.class,
+            () -> traceServiceClient.fetchBasicTrace(BigInteger.ONE, BigInteger.valueOf(3)));
+    }
+
+    /**
+     * Test fetch basic trace when stream returns null
+     */
+    @Test
+    public void testFetchBasicTrace_NullInStream() {
+        when(stub.fetchBasicTrace(notNull())).thenReturn(
+            ListUtil.toList(BASIC_BLOCK_TRACE1, null, BASIC_BLOCK_TRACE2).stream().iterator()
+        );
+
+        Assert.assertThrows(RuntimeException.class,
+            () -> traceServiceClient.fetchBasicTrace(BigInteger.ONE, BigInteger.valueOf(4)));
+    }
+
+    /**
+     * Test get basic trace when block is not stable yet
+     */
+    @Test
+    public void testGetBasicTrace_BlockNotStable() {
+        when(stub.getBasicTrace(notNull())).thenReturn(
+                GetBasicTraceResponse.newBuilder()
+                    .setBasicTrace(BASIC_BLOCK_TRACE1)
+                    .setStableBlockNumber(5)
+                    .setStatus(L2Status.newBuilder()
+                        .setErrorCode(L2ErrorCode.L2_TRACER_ERROR_INVALID_BLOCK_NUMBER)
+                        .setErrorMessage("Block not stable yet"))
+                    .build()
+        );
+
+        Assert.assertThrows(CallRemoteServiceFailedException.class,
+            () -> traceServiceClient.getBasicTrace(BigInteger.valueOf(20)));
+    }
+
+    /**
+     * Test get basic trace when tracer returns timeout error
+     */
+    @Test
+    public void testGetBasicTrace_Timeout() {
+        when(stub.getBasicTrace(notNull())).thenReturn(
+                GetBasicTraceResponse.newBuilder()
+                    .setBasicTrace(BASIC_BLOCK_TRACE1)
+                    .setStatus(L2Status.newBuilder()
+                        .setErrorCode(L2ErrorCode.L2_TIMEOUT)
+                        .setErrorMessage("Trace generation timeout"))
+                    .build()
+        );
+
+        Assert.assertThrows(RemoteServiceRetryException.class,
+            () -> traceServiceClient.getBasicTrace(BigInteger.ONE));
+    }
+
+    /**
+     * Test get basic trace when block number is invalid
+     */
+    @Test
+    public void testGetBasicTrace_InvalidBlockNumber() {
+        when(stub.getBasicTrace(notNull())).thenReturn(
+                GetBasicTraceResponse.newBuilder()
+                    .setBasicTrace(BASIC_BLOCK_TRACE1)
+                    .setStableBlockNumber(10)
+                    .setStatus(L2Status.newBuilder()
+                        .setErrorCode(L2ErrorCode.L2_TRACER_ERROR_INVALID_BLOCK_NUMBER)
+                        .setErrorMessage("Block number does not exist"))
+                    .build()
+        );
+
+        Assert.assertThrows(CallRemoteServiceFailedException.class,
+            () -> traceServiceClient.getBasicTrace(BigInteger.valueOf(100)));
+    }
+
+    /**
+     * Test fetch basic trace when range is invalid
+     */
+    @Test
+    public void testFetchBasicTrace_InvalidRange() {
+        when(stub.fetchBasicTrace(notNull())).thenReturn(
+            ListUtil.<BasicBlockTrace>empty().stream().iterator()
+        );
+
+        List<BasicBlockTrace> traces = traceServiceClient.fetchBasicTrace(BigInteger.valueOf(10), BigInteger.ONE);
+        Assert.assertEquals(0, traces.size());
+    }
+
+    /**
+     * Test get basic trace with multiple retries until success
+     */
+    @Test
+    public void testGetBasicTrace_RetryUntilSuccess() {
+        when(stub.getBasicTrace(notNull())).thenReturn(
+                GetBasicTraceResponse.newBuilder()
+                    .setBasicTrace(BASIC_BLOCK_TRACE1)
+                    .setStatus(L2Status.newBuilder().setErrorCode(L2ErrorCode.L2_RESOURCE_EXHAUSTED))
+                    .build(),
+                GetBasicTraceResponse.newBuilder()
+                    .setBasicTrace(BASIC_BLOCK_TRACE1)
+                    .setStatus(L2Status.newBuilder().setErrorCode(L2ErrorCode.L2_RESOURCE_EXHAUSTED))
+                    .build(),
+                GetBasicTraceResponse.newBuilder()
+                    .setBasicTrace(BASIC_BLOCK_TRACE1)
+                    .setStatus(L2Status.newBuilder().setErrorCode(L2ErrorCode.L2_OK))
+                    .build()
+        );
+
+        // Should succeed after retries
+        BasicBlockTrace res = traceServiceClient.getBasicTrace(BigInteger.ONE);
+        Assert.assertEquals(1L, res.getHeader().getNumber());
     }
 }

@@ -23,7 +23,6 @@ import java.util.Set;
 import java.util.concurrent.locks.Lock;
 import java.util.stream.Collectors;
 
-import cn.hutool.core.collection.ListUtil;
 import cn.hutool.core.util.ObjectUtil;
 import com.alipay.antchain.l2.relayer.commons.enums.ActiveNodeStatusEnum;
 import com.alipay.antchain.l2.relayer.commons.enums.BizTaskTypeEnum;
@@ -40,34 +39,62 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 /**
- * Dispatcher负责拆分区块链任务，并根据节点心跳表获取在线节点排值班表
+ * Dispatcher is responsible for distributing blockchain tasks and scheduling duty shifts
+ * based on the node heartbeat table to obtain online nodes.
+ * <p>
+ * The dispatcher performs the following operations:
+ * <ul>
+ *   <li>Updates the status of all nodes based on heartbeat information</li>
+ *   <li>Filters tasks that are already in time slices or have offline nodes</li>
+ *   <li>Assigns time slices to remaining tasks using round-robin algorithm</li>
+ *   <li>Ensures BLOCK_POLLING_TASK continuity on the same node when possible</li>
+ * </ul>
+ * </p>
  */
 @Component
 @Slf4j
 public class Dispatcher {
 
-    private final List<IDistributedTask> runningTaskList = ListUtil.toList(
-            new BizDistributedTask(BizTaskTypeEnum.BLOCK_POLLING_TASK),
-            new BizDistributedTask(BizTaskTypeEnum.BATCH_PROVE_TASK),
-            new BizDistributedTask(BizTaskTypeEnum.BATCH_COMMIT_TASK),
-            new BizDistributedTask(BizTaskTypeEnum.PROOF_COMMIT_TASK),
-            new BizDistributedTask(BizTaskTypeEnum.RELIABLE_TX_TASK),
-            new BizDistributedTask(BizTaskTypeEnum.L1_BLOCK_POLLING_TASK),
-            new BizDistributedTask(BizTaskTypeEnum.L1MSG_PROCESS_TASK),
-            new BizDistributedTask(BizTaskTypeEnum.L2MSG_PROVE_TASK),
-            new BizDistributedTask(BizTaskTypeEnum.ORACLE_GAS_FEED_TASK)
-    );
+    /**
+     * List of all running distributed tasks.
+     */
+    @Resource
+    private List<IDistributedTask> runningTaskList;
 
+    /**
+     * Repository for schedule-related data operations.
+     */
     @Resource
     private IScheduleRepository scheduleRepository;
 
+    /**
+     * The length of time slice for each task execution (in milliseconds).
+     */
     @Value("#{duty.timeSliceLength}")
     private long timeSliceLength;
 
+    /**
+     * Time-to-live for node heartbeat (in milliseconds).
+     * <p>
+     * If a node's last heartbeat exceeds this duration, it will be considered offline.
+     * </p>
+     */
     @Getter
     @Value("${l2-relayer.engine.schedule.activate.ttl:5000}")
     private long nodeTimeToLive;
 
+    /**
+     * Dispatches distributed tasks to online nodes.
+     * <p>
+     * This method performs the following steps:
+     * <ol>
+     *   <li>Acquires the dispatch lock to ensure single dispatcher execution</li>
+     *   <li>Updates and retrieves the list of online nodes</li>
+     *   <li>Filters tasks that need to be dispatched</li>
+     *   <li>Assigns tasks to nodes using round-robin algorithm</li>
+     * </ol>
+     * </p>
+     */
     public void dispatch() {
         Lock lock = getDistributeLock();
         if (!lock.tryLock()) {

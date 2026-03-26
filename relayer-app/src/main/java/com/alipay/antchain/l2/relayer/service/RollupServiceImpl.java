@@ -25,6 +25,7 @@ import cn.hutool.core.util.ObjectUtil;
 import com.alipay.antchain.l2.relayer.commons.enums.*;
 import com.alipay.antchain.l2.relayer.commons.exceptions.*;
 import com.alipay.antchain.l2.relayer.commons.l2basic.BatchHeader;
+import com.alipay.antchain.l2.relayer.commons.l2basic.da.IDaService;
 import com.alipay.antchain.l2.relayer.commons.merkle.AppendMerkleTree;
 import com.alipay.antchain.l2.relayer.commons.models.BatchProveRequestDO;
 import com.alipay.antchain.l2.relayer.commons.models.BatchWrapper;
@@ -47,6 +48,7 @@ import jakarta.annotation.Resource;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.TransactionStatus;
@@ -98,6 +100,10 @@ public class RollupServiceImpl implements IRollupService {
 
     @Resource
     private RollupConfig rollupConfig;
+
+    @Lazy
+    @Resource
+    private IDaService daService;
 
     @Value("${l2-relayer.tasks.block-polling.l2.max-poling-block-size:32}")
     private int maxPollingBlockSize;
@@ -233,7 +239,10 @@ public class RollupServiceImpl implements IRollupService {
 
     @Override
     public void commitL2Batch() {
-        if (!rollupThrottle.checkL1BlobPoolTraffic()) {
+        if (!switch (rollupConfig.getDaType()) {
+            case BLOBS -> rollupThrottle.checkL1BlobPoolTraffic();
+            case DAS -> rollupThrottle.checkL1LegacyPoolTraffic();
+        }) {
             log.warn("too many l1 txns is pending, so skip this committing process");
             return;
         }
@@ -407,7 +416,8 @@ public class RollupServiceImpl implements IRollupService {
                     throw new CommitL2BatchException("null batch for {}", nextBatchIndex);
                 }
             } else {
-                if (ReliableTransactionStateEnum.considerAsSuccess(txCommitted.getState())) {
+                // Double check that the latest committed definitely less than the next batch index
+                if (ReliableTransactionStateEnum.considerAsSuccess(txCommitted.getState()) && l1Client.lastCommittedBatch().compareTo(nextBatchIndex) < 0) {
                     log.error("🚨 tx {} shows batch {} commit success but not on contract, recommit it! ", txCommitted.getLatestTxHash(), txCommitted.getBatchIndex());
                     nextBatch = rollupRepository.getBatch(nextBatchIndex);
                     if (ObjectUtil.isNull(nextBatch)) {
@@ -428,7 +438,11 @@ public class RollupServiceImpl implements IRollupService {
 
         TransactionInfo transactionInfo;
         try {
-            transactionInfo = l1Client.commitBatch(nextBatch);
+            transactionInfo = switch (rollupConfig.getDaType()) {
+                case BLOBS -> l1Client.commitBatch(nextBatch);
+                // use local dummy da service for now 🤪
+                case DAS -> l1Client.commitBatch(nextBatch, daService.endorseBatch(nextBatch));
+            };
         } catch (L1ContractWarnException e) {
             log.info("rollup contract shows that batch {} has been committed", nextBatch.getBatchHeader().getBatchIndex());
             return;
@@ -465,7 +479,8 @@ public class RollupServiceImpl implements IRollupService {
             if (ObjectUtil.isNull(txCommitted)) {
                 log.error("🚨 has no tx info for tee proof of batch {} but record its index as committed, recommit it !!!", nextBatchIdxToCommitTeeProof);
             } else {
-                if (ReliableTransactionStateEnum.considerAsSuccess(txCommitted.getState())) {
+                // Double check that the latest committed definitely less than the next batch index
+                if (ReliableTransactionStateEnum.considerAsSuccess(txCommitted.getState()) && l1Client.lastTeeVerifiedBatch().compareTo(nextBatchIdxToCommitTeeProof) < 0) {
                     log.error("🚨 tx {} shows tee proof of batch {} commit success but not on contract, recommit it! ",
                             txCommitted.getLatestTxHash(), txCommitted.getBatchIndex());
                 } else if (ReliableTransactionStateEnum.considerAsFailed(txCommitted.getState())) {
@@ -525,7 +540,8 @@ public class RollupServiceImpl implements IRollupService {
             if (ObjectUtil.isNull(txCommitted)) {
                 log.error("🚨 has no tx info for zk proof of batch {} but record its index as committed, recommit it !!!", nextBatchIdxToCommitZkProof);
             } else {
-                if (ReliableTransactionStateEnum.considerAsSuccess(txCommitted.getState())) {
+                // Double check that the latest committed definitely less than the next batch index
+                if (ReliableTransactionStateEnum.considerAsSuccess(txCommitted.getState()) && l1Client.lastZkVerifiedBatch().compareTo(nextBatchIdxToCommitZkProof) < 0) {
                     log.error("🚨 tx {} shows zk proof of batch {} commit success but not on contract, recommit it! ",
                             txCommitted.getLatestTxHash(), txCommitted.getBatchIndex());
                 } else if (ReliableTransactionStateEnum.considerAsFailed(txCommitted.getState())) {

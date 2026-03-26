@@ -21,16 +21,12 @@ import java.math.BigInteger;
 
 import cn.hutool.core.util.RandomUtil;
 import com.alipay.antchain.l2.relayer.TestBase;
-import com.alipay.antchain.l2.relayer.commons.enums.ChainTypeEnum;
 import com.alipay.antchain.l2.relayer.commons.exceptions.TxNotFoundButRetryException;
 import com.alipay.antchain.l2.relayer.commons.l2basic.L1MsgTransaction;
 import com.alipay.antchain.l2.relayer.commons.models.TransactionInfo;
-import com.alipay.antchain.l2.relayer.config.BlockchainConfig;
 import com.alipay.antchain.l2.relayer.config.RollupConfig;
-import com.alipay.antchain.l2.relayer.core.blockchain.helper.AcbFastRawTransactionManager;
-import com.alipay.antchain.l2.relayer.core.blockchain.helper.AcbRawTransactionManager;
-import com.alipay.antchain.l2.relayer.core.blockchain.helper.BaseRawTransactionManager;
-import com.alipay.antchain.l2.relayer.core.blockchain.helper.IGasPriceProvider;
+import com.alipay.antchain.l2.relayer.config.SubChainConfig;
+import com.alipay.antchain.l2.relayer.core.blockchain.helper.*;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.model.EthNoncePolicyEnum;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.model.GasLimitPolicyEnum;
 import com.alipay.antchain.l2.relayer.engine.DistributedTaskEngine;
@@ -43,6 +39,7 @@ import org.junit.Before;
 import org.junit.Test;
 import org.redisson.api.RedissonClient;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.test.context.bean.override.convention.TestBean;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.DefaultBlockParameterName;
@@ -67,14 +64,16 @@ public class L2ClientTest extends TestBase {
     private Web3j l2Web3j;
     @MockitoBean(name = "l2ChainId")
     private BigInteger l2ChainId;
-    @MockitoBean
+    @TestBean
     private RollupConfig rollupConfig;
     @MockitoBean
     private DistributedTaskEngine distributedTaskEngine;
     @MockitoBean
     private L2Client l2Client;
     @Resource
-    private BlockchainConfig blockchainConfig;
+    private SubChainConfig subChainConfig;
+    @Resource
+    private INonceManager l2NonceManager;
     @MockitoBean(name = "l2TransactionManager")
     private BaseRawTransactionManager l2TransactionManager;
     @Resource(name = "l2GasPriceProvider")
@@ -109,8 +108,8 @@ public class L2ClientTest extends TestBase {
         when(l2Web3j.ethGetCode(notNull(), any())).thenReturn(ethGetCodeReq);
 
         var l2TxManager = l2NoncePolicy == EthNoncePolicyEnum.FAST ?
-                new AcbFastRawTransactionManager(l2Web3j, blockchainConfig.getL2TxSignService(), 123, redisson, null, ChainTypeEnum.LAYER_ONE, null)
-                : new AcbRawTransactionManager(l2Web3j, blockchainConfig.getL2TxSignService(), 123, redisson, null);
+                new AcbFastRawTransactionManager(l2Web3j, subChainConfig.getL2TxSignService(), 123, redisson, null, l2NonceManager)
+                : new AcbRawTransactionManager(l2Web3j, subChainConfig.getL2TxSignService(), 123, redisson, null, l2NonceManager);
         testClient = new L2Client(
                 l2Web3j, l2TxManager,
                 l2GasPriceProvider, mockGasOracleContract, mockCoinbaseContract, gasLimitPolicy, extraGas, staticGasLimit
@@ -332,5 +331,164 @@ public class L2ClientTest extends TestBase {
         ethSendTransaction.setResult(txHash);
         when(ethSendRawReq.send()).thenReturn(ethSendTransaction);
         when(l2Web3j.ethSendRawTransaction(any())).thenReturn(ethSendRawReq);
+    }
+
+    // ==================== Negative Case Tests ====================
+
+    /**
+     * Test send L1 message transaction when RPC fails
+     */
+    @Test
+    @SneakyThrows
+    public void testSendL1MsgTx_RPCFailure() {
+        L1MsgTransaction tx = new L1MsgTransaction(BigInteger.ONE, BigInteger.valueOf(1_000), "123");
+
+        Request ethSendRawTxReq = mock(Request.class);
+        when(ethSendRawTxReq.send()).thenThrow(new IOException("Connection refused"));
+        when(l2Web3j.ethSendRawTransaction(anyString())).thenReturn(ethSendRawTxReq);
+
+        Request ethGetTransactionCountReq = mock(Request.class);
+        EthGetTransactionCount ethGetTransactionCount = new EthGetTransactionCount();
+        ethGetTransactionCount.setResult("111");
+        when(ethGetTransactionCountReq.send()).thenReturn(ethGetTransactionCount);
+        when(l2Web3j.ethGetTransactionCount(anyString(), notNull())).thenReturn(ethGetTransactionCountReq);
+
+        Assert.assertThrows(IOException.class, () -> testClient.sendL1MsgTx(tx));
+    }
+
+    /**
+     * Test query L2 gas oracle when contract call fails
+     */
+    @Test
+    @SneakyThrows
+    public void testQueryL2GasOracle_ContractCallFailure() {
+        Request ethCallReq = mock(Request.class);
+        when(ethCallReq.send()).thenThrow(new IOException("RPC timeout"));
+        when(l2Web3j.ethCall(notNull(), notNull())).thenReturn(ethCallReq);
+
+        Assert.assertThrows(RuntimeException.class, () -> testClient.queryL2GasOracleLastBatchDaFee());
+    }
+
+    /**
+     * Test query L2 gas oracle when result is null
+     */
+    @Test
+    @SneakyThrows
+    public void testQueryL2GasOracle_NullResult() {
+        Request ethCallReq = mock(Request.class);
+        EthCall result = new EthCall();
+        result.setResult(null);
+        when(ethCallReq.send()).thenReturn(result);
+        when(l2Web3j.ethCall(notNull(), notNull())).thenReturn(ethCallReq);
+
+        Assert.assertThrows(RuntimeException.class, () -> testClient.queryL2GasOracleLastBatchExecFee());
+    }
+
+    /**
+     * Test update batch rollup fee when gas estimation fails
+     */
+    @Test
+    @SneakyThrows
+    public void testUpdateBatchRollupFee_GasEstimationFailure() {
+        Request ethGetBlockByNumberReq = mock(Request.class);
+        EthBlock ethBlock = new EthBlock();
+        EthBlock.Block block = new EthBlock.Block();
+        block.setBaseFeePerGas("123");
+        ethBlock.setResult(block);
+        when(ethGetBlockByNumberReq.send()).thenReturn(ethBlock);
+        when(l2Web3j.ethGetBlockByNumber(eq(DefaultBlockParameterName.LATEST), anyBoolean())).thenReturn(ethGetBlockByNumberReq);
+
+        Request ethEstimateGasReq = mock(Request.class);
+        when(ethEstimateGasReq.send()).thenThrow(new IOException("Gas estimation failed"));
+        when(l2Web3j.ethEstimateGas(any())).thenReturn(ethEstimateGasReq);
+
+        Request ethMaxPriorityFeePerGasReq = mock(Request.class);
+        EthMaxPriorityFeePerGas ethMaxPriorityFeePerGas = new EthMaxPriorityFeePerGas();
+        ethMaxPriorityFeePerGas.setResult("1111111");
+        when(ethMaxPriorityFeePerGasReq.send()).thenReturn(ethMaxPriorityFeePerGas);
+        when(l2Web3j.ethMaxPriorityFeePerGas()).thenReturn(ethMaxPriorityFeePerGasReq);
+
+        Assert.assertThrows(IOException.class, () ->
+                testClient.updateBatchRollupFee(BigInteger.ONE, BigInteger.ONE, BigInteger.ONE));
+    }
+
+    /**
+     * Test update base fee scala when transaction fails
+     */
+    @Test
+    @SneakyThrows
+    public void testUpdateBaseFeeScala_TransactionFailure() {
+        Request ethGetBlockByNumberReq = mock(Request.class);
+        EthBlock ethBlock = new EthBlock();
+        EthBlock.Block block = new EthBlock.Block();
+        block.setBaseFeePerGas("123");
+        ethBlock.setResult(block);
+        when(ethGetBlockByNumberReq.send()).thenReturn(ethBlock);
+        when(l2Web3j.ethGetBlockByNumber(eq(DefaultBlockParameterName.LATEST), anyBoolean())).thenReturn(ethGetBlockByNumberReq);
+
+        Request ethEstimateGasReq = mock(Request.class);
+        EthEstimateGas ethEstimateGas = new EthEstimateGas();
+        ethEstimateGas.setResult("10000");
+        when(ethEstimateGasReq.send()).thenReturn(ethEstimateGas);
+        when(l2Web3j.ethEstimateGas(any())).thenReturn(ethEstimateGasReq);
+
+        Request ethMaxPriorityFeePerGasReq = mock(Request.class);
+        EthMaxPriorityFeePerGas ethMaxPriorityFeePerGas = new EthMaxPriorityFeePerGas();
+        ethMaxPriorityFeePerGas.setResult("1111111");
+        when(ethMaxPriorityFeePerGasReq.send()).thenReturn(ethMaxPriorityFeePerGas);
+        when(l2Web3j.ethMaxPriorityFeePerGas()).thenReturn(ethMaxPriorityFeePerGasReq);
+
+        Request ethGetTransactionCountReq = mock(Request.class);
+        EthGetTransactionCount ethGetTransactionCount = new EthGetTransactionCount();
+        ethGetTransactionCount.setResult("111");
+        when(ethGetTransactionCountReq.send()).thenReturn(ethGetTransactionCount);
+        when(l2Web3j.ethGetTransactionCount(anyString(), eq(DefaultBlockParameterName.PENDING))).thenReturn(ethGetTransactionCountReq);
+
+        Request ethSendRawReq = mock(Request.class);
+        when(ethSendRawReq.send()).thenThrow(new IOException("Insufficient funds"));
+        when(l2Web3j.ethSendRawTransaction(any())).thenReturn(ethSendRawReq);
+
+        Assert.assertThrows(RuntimeException.class, () ->
+                testClient.updateBaseFeeScala(BigInteger.ONE, BigInteger.ONE));
+    }
+
+    /**
+     * Test query transaction with retry when nonce mismatch
+     */
+    @Test
+    @SneakyThrows
+    public void testQueryTxWithRetry_NonceMismatch() {
+        Request ethGetTransactionByHashReq = mock(Request.class);
+        var ethTransactionNull = new EthTransaction();
+        ethTransactionNull.setResult(null);
+        when(ethGetTransactionByHashReq.send()).thenReturn(ethTransactionNull);
+        when(l2Web3j.ethGetTransactionByHash(anyString())).thenReturn(ethGetTransactionByHashReq);
+
+        Request ethGetTransactionCountReq = mock(Request.class);
+        var ethGetTransactionCount = new EthGetTransactionCount();
+        ethGetTransactionCount.setResult("0x5");
+        when(ethGetTransactionCountReq.send()).thenReturn(ethGetTransactionCount);
+        when(l2Web3j.ethGetTransactionCount(anyString(), notNull())).thenReturn(ethGetTransactionCountReq);
+
+        // Nonce is 1 but current nonce is 5, should return null
+        var res = testClient.queryTxWithRetry("test", "test", BigInteger.ONE);
+        Assert.assertNull(res);
+    }
+
+    /**
+     * Test withdraw vault when network error occurs
+     */
+    @Test
+    @SneakyThrows
+    public void testWithdrawVault_NetworkError() {
+        Request ethMaxPriorityFeePerGasReq = mock(Request.class);
+        when(ethMaxPriorityFeePerGasReq.send()).thenThrow(new IOException("Network unreachable"));
+        when(l2Web3j.ethMaxPriorityFeePerGas()).thenReturn(ethMaxPriorityFeePerGasReq);
+        try {
+            testClient.withdrawVault(mockSender, BigInteger.ONE);
+            Assert.fail("Should throw exception");
+        } catch (Exception e) {
+            Assert.assertTrue(e.getCause().getCause().getMessage().contains("Network unreachable"));
+        }
     }
 }

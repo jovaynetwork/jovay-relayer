@@ -16,24 +16,26 @@
 
 package com.alipay.antchain.l2.relayer.engine.executor;
 
+import java.util.concurrent.ExecutorService;
+
 import com.alipay.antchain.l2.relayer.commons.models.IDistributedTask;
 import com.alipay.antchain.l2.relayer.engine.checker.IDistributedTaskChecker;
 import com.alipay.antchain.l2.relayer.service.IOracleService;
+import jakarta.annotation.PreDestroy;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
-
-import jakarta.annotation.PreDestroy;
-import jakarta.annotation.Resource;
-import java.util.concurrent.ExecutorService;
 
 @Component
 @Slf4j
 public class OracleGasFeedTaskExecutor extends BaseScheduleTaskExecutor {
 
     @Resource
+    @Lazy
     private IOracleService oracleService;
 
     @Autowired

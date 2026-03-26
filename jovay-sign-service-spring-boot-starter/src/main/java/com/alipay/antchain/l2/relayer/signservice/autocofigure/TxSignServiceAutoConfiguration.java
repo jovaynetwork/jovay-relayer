@@ -23,6 +23,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.Environment;
 
 @Configuration
 @EnableConfigurationProperties({TxSignServicesProperties.class})
@@ -32,9 +33,10 @@ public class TxSignServiceAutoConfiguration {
     @Bean
     public static TxSignServiceBeanPostProcessor txSignServiceBeanPostProcessor(
             TxSignServicesProperties txSignServicesProperties,
-            TxSignServiceFactory txSignServiceFactory
+            TxSignServiceFactory txSignServiceFactory,
+            Environment environment
     ) {
-        return new TxSignServiceBeanPostProcessor(txSignServicesProperties, txSignServiceFactory);
+        return new TxSignServiceBeanPostProcessor(txSignServicesProperties, txSignServiceFactory, environment);
     }
 
     @Bean

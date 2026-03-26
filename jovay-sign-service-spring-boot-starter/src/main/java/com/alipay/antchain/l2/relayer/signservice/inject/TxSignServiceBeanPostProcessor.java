@@ -26,7 +26,9 @@ import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.BeanDefinitionStoreException;
 import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.core.annotation.AnnotationUtils;
+import org.springframework.core.env.Environment;
 import org.springframework.util.ReflectionUtils;
+import org.springframework.util.StringUtils;
 
 public class TxSignServiceBeanPostProcessor implements BeanPostProcessor {
 
@@ -34,12 +36,16 @@ public class TxSignServiceBeanPostProcessor implements BeanPostProcessor {
 
     private final TxSignServiceFactory txSignServiceFactory;
 
+    private final Environment environment;
+
     public TxSignServiceBeanPostProcessor(
             @NonNull TxSignServicesProperties txSignServicesProperties,
-            @NonNull TxSignServiceFactory txSignServiceFactory
+            @NonNull TxSignServiceFactory txSignServiceFactory,
+            @NonNull Environment environment
     ) {
         this.txSignServicesProperties = txSignServicesProperties;
         this.txSignServiceFactory = txSignServiceFactory;
+        this.environment = environment;
     }
 
     @Override
@@ -65,6 +71,11 @@ public class TxSignServiceBeanPostProcessor implements BeanPostProcessor {
         for (final Field field : clazz.getDeclaredFields()) {
             final JovayTxSignService annotation = AnnotationUtils.findAnnotation(field, JovayTxSignService.class);
             if (annotation != null) {
+                // Check conditional property if specified
+                if (!shouldInject(annotation)) {
+                    continue;
+                }
+
                 var name = annotation.value();
                 var properties = txSignServicesProperties.getSignService().get(name);
                 if (null == properties) {
@@ -76,7 +87,6 @@ public class TxSignServiceBeanPostProcessor implements BeanPostProcessor {
         }
     }
 
-
     /**
      * Processes the bean's methods in the given class.
      *
@@ -87,6 +97,11 @@ public class TxSignServiceBeanPostProcessor implements BeanPostProcessor {
         for (final Method method : clazz.getDeclaredMethods()) {
             final JovayTxSignService annotation = AnnotationUtils.findAnnotation(method, JovayTxSignService.class);
             if (annotation != null) {
+                // Check conditional property if specified
+                if (!shouldInject(annotation)) {
+                    continue;
+                }
+
                 final Class<?>[] paramTypes = method.getParameterTypes();
                 if (paramTypes.length != 1) {
                     throw new BeanDefinitionStoreException(
@@ -101,5 +116,49 @@ public class TxSignServiceBeanPostProcessor implements BeanPostProcessor {
                 ReflectionUtils.invokeMethod(method, bean, txSignServiceFactory.createTxSignService(name, properties));
             }
         }
+    }
+
+    /**
+     * Checks if the service should be injected based on conditional properties.
+     *
+     * @param annotation The JovayTxSignService annotation
+     * @return true if the service should be injected, false otherwise
+     */
+    private boolean shouldInject(JovayTxSignService annotation) {
+        String[] conditionalProperties = annotation.conditionalProperty();
+
+        // If no conditional property is specified, always inject
+        if (conditionalProperties == null || conditionalProperties.length == 0) {
+            return true;
+        }
+
+        String havingValue = annotation.conditionalPropertyHavingValue();
+        boolean matchIfMissing = annotation.conditionalPropertyMatchIfMissing();
+
+        // Check all conditional properties (AND logic)
+        for (String propertyName : conditionalProperties) {
+            if (!StringUtils.hasText(propertyName)) {
+                continue;
+            }
+
+            String propertyValue = environment.getProperty(propertyName);
+
+            // If property is missing
+            if (propertyValue == null) {
+                if (!matchIfMissing) {
+                    return false;
+                }
+                continue;
+            }
+
+            // If havingValue is specified, check if property value matches
+            if (StringUtils.hasText(havingValue)) {
+                if (!havingValue.equals(propertyValue)) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
     }
 }

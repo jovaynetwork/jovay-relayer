@@ -31,6 +31,7 @@ import com.alipay.antchain.l2.relayer.commons.exceptions.InvalidChunkException;
 import com.alipay.antchain.l2.relayer.commons.l2basic.BatchVersionEnum;
 import com.alipay.antchain.l2.relayer.commons.l2basic.BlobsDaData;
 import com.alipay.antchain.l2.relayer.commons.l2basic.ChunksPayload;
+import com.alipay.antchain.l2.relayer.commons.l2basic.da.IDaService;
 import com.alipay.antchain.l2.relayer.commons.models.BatchWrapper;
 import com.alipay.antchain.l2.relayer.commons.models.ChunkWrapper;
 import com.alipay.antchain.l2.relayer.commons.specs.IRollupSpecs;
@@ -45,6 +46,7 @@ import com.alipay.antchain.l2.trace.BasicBlockTrace;
 import jakarta.annotation.Resource;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -75,6 +77,10 @@ public class RollupAggregator implements IRollupAggregator {
      */
     @Resource
     private GrowingBatchChunksMemCache growingBatchChunks;
+
+    @Lazy
+    @Resource
+    private IDaService daService;
 
     @Override
     public BigInteger process(BasicBlockTrace blockTrace) {
@@ -201,7 +207,14 @@ public class RollupAggregator implements IRollupAggregator {
                     rollupRepository.createBatchProveRequest(nextBatch.getBatch().getBatchIndex(), ProveTypeEnum.ZK_PROOF);
                 }
 
-                rollupRepository.saveBatch(nextBatch);
+                switch (rollupConfig.getDaType()) {
+                    case BLOBS -> rollupRepository.saveBatch(nextBatch);
+                    // Ideally, the batch data should be uploaded to the DAS asynchronously,
+                    // and more design work will be introduced in the future.
+                    // Currently, a local dummy DA service is used in the Relayer,
+                    // so performance and latency are not considered for now. 🤪
+                    case DAS -> daService.uploadBatch(nextBatch);
+                }
                 rollupRepository.updateRollupNumberRecord(
                         ChainTypeEnum.LAYER_TWO, RollupNumberRecordTypeEnum.NEXT_BATCH,
                         nextBatchIndex.add(BigInteger.ONE)

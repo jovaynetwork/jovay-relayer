@@ -122,6 +122,8 @@ public class Batch {
         this.payload = new ChunksPayload(version, chunks);
         if (ObjectUtil.isNull(daData)) {
             this.daData = BlobsDaData.buildFrom(version, this.payload);
+        } else {
+            this.daData = daData;
         }
 
         this.batchHeader = BatchHeader.builder()

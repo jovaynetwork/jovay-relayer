@@ -35,10 +35,12 @@ import cn.hutool.core.util.StrUtil;
 import com.alipay.antchain.l2.relayer.commons.abi.IMailBoxBase;
 import com.alipay.antchain.l2.relayer.commons.abi.Rollup;
 import com.alipay.antchain.l2.relayer.commons.enums.ChainTypeEnum;
+import com.alipay.antchain.l2.relayer.commons.enums.DaType;
 import com.alipay.antchain.l2.relayer.commons.enums.TransactionTypeEnum;
 import com.alipay.antchain.l2.relayer.commons.exceptions.*;
 import com.alipay.antchain.l2.relayer.commons.l2basic.FusakaTransaction4844;
 import com.alipay.antchain.l2.relayer.commons.l2basic.L1MsgTransaction;
+import com.alipay.antchain.l2.relayer.commons.l2basic.da.DaProof;
 import com.alipay.antchain.l2.relayer.commons.models.*;
 import com.alipay.antchain.l2.relayer.commons.utils.EthTxDecoder;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.BaseRawTransactionManager;
@@ -122,10 +124,13 @@ public class L1Client extends AbstractWeb3jClient implements L1ClientInterface {
     @Resource
     private IContractErrorParser contractErrorParser;
 
+    @Value("${l2-relayer.rollup.da-type:BLOBS}")
+    private DaType daType;
+
     @Autowired
     public L1Client(
             @Qualifier("l1Web3j") Web3j l1Web3j,
-            @Qualifier("l1BlobPoolTxTransactionManager") BaseRawTransactionManager l1BlobPoolTxTransactionManager,
+            @Autowired(required = false) @Qualifier("l1BlobPoolTxTransactionManager") BaseRawTransactionManager l1BlobPoolTxTransactionManager,
             @Qualifier("l1LegacyPoolTxTransactionManager") BaseRawTransactionManager l1LegacyPoolTxTransactionManager,
             @Qualifier("l1GasPriceProvider") IGasPriceProvider l1GasPriceProvider,
             @Value("${l2-relayer.l1-client.gas-limit-policy:STATIC}") GasLimitPolicyEnum gasLimitPolicy,
@@ -151,7 +156,8 @@ public class L1Client extends AbstractWeb3jClient implements L1ClientInterface {
                 staticGasLimit,
                 rollupEconomicStrategy
         );
-        if (StrUtil.equalsIgnoreCase(l1BlobPoolTxTransactionManager.getAddress(), l1LegacyPoolTxTransactionManager.getAddress())) {
+        if (ObjectUtil.isNotNull(l1BlobPoolTxTransactionManager)
+                && StrUtil.equalsIgnoreCase(l1BlobPoolTxTransactionManager.getAddress(), l1LegacyPoolTxTransactionManager.getAddress())) {
             throw new RuntimeException("same accounts for blob and legacy pool is not allowed on L1");
         }
         this.rollupContractAddress = rollupContractAddress;
@@ -169,16 +175,31 @@ public class L1Client extends AbstractWeb3jClient implements L1ClientInterface {
     @WithSpan
     @Retryable(retryFor = {TxSimulateException.class, ClientConnectionException.class, SocketException.class, SocketTimeoutException.class}, backoff = @Backoff(delay = 300))
     public TransactionInfo commitBatch(BatchWrapper batchWrapper) throws L2RelayerException {
-        log.info("start sending tx to commit batch#{} with retry {}", batchWrapper.getBatchIndex(),
+        log.info("start sending tx to commit batch#{} to L1 with retry {}", batchWrapper.getBatchIndex(),
                 ObjectUtil.isNull(RetrySynchronizationManager.getContext()) ? 0 : RetrySynchronizationManager.getContext().getRetryCount());
         selfReportMetric.recordStart(RollupMetricRecord.createCommitBatchRecord(batchWrapper.getBatch().getBatchIndex()));
         return commitBatch(batchWrapper, false);
     }
 
+    @WithSpan
+    @Retryable(retryFor = {TxSimulateException.class, ClientConnectionException.class, SocketException.class, SocketTimeoutException.class}, backoff = @Backoff(delay = 300))
+    public TransactionInfo commitBatch(BatchWrapper batchWrapper, DaProof daProof) throws L2RelayerException {
+        log.info("start sending tx to commit batch#{} with DA proof to L2. (retry count: {})", batchWrapper.getBatchIndex(),
+                ObjectUtil.isNull(RetrySynchronizationManager.getContext()) ? 0 : RetrySynchronizationManager.getContext().getRetryCount());
+        selfReportMetric.recordStart(RollupMetricRecord.createCommitBatchRecord(batchWrapper.getBatch().getBatchIndex()));
+        return commitBatchWithDaProof(batchWrapper, daProof, false);
+    }
+
     @Override
     public TransactionInfo commitBatchWithEthCall(BatchWrapper batchWrapper) throws L2RelayerException {
-        log.info("start sending tx to commit batch#{} with eth call", batchWrapper.getBatchIndex());
+        log.info("start sending tx to commit batch#{} to L1 with eth call", batchWrapper.getBatchIndex());
         return commitBatch(batchWrapper, true);
+    }
+
+    @Override
+    public TransactionInfo commitBatchWithEthCall(BatchWrapper batchWrapper, DaProof daProof) throws L2RelayerException {
+        log.info("start sending tx to commit batch#{} to L2 with eth call", batchWrapper.getBatchIndex());
+        return commitBatchWithDaProof(batchWrapper, daProof, true);
     }
 
     @Override
@@ -337,6 +358,9 @@ public class L1Client extends AbstractWeb3jClient implements L1ClientInterface {
         }
         try {
             var rawTransaction = EthTxDecoder.decode(Numeric.toHexString(tx.getRawTx()));
+            if (rawTransaction.getTransaction().getType().isEip4844() && ObjectUtil.isNull(this.getBlobPoolTxManager())) {
+                throw new RuntimeException("blob tx not support, check your DA setting");
+            }
             var currentGasPrice = checkIfSpeedUpTx(tx.getTransactionType(), tx.getBatchIndex(), rawTransaction, tx.getLatestTxSendTime());
             return speedUpRollupTxLogic(tx, rawTransaction, currentGasPrice);
         } finally {
@@ -355,7 +379,10 @@ public class L1Client extends AbstractWeb3jClient implements L1ClientInterface {
                 maxFeePerGas, maxPriorityFeePerGas, maxFeePerBlobGas);
         try {
             var netGasPrice = tx.getTransactionType() == TransactionTypeEnum.BATCH_COMMIT_TX ?
-                    this.getGasPriceProvider().getEip4844GasPrice() :
+                    switch (daType) {
+                        case BLOBS -> this.getGasPriceProvider().getEip4844GasPrice();
+                        case DAS -> this.getGasPriceProvider().getEip1559GasPrice();
+                    } :
                     this.getGasPriceProvider().getEip1559GasPrice();
             var currentGasPrice = netGasPrice instanceof Eip4844GasPrice ?
                     new Eip4844GasPrice(
@@ -466,6 +493,30 @@ public class L1Client extends AbstractWeb3jClient implements L1ClientInterface {
                 batchWrapper.getBatch().getEthBlobs(),
                 getRollupEconomicStrategy().createBatchCommitCostChecker(batchWrapper)
         );
+    }
+
+    private TransactionInfo commitBatchWithDaProof(BatchWrapper batchWrapper, DaProof daProof, boolean ethCall) throws L2RelayerException {
+        // 1. check
+        // 2. create func
+        var function = new Function(
+                Rollup.FUNC_COMMITBATCHWITHDAPROOF, // function name
+                Arrays.asList(
+                        new DynamicBytes(batchWrapper.getBatchHeader().serialize()),
+                        new Uint256(batchWrapper.getTotalL1MessagePopped()),
+                        new DynamicBytes(daProof.proof())
+                ), // inputs
+                Collections.emptyList()// outputs
+        );
+
+        if (ethCall) {
+            var call = ethCall(this.rollupContractAddress, FunctionEncoder.encode(function));
+            if (call.isReverted()) {
+                processFailedEthCall(call, this.rollupContractAddress, function.getName());
+                return null;
+            }
+        }
+
+        return sendTransaction(this.rollupContractAddress, function, getRollupEconomicStrategy().createBatchCommitCostChecker(batchWrapper));
     }
 
     private TransactionInfo verifyBatch(BatchWrapper batchWrapper, BatchProveRequestDO proveReq, boolean ethCall) {

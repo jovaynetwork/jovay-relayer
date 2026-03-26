@@ -164,4 +164,17 @@ public class OracleRepository implements IOracleRepository {
                         .eq(OracleRequestEntity::getRequestIndex, requestIndex)
         ));
     }
+
+    @Override
+    public int deleteBatchOracleRequestsFrom(BigInteger fromBatchIndex) {
+        return oracleRequestMapper.delete(
+                new LambdaQueryWrapper<OracleRequestEntity>()
+                        .eq(OracleRequestEntity::getOracleType, OracleTypeEnum.L2_GAS_ORACLE)
+                        .and(wrapper -> wrapper
+                                .eq(OracleRequestEntity::getOracleTaskType, OracleRequestTypeEnum.L2_BATCH_COMMIT)
+                                .or().eq(OracleRequestEntity::getOracleTaskType, OracleRequestTypeEnum.L2_BATCH_PROVE)
+                        )
+                        .ge(OracleRequestEntity::getRequestIndex, fromBatchIndex)
+        );
+    }
 }

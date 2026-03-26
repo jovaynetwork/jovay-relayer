@@ -90,4 +90,12 @@ public class L2MerkleTreeRepository implements IL2MerkleTreeRepository{
     private String getL2MerkleTreeCacheKey(BigInteger batchIndex) {
         return StrUtil.format("L2_MERKLE_TREE-{}", batchIndex);
     }
+
+    @Override
+    public int deleteMerkleTreesFrom(BigInteger fromBatchIndex) {
+        return l2MerkleTreeMapper.delete(
+                new LambdaQueryWrapper<L2MerkleTreeEntity>()
+                        .ge(L2MerkleTreeEntity::getBatchIndex, fromBatchIndex)
+        );
+    }
 }

@@ -49,7 +49,6 @@ import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.support.TransactionTemplate;
 import org.web3j.crypto.transaction.type.Transaction4844;
 import org.web3j.crypto.transaction.type.TransactionType;
 import org.web3j.protocol.core.DefaultBlockParameterName;
@@ -76,10 +75,7 @@ public class ReliableTxServiceImpl implements IReliableTxService {
     @Resource
     private TraceServiceClient traceServiceClient;
 
-    @Resource
-    private TransactionTemplate transactionTemplate;
-
-    @Value("${l2-relayer.tasks.reliable-tx.process-batch-size:32}")
+    @Value("${l2-relayer.tasks.reliable-tx.process-batch-size:10}")
     private int processBatchSize;
 
     @Value("${l2-relayer.tasks.block-polling.l1.policy:FINALIZED}")
@@ -93,6 +89,12 @@ public class ReliableTxServiceImpl implements IReliableTxService {
 
     @Value("${l2-relayer.tasks.reliable-tx.tx-timeout-limit:600}")
     private int txTimeOutLimitSec;
+
+    @Value("${l2-relayer.tasks.reliable-tx.parent-chain-tx-missed-tolerant-time:5}")
+    private int parentChainTxMissedTolerantTimeSec;
+
+    @Value("${l2-relayer.tasks.reliable-tx.subchain-tx-missed-tolerant-time:5}")
+    private int subChainTxMissedTolerantTimeSec;
 
     @Value("${l2-relayer.l1-client.nonce-policy:NORMAL}")
     private EthNoncePolicyEnum l1NoncePolicy;
@@ -111,19 +113,75 @@ public class ReliableTxServiceImpl implements IReliableTxService {
 
     @Override
     public void processL1NotFinalizedTx() {
-        var reliableTransactions = rollupRepository.getNotFinalizedReliableTransactions(ChainTypeEnum.LAYER_ONE, processBatchSize);
-        if (ObjectUtil.isEmpty(reliableTransactions)) {
-            log.debug("No L1 pending reliable tx found, skip it...");
+        // Process TX_PACKAGED first, then TX_PENDING.
+        // This order prevents duplicate processing since TX_PENDING transactions
+        // may transition to TX_PACKAGED during processing.
+        processL1PackagedStateTx();
+        processL1PendingStateTx();
+    }
+
+    /**
+     * Processes L1 transactions in TX_PACKAGED state.
+     *
+     * <p>TX_PACKAGED transactions are processed using the same logic as TX_PENDING
+     * because block reorganization may cause packaged transactions to become lost
+     * and require re-submission.</p>
+     */
+    private void processL1PackagedStateTx() {
+        var packagedTxList = rollupRepository.getReliableTransactionsByState(
+                ChainTypeEnum.LAYER_ONE,
+                ReliableTransactionStateEnum.TX_PACKAGED,
+                processBatchSize
+        );
+        if (ObjectUtil.isEmpty(packagedTxList)) {
+            log.debug("No L1 TX_PACKAGED reliable tx found, skip it...");
             return;
         }
 
-        for (ReliableTransactionDO tx : reliableTransactions) {
+        for (ReliableTransactionDO tx : packagedTxList) {
             try {
-                processL1PendingTx(tx);
+                processL1UnfinalizedTx(tx);
             } catch (RollupEconomicStrategyNotAllowedException e) {
-                log.warn("l1 gas price too high, skip this tx {}-{}-{}: {}", tx.getChainType(), tx.getTransactionType(), tx.getBatchIndex(), e.getMessage());
+                log.warn("L1 gas price too high, skip packaged tx {}-{}-{}: {}",
+                        tx.getChainType(), tx.getTransactionType(), tx.getBatchIndex(), e.getMessage());
             } catch (Exception e) {
-                log.error("process l1 reliable tx for batch {}-{} failed: ", tx.getTransactionType(), tx.getBatchIndex(), e);
+                log.error("Process L1 packaged tx for batch {}-{} failed: ",
+                        tx.getTransactionType(), tx.getBatchIndex(), e);
+            }
+        }
+    }
+
+    /**
+     * Processes L1 transactions in TX_PENDING state.
+     *
+     * <p>TX_PENDING transactions are checked for:
+     * <ul>
+     *   <li>Transaction loss - resend if transaction is not found on chain</li>
+     *   <li>Timeout - speed up transaction with higher gas price if not packaged within timeout</li>
+     *   <li>Confirmation - update state based on transaction receipt</li>
+     * </ul>
+     * </p>
+     */
+    private void processL1PendingStateTx() {
+        var pendingTxList = rollupRepository.getReliableTransactionsByState(
+                ChainTypeEnum.LAYER_ONE,
+                ReliableTransactionStateEnum.TX_PENDING,
+                processBatchSize
+        );
+        if (ObjectUtil.isEmpty(pendingTxList)) {
+            log.debug("No L1 TX_PENDING reliable tx found, skip it...");
+            return;
+        }
+
+        for (ReliableTransactionDO tx : pendingTxList) {
+            try {
+                processL1UnfinalizedTx(tx);
+            } catch (RollupEconomicStrategyNotAllowedException e) {
+                log.warn("L1 gas price too high, skip pending tx {}-{}-{}: {}",
+                        tx.getChainType(), tx.getTransactionType(), tx.getBatchIndex(), e.getMessage());
+            } catch (Exception e) {
+                log.error("Process L1 pending tx for batch {}-{} failed: ",
+                        tx.getTransactionType(), tx.getBatchIndex(), e);
             }
         }
     }
@@ -189,121 +247,242 @@ public class ReliableTxServiceImpl implements IReliableTxService {
         reliableTransactions.forEach(this::retryL2Tx);
     }
 
-    private void processL1PendingTx(ReliableTransactionDO tx) {
+    /**
+     * Processes a single L1 reliable transaction that is not yet finalized.
+     *
+     * <p>This method handles transactions in both TX_PENDING and TX_PACKAGED states,
+     * as block reorganization may cause packaged transactions to become lost.</p>
+     *
+     * <p>The processing flow:
+     * <ol>
+     *   <li>Check if transaction exists on chain - if not, handle missing transaction</li>
+     *   <li>Check if transaction has receipt - if not, handle unpackaged transaction</li>
+     *   <li>Process transaction based on receipt status</li>
+     * </ol>
+     * </p>
+     *
+     * @param tx the reliable transaction to process
+     */
+    private void processL1UnfinalizedTx(ReliableTransactionDO tx) {
         var transaction = l1Client.queryTx(tx.getLatestTxHash());
-        // tx not found on blockchain
+
+        // Scenario 1: Transaction not found on blockchain (possibly lost)
         if (ObjectUtil.isNull(transaction)) {
-            log.info("nonce {} missed for {} tx {} of batch {}, resend the raw signed tx...",
-                    tx.getNonce(), tx.getTransactionType(), tx.getLatestTxHash(), tx.getBatchIndex());
-            if (l1NoncePolicy == EthNoncePolicyEnum.NORMAL) {
-                retryL1Tx(tx, false);
-            } else {
-                // if the finalized nonce of sender account is greater than this one's nonce,
-                // it means that no need to resend it.
-                if (l1Client.queryTxCount(tx.getSenderAccount(), l1BlockPollingPolicy).longValue() > tx.getNonce()) {
-                    log.info("Nonce {} of {} tx {} for batch {} has been finalized, update its state to success",
-                            tx.getNonce(), tx.getTransactionType(), tx.getLatestTxHash(), tx.getBatchIndex());
-                    tx.setState(ReliableTransactionStateEnum.TX_SUCCESS);
-                    rollupRepository.updateReliableTransaction(tx);
-                    // WARN: next generation -> The intermediate transactions of retry cannot be found, and the txHash does not exist during the retry process.
-                    TransactionReceipt originalTxReceipt = l1Client.queryTxReceipt(tx.getOriginalTxHash());
-                    if (ObjectUtil.isNotNull(originalTxReceipt) && originalTxReceipt.isStatusOK()) {
-                        createL2GasFeedRequest(tx, originalTxReceipt);
-                    }
-                    return;
-                }
-                EthSendTransaction sendResult = l1Client.sendRawTx(tx.getRawTx());
-                if (sendResult.hasError()) {
-                    if (StrUtil.containsAny(sendResult.getError().getMessage(), "already known", "nonce too low")) {
-                        log.warn("resend missed tx {} failed: {}", tx.getLatestTxHash(), sendResult.getError().getMessage());
-                    } else {
-                        log.error("resend missed tx {} failed: {}", tx.getLatestTxHash(), sendResult.getError().getMessage());
-                    }
-                    return;
-                }
-                if (!StrUtil.equalsIgnoreCase(tx.getLatestTxHash(), sendResult.getTransactionHash())) {
-                    log.error("resend tx hash {} not equals to last one {}", sendResult.getTransactionHash(), tx.getLatestTxHash());
-                    return;
-                }
-
-                tx.setLatestTxSendTime(new Date());
-                rollupRepository.updateReliableTransaction(tx);
-
-                log.info("resend tx {} for batch {}-{}", tx.getLatestTxHash(), tx.getTransactionType(), tx.getBatchIndex());
-            }
+            handleL1MissingTx(tx);
             return;
         }
 
+        // Scenario 2: Transaction exists, check receipt
         TransactionReceipt receipt = l1Client.queryTxReceipt(tx.getLatestTxHash());
-        // tx not packaged
         if (ObjectUtil.isNull(receipt)) {
-            // tx not packaged and has been timeout
-            if (tx.getLatestTxSendTime().getTime() + txTimeOutLimitSec * 1000L < System.currentTimeMillis()) {
-                // timeout the tx
-                log.info("{}-{} tx {} timeout from {}, update the gas price and speed it up...",
-                        tx.getTransactionType(), tx.getBatchIndex(), tx.getLatestTxHash(), DateUtil.format(tx.getLatestTxSendTime(), DatePattern.NORM_DATETIME_MS_PATTERN));
-                TransactionInfo transactionInfo;
-                try {
-                    transactionInfo = l1Client.speedUpRollupTx(tx);
-                } catch (L1ContractWarnException e) {
-                    log.info("rollup contract shows that already committed for batch {}-{}", tx.getTransactionType(), tx.getBatchIndex());
-                    tx.setRevertReason("repeat commit: " + tx.getTransactionType());
-                    tx.setState(ReliableTransactionStateEnum.BIZ_SUCCESS);
-                    rollupRepository.updateReliableTransaction(tx);
-                    return;
-                } catch (NoNeedToSpeedUpException e) {
-                    log.warn("The {} tx for batch {} (latest: {}, original: {}) is no need to speed up: {}",
-                            tx.getTransactionType(), tx.getBatchIndex(), tx.getOriginalTxHash(), tx.getLatestTxHash(), e.getMessage());
-                    return;
-                } catch (RollupEconomicStrategyNotAllowedException e) {
-                    // going to be handled outside this method
-                    throw e;
-                } catch (Exception e) {
-                    log.error("failed to speed tx {} up for batch {}-{}", tx.getLatestTxHash(), tx.getTransactionType(), tx.getBatchIndex(), e);
-                    return;
-                }
-                tx.setLatestTxHash(transactionInfo.getTxHash());
-                tx.setLatestTxSendTime(transactionInfo.getSendTxTime());
-                tx.setRawTx(transactionInfo.getRawTx());
-                tx.setSenderAccount(transactionInfo.getSenderAccount());
-                rollupRepository.updateReliableTransaction(tx);
-                log.info("successful to speed up tx {} for batch {}-{}", tx.getLatestTxHash(), tx.getTransactionType(), tx.getBatchIndex());
-            } else {
-                // tx not packaged, just wait
-                log.debug("tx {} not timeout yet, wait for block packaging...", tx.getLatestTxHash());
+            handleL1UnpackagedTx(tx);
+            return;
+        }
+
+        // Scenario 3: Transaction has receipt, process based on status
+        handleL1TxWithReceipt(tx, receipt);
+    }
+
+    /**
+     * Handles L1 transaction that is missing from the blockchain.
+     *
+     * <p>This may occur due to:
+     * <ul>
+     *   <li>Transaction was dropped from mempool</li>
+     *   <li>Block reorganization caused transaction to be reverted</li>
+     *   <li>Network issues causing transaction to not propagate</li>
+     * </ul>
+     * </p>
+     *
+     * @param tx the missing transaction to handle
+     */
+    private void handleL1MissingTx(ReliableTransactionDO tx) {
+        // Check if still within tolerant duration
+        if (parentChainTxMissedTolerantTimeSec > 0
+                && tx.getLatestTxSendTime().getTime() + parentChainTxMissedTolerantTimeSec * 1000L >= System.currentTimeMillis()) {
+            log.info("Tx {} not found on parent-chain node, but still in tolerant duration, so we just continue...", tx.getLatestTxHash());
+            return;
+        }
+
+        log.info("nonce {} missed for {} tx {} of batch {}, resend the raw signed tx...",
+                tx.getNonce(), tx.getTransactionType(), tx.getLatestTxHash(), tx.getBatchIndex());
+
+        if (l1NoncePolicy == EthNoncePolicyEnum.NORMAL) {
+            retryL1Tx(tx, false);
+        } else {
+            handleL1MissingTxWithNonceCheck(tx);
+        }
+    }
+
+    /**
+     * Handles missing L1 transaction with nonce validation.
+     *
+     * <p>If the finalized nonce of sender account is greater than this transaction's nonce,
+     * it means the transaction has already been processed and no resend is needed.</p>
+     *
+     * @param tx the missing transaction to handle
+     */
+    private void handleL1MissingTxWithNonceCheck(ReliableTransactionDO tx) {
+        // Check if nonce has already been finalized
+        if (l1Client.queryTxCount(tx.getSenderAccount(), l1BlockPollingPolicy).longValue() > tx.getNonce()) {
+            log.info("Nonce {} of {} tx {} for batch {} has been finalized, update its state to success",
+                    tx.getNonce(), tx.getTransactionType(), tx.getLatestTxHash(), tx.getBatchIndex());
+            tx.setState(ReliableTransactionStateEnum.TX_SUCCESS);
+            rollupRepository.updateReliableTransaction(tx);
+
+            // WARN: The intermediate transactions of retry cannot be found,
+            // and the txHash does not exist during the retry process.
+            TransactionReceipt originalTxReceipt = l1Client.queryTxReceipt(tx.getOriginalTxHash());
+            if (rollupConfig.getParentChainType().needRollupFeeFeed()
+                    && ObjectUtil.isNotNull(originalTxReceipt)
+                    && originalTxReceipt.isStatusOK()) {
+                createL2GasFeedRequest(tx, originalTxReceipt);
             }
             return;
         }
 
-        if (receipt.isStatusOK()) {
-            if (receipt.getBlockNumber().compareTo(l1Client.queryLatestBlockNumber(l1BlockPollingPolicy)) <= 0
-                    && receipt.getBlockNumber().compareTo(BigInteger.ZERO) > 0) {
-                // tx has been confirmed
-                doMetrics(tx);
-                doNotify(tx);
-                log.info("🎉 tx {} for batch {}-{} has been finalized and success", tx.getLatestTxHash(), tx.getTransactionType(), tx.getBatchIndex());
-                rollupRepository.updateReliableTransactionState(ChainTypeEnum.LAYER_ONE, tx.getBatchIndex(), tx.getTransactionType(), ReliableTransactionStateEnum.TX_SUCCESS);
-                // create oracle request and insert into `oracle_request` table
-                createL2GasFeedRequest(tx, receipt);
-                removeFinalizedTxDataAsync(tx);
+        // Resend the raw transaction
+        EthSendTransaction sendResult = l1Client.sendRawTx(tx.getRawTx());
+        if (sendResult.hasError()) {
+            if (StrUtil.containsAny(sendResult.getError().getMessage(), "already known", "nonce too low")) {
+                log.warn("resend missed tx {} failed: {}", tx.getLatestTxHash(), sendResult.getError().getMessage());
             } else {
-                // tx has been packaged
-                if (tx.getState() != ReliableTransactionStateEnum.TX_PACKAGED) {
-                    rollupRepository.updateReliableTransactionState(ChainTypeEnum.LAYER_ONE, tx.getBatchIndex(), tx.getTransactionType(), ReliableTransactionStateEnum.TX_PACKAGED);
-                    log.info("update tx's state to packaged...");
-                }
-                log.info("tx {} already been packaged into block {}-{}, please wait for block confirmation...",
-                        tx.getLatestTxHash(), receipt.getBlockNumber(), receipt.getBlockHash());
+                log.error("resend missed tx {} failed: {}", tx.getLatestTxHash(), sendResult.getError().getMessage());
             }
-        } else {
-            // mark it failed
-            if (StrUtil.isEmpty(tx.getRevertReason())) {
-                tx.setRevertReason("receipt shows: " + receipt.getRevertReason());
-            }
-            tx.setState(ReliableTransactionStateEnum.TX_FAILED);
-            rollupRepository.updateReliableTransaction(tx);
-            log.error("tx {} failed of batch {}-{}: {}", tx.getLatestTxHash(), tx.getTransactionType(), tx.getBatchIndex(), tx.getRevertReason());
+            return;
         }
+
+        if (!StrUtil.equalsIgnoreCase(tx.getLatestTxHash(), sendResult.getTransactionHash())) {
+            log.error("resend tx hash {} not equals to last one {}", sendResult.getTransactionHash(), tx.getLatestTxHash());
+            return;
+        }
+
+        tx.setLatestTxSendTime(new Date());
+        rollupRepository.updateReliableTransaction(tx);
+        log.info("resend tx {} for batch {}-{}", tx.getLatestTxHash(), tx.getTransactionType(), tx.getBatchIndex());
+    }
+
+    /**
+     * Handles L1 transaction that exists on chain but has no receipt yet.
+     *
+     * <p>If the transaction has been pending for longer than the timeout limit,
+     * it will be sped up with a higher gas price.</p>
+     *
+     * @param tx the unpackaged transaction to handle
+     */
+    private void handleL1UnpackagedTx(ReliableTransactionDO tx) {
+        // Check if transaction has timed out
+        if (tx.getLatestTxSendTime().getTime() + txTimeOutLimitSec * 1000L < System.currentTimeMillis()) {
+            speedUpL1Tx(tx);
+        } else {
+            log.debug("tx {} not timeout yet, wait for block packaging...", tx.getLatestTxHash());
+        }
+    }
+
+    /**
+     * Speeds up an L1 transaction by resubmitting with higher gas price.
+     *
+     * @param tx the transaction to speed up
+     */
+    private void speedUpL1Tx(ReliableTransactionDO tx) {
+        log.info("{}-{} tx {} timeout from {}, update the gas price and speed it up...",
+                tx.getTransactionType(), tx.getBatchIndex(), tx.getLatestTxHash(),
+                DateUtil.format(tx.getLatestTxSendTime(), DatePattern.NORM_DATETIME_MS_PATTERN));
+
+        TransactionInfo transactionInfo;
+        try {
+            transactionInfo = l1Client.speedUpRollupTx(tx);
+        } catch (L1ContractWarnException e) {
+            log.info("rollup contract shows that already committed for batch {}-{}", tx.getTransactionType(), tx.getBatchIndex());
+            tx.setRevertReason("repeat commit: " + tx.getTransactionType());
+            tx.setState(ReliableTransactionStateEnum.BIZ_SUCCESS);
+            rollupRepository.updateReliableTransaction(tx);
+            return;
+        } catch (NoNeedToSpeedUpException e) {
+            log.warn("The {} tx for batch {} (latest: {}, original: {}) is no need to speed up: {}",
+                    tx.getTransactionType(), tx.getBatchIndex(), tx.getOriginalTxHash(), tx.getLatestTxHash(), e.getMessage());
+            return;
+        } catch (RollupEconomicStrategyNotAllowedException e) {
+            // Going to be handled outside this method
+            throw e;
+        } catch (Exception e) {
+            log.error("failed to speed tx {} up for batch {}-{}", tx.getLatestTxHash(), tx.getTransactionType(), tx.getBatchIndex(), e);
+            return;
+        }
+
+        tx.setLatestTxHash(transactionInfo.getTxHash());
+        tx.setLatestTxSendTime(transactionInfo.getSendTxTime());
+        tx.setRawTx(transactionInfo.getRawTx());
+        tx.setSenderAccount(transactionInfo.getSenderAccount());
+        rollupRepository.updateReliableTransaction(tx);
+        log.info("successful to speed up tx {} for batch {}-{}", tx.getLatestTxHash(), tx.getTransactionType(), tx.getBatchIndex());
+    }
+
+    /**
+     * Handles L1 transaction that has a receipt.
+     *
+     * @param tx the transaction to handle
+     * @param receipt the transaction receipt
+     */
+    private void handleL1TxWithReceipt(ReliableTransactionDO tx, TransactionReceipt receipt) {
+        if (receipt.isStatusOK()) {
+            handleL1SuccessfulTx(tx, receipt);
+        } else {
+            handleL1FailedTx(tx, receipt);
+        }
+    }
+
+    /**
+     * Handles L1 transaction with successful receipt.
+     *
+     * <p>Checks if the transaction has been finalized (block confirmed) or just packaged.</p>
+     *
+     * @param tx the successful transaction
+     * @param receipt the transaction receipt
+     */
+    private void handleL1SuccessfulTx(ReliableTransactionDO tx, TransactionReceipt receipt) {
+        boolean isFinalized = receipt.getBlockNumber().compareTo(l1Client.queryLatestBlockNumber(l1BlockPollingPolicy)) <= 0
+                && receipt.getBlockNumber().compareTo(BigInteger.ZERO) > 0;
+
+        if (isFinalized) {
+            // Transaction has been confirmed
+            doMetrics(tx);
+            doNotify(tx);
+            log.info("🎉 tx {} for batch {}-{} has been finalized and success",
+                    tx.getLatestTxHash(), tx.getTransactionType(), tx.getBatchIndex());
+            rollupRepository.updateReliableTransactionState(
+                    ChainTypeEnum.LAYER_ONE, tx.getBatchIndex(), tx.getTransactionType(), ReliableTransactionStateEnum.TX_SUCCESS);
+
+            if (rollupConfig.getParentChainType().needRollupFeeFeed()) {
+                createL2GasFeedRequest(tx, receipt);
+            }
+            removeFinalizedTxDataAsync(tx);
+        } else {
+            // Transaction has been packaged but not yet finalized
+            if (tx.getState() != ReliableTransactionStateEnum.TX_PACKAGED) {
+                rollupRepository.updateReliableTransactionState(
+                        ChainTypeEnum.LAYER_ONE, tx.getBatchIndex(), tx.getTransactionType(), ReliableTransactionStateEnum.TX_PACKAGED);
+                log.info("update tx's state to packaged...");
+            }
+            log.info("tx {} already been packaged into block {}-{}, please wait for block confirmation...",
+                    tx.getLatestTxHash(), receipt.getBlockNumber(), receipt.getBlockHash());
+        }
+    }
+
+    /**
+     * Handles L1 transaction with failed receipt.
+     *
+     * @param tx the failed transaction
+     * @param receipt the transaction receipt
+     */
+    private void handleL1FailedTx(ReliableTransactionDO tx, TransactionReceipt receipt) {
+        if (StrUtil.isEmpty(tx.getRevertReason())) {
+            tx.setRevertReason("receipt shows: " + receipt.getRevertReason());
+        }
+        tx.setState(ReliableTransactionStateEnum.TX_FAILED);
+        rollupRepository.updateReliableTransaction(tx);
+        log.error("tx {} failed of batch {}-{}: {}",
+                tx.getLatestTxHash(), tx.getTransactionType(), tx.getBatchIndex(), tx.getRevertReason());
     }
 
     private void processL2PendingTx(ReliableTransactionDO tx) {
@@ -311,6 +490,11 @@ public class ReliableTxServiceImpl implements IReliableTxService {
         // if tx is lost
         if ((tx.getTransactionType() == TransactionTypeEnum.L2_ORACLE_BASE_FEE_FEED_TX || tx.getTransactionType() == TransactionTypeEnum.L2_ORACLE_BATCH_FEE_FEED_TX)
                 && ObjectUtil.isNull(l2Client.queryTxWithRetry(tx.getSenderAccount(), tx.getLatestTxHash(), BigInteger.valueOf(tx.getNonce())))) {
+            if (subChainTxMissedTolerantTimeSec > 0
+                    && tx.getLatestTxSendTime().getTime() + subChainTxMissedTolerantTimeSec * 1000L >= System.currentTimeMillis()) {
+                log.info("Tx {} not found on subchain node, but still in tolerant duration, so we just continue...", tx.getLatestTxHash());
+                return;
+            }
             // tx not found on blockchain
             log.warn("🚨 oracle feeding tx is lost, oracle index: {}, oracle type: {}, txHash: {}. try to resend it...",
                     tx.getBatchIndex(), tx.getTransactionType(), tx.getLatestTxHash());

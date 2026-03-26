@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package com.alipay.antchain.l2.relayer.commoms;
+package com.alipay.antchain.l2.relayer.commons.models;
 
 import java.math.BigInteger;
 

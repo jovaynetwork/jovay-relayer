@@ -17,10 +17,12 @@
 package com.alipay.antchain.l2.relayer.service;
 
 import java.math.BigInteger;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
+import cn.hutool.cache.Cache;
 import cn.hutool.core.collection.ListUtil;
 import cn.hutool.core.date.DateUtil;
 import cn.hutool.core.util.HexUtil;
@@ -41,15 +43,24 @@ import com.alipay.antchain.l2.relayer.core.blockchain.helper.CachedNonceManager;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.RemoteNonceManager;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.gasprice.DynamicGasPriceProviderConfig;
 import com.alipay.antchain.l2.relayer.core.layer2.economic.RollupEconomicStrategyConfig;
+import com.alipay.antchain.l2.relayer.dal.repository.IL2MerkleTreeRepository;
+import com.alipay.antchain.l2.relayer.dal.repository.IMailboxRepository;
+import com.alipay.antchain.l2.relayer.dal.repository.IOracleRepository;
 import com.alipay.antchain.l2.relayer.dal.repository.IRollupRepository;
+import com.alipay.antchain.l2.relayer.dal.repository.ScheduleRepository;
 import com.alipay.antchain.l2.relayer.engine.DistributedTaskEngine;
+import com.alipay.antchain.l2.relayer.engine.core.ScheduleContext;
 import com.alipay.antchain.l2.relayer.server.grpc.*;
+import com.alipay.antchain.l2.trace.BasicBlockTrace;
 import io.grpc.internal.testing.StreamRecorder;
 import jakarta.annotation.Resource;
 import lombok.SneakyThrows;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
+import org.springframework.test.context.bean.override.convention.TestBean;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.web3j.abi.datatypes.generated.Bytes32;
 import org.web3j.protocol.core.methods.response.EthSendTransaction;
@@ -65,7 +76,7 @@ public class AdminGrpcServiceTest extends TestBase {
     @MockitoBean
     private IRollupRepository rollupRepository;
 
-    @MockitoBean
+    @TestBean
     private RollupConfig rollupConfig;
 
     @MockitoBean
@@ -94,6 +105,27 @@ public class AdminGrpcServiceTest extends TestBase {
 
     @MockitoBean
     private RollupEconomicStrategyConfig rollupEconomicStrategyConfig;
+
+    @MockitoBean
+    private RedissonClient redissonClient;
+
+    @MockitoBean
+    private IMailboxRepository mailboxRepository;
+
+    @MockitoBean
+    private IL2MerkleTreeRepository l2MerkleTreeRepository;
+
+    @MockitoBean
+    private IOracleRepository oracleRepository;
+
+    @MockitoBean
+    private ScheduleRepository scheduleRepository;
+
+    @MockitoBean
+    private ScheduleContext scheduleContext;
+
+    @MockitoBean
+    private Cache<BigInteger, BasicBlockTrace> l2BlockTracesCacheForCurrChunk;
 
     @Resource
     private AdminGrpcService adminGrpcService;
@@ -1526,5 +1558,689 @@ public class AdminGrpcServiceTest extends TestBase {
         verify(rollupRepository, never()).updateBatchProveRequestState(
                 eq(BigInteger.valueOf(2)), any(), any()
         );
+    }
+
+    // ==================== Negative Case Tests ====================
+
+    @Test
+    @SneakyThrows
+    public void testInitAnchorBatch_InvalidBatchIndex() {
+        var req = InitAnchorBatchReq.newBuilder()
+                .setAnchorBatchIndex(999)
+                .build();
+        StreamRecorder<Response> responseObserver = StreamRecorder.create();
+
+        doThrow(new IllegalArgumentException("Invalid batch index")).when(rollupService).setAnchorBatch(any(BigInteger.class));
+
+        adminGrpcService.initAnchorBatch(req, responseObserver);
+
+        Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
+        Assert.assertNull(responseObserver.getError());
+        List<Response> results = responseObserver.getValues();
+        Assert.assertEquals(1, results.size());
+        Assert.assertEquals(-1, results.get(0).getCode());
+    }
+
+    @Test
+    @SneakyThrows
+    public void testGetBatch_BatchNotFound() {
+        var req = GetBatchReq.newBuilder()
+                .setBatchIndex("999")
+                .build();
+        StreamRecorder<Response> responseObserver = StreamRecorder.create();
+
+        when(rollupRepository.getBatch(any())).thenReturn(null);
+
+        adminGrpcService.getBatch(req, responseObserver);
+
+        Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
+        Assert.assertNull(responseObserver.getError());
+        List<Response> results = responseObserver.getValues();
+        Assert.assertEquals(1, results.size());
+        Assert.assertEquals(-1, results.get(0).getCode());
+    }
+
+    @Test
+    @SneakyThrows
+    public void testRetryBatchTx_InvalidTransactionType() {
+        var req = RetryBatchTxReq.newBuilder()
+                .setType("INVALID_TYPE")
+                .setFromBatchIndex(1)
+                .setToBatchIndex(3)
+                .build();
+        StreamRecorder<Response> responseObserver = StreamRecorder.create();
+
+        adminGrpcService.retryBatchTx(req, responseObserver);
+
+        Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
+        Assert.assertNull(responseObserver.getError());
+        List<Response> results = responseObserver.getValues();
+        Assert.assertEquals(1, results.size());
+        Assert.assertEquals(-1, results.get(0).getCode());
+    }
+
+    @Test
+    @SneakyThrows
+    public void testQueryBatchTxInfo_TransactionNotFound() {
+        var req = QueryBatchTxInfoReq.newBuilder()
+                .setType(TransactionTypeEnum.BATCH_TEE_PROOF_COMMIT_TX.name())
+                .setBatchIndex(999)
+                .build();
+        StreamRecorder<Response> responseObserver = StreamRecorder.create();
+
+        when(rollupRepository.getReliableTransaction(any(), any(), any())).thenReturn(null);
+
+        adminGrpcService.queryBatchTxInfo(req, responseObserver);
+
+        Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
+        Assert.assertNull(responseObserver.getError());
+        List<Response> results = responseObserver.getValues();
+        Assert.assertEquals(1, results.size());
+        Assert.assertEquals(-1, results.get(0).getCode());
+    }
+
+    @Test
+    @SneakyThrows
+    public void testWithdrawFromVault_InvalidAddress() {
+        var req = WithdrawFromVaultReq.newBuilder()
+                .setTo("invalid_address")
+                .setAmount(100)
+                .build();
+        StreamRecorder<Response> responseObserver = StreamRecorder.create();
+
+        when(oracleService.withdrawVault(anyString(), any())).thenThrow(new IllegalArgumentException("Invalid address format"));
+
+        adminGrpcService.withdrawFromVault(req, responseObserver);
+
+        Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
+        Assert.assertNull(responseObserver.getError());
+        List<Response> results = responseObserver.getValues();
+        Assert.assertEquals(1, results.size());
+        Assert.assertEquals(-1, results.get(0).getCode());
+    }
+
+    @Test
+    @SneakyThrows
+    public void testUpdateFixedProfit_InvalidValue() {
+        var req = UpdateFixedProfitReq.newBuilder()
+                .setProfit("-100")
+                .build();
+        StreamRecorder<Response> responseObserver = StreamRecorder.create();
+
+        when(oracleService.updateFixedProfit(any())).thenThrow(new IllegalArgumentException("Invalid profit value"));
+
+        adminGrpcService.updateFixedProfit(req, responseObserver);
+
+        Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
+        Assert.assertNull(responseObserver.getError());
+        List<Response> results = responseObserver.getValues();
+        Assert.assertEquals(1, results.size());
+        Assert.assertEquals(-1, results.get(0).getCode());
+    }
+
+    @Test
+    @SneakyThrows
+    public void testSpeedupTx_TransactionNotPending() {
+        var req = SpeedupTxReq.newBuilder()
+                .setChainType(ChainTypeEnum.LAYER_ONE.name())
+                .setType(TransactionTypeEnum.BATCH_COMMIT_TX.name())
+                .setBatchIndex(1)
+                .build();
+        StreamRecorder<Response> responseObserver = StreamRecorder.create();
+
+        when(rollupRepository.getReliableTransaction(any(), any(), any())).thenReturn(
+                ReliableTransactionDO.builder()
+                        .state(ReliableTransactionStateEnum.TX_SUCCESS)
+                        .build()
+        );
+
+        adminGrpcService.speedupTx(req, responseObserver);
+
+        Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
+        Assert.assertNull(responseObserver.getError());
+        List<Response> results = responseObserver.getValues();
+        Assert.assertEquals(1, results.size());
+        Assert.assertEquals(-1, results.get(0).getCode());
+    }
+
+    @Test
+    @SneakyThrows
+    public void testUpdateGasPriceConfig_InvalidConfigValue() {
+        var req = UpdateGasPriceConfigReq.newBuilder()
+                .setChainType("ethereum")
+                .setConfigKey("gasPriceIncreasedPercentage")
+                .setConfigValue("invalid_number")
+                .build();
+        StreamRecorder<Response> responseObserver = StreamRecorder.create();
+
+        adminGrpcService.updateGasPriceConfig(req, responseObserver);
+
+        Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
+        Assert.assertNull(responseObserver.getError());
+        List<Response> results = responseObserver.getValues();
+        Assert.assertEquals(1, results.size());
+        Assert.assertEquals(-1, results.get(0).getCode());
+    }
+
+    @Test
+    @SneakyThrows
+    public void testGetGasPriceConfig_UnknownConfigKey() {
+        var req = GetGasPriceConfigReq.newBuilder()
+                .setChainType("ethereum")
+                .setConfigKey("unknownKey")
+                .build();
+        StreamRecorder<Response> responseObserver = StreamRecorder.create();
+
+        adminGrpcService.getGasPriceConfig(req, responseObserver);
+
+        Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
+        Assert.assertNull(responseObserver.getError());
+        List<Response> results = responseObserver.getValues();
+        Assert.assertEquals(1, results.size());
+        Assert.assertEquals(-1, results.get(0).getCode());
+    }
+
+    // ==================== Rollback to Subchain Height Tests ====================
+
+    /**
+     * Test successful rollback to subchain height
+     * Should execute all rollback steps and clear caches
+     */
+    @Test
+    @SneakyThrows
+    public void testRollbackToSubchainHeight_Success() {
+        long targetBatchIndex = 10L;
+        long targetBlockHeight = 1000L;
+        long l1MsgNonceThreshold = 50L;
+
+        var req = RollbackToSubchainHeightReq.newBuilder()
+                .setTargetBatchIndex(targetBatchIndex)
+                .setTargetBlockHeight(targetBlockHeight)
+                .setL1MsgNonceThreshold(l1MsgNonceThreshold)
+                .build();
+        StreamRecorder<Response> responseObserver = StreamRecorder.create();
+
+        // Mock schedule context and repository for node check
+        when(scheduleContext.getNodeId()).thenReturn("node-1");
+        var localNode = new ActiveNode();
+        localNode.setNodeId("node-1");
+        localNode.setStatus(ActiveNodeStatusEnum.ONLINE);
+        when(scheduleRepository.getAllActiveNodes()).thenReturn(ListUtil.toList(localNode));
+
+        // Mock chunks for the target batch
+        var chunk1 = createMockChunkWrapper(BigInteger.valueOf(targetBatchIndex), 0, 
+                BigInteger.valueOf(900), BigInteger.valueOf(950), 1000L);
+        var chunk2 = createMockChunkWrapper(BigInteger.valueOf(targetBatchIndex), 1, 
+                BigInteger.valueOf(951), BigInteger.valueOf(1050), 2000L);
+        when(rollupRepository.getChunks(eq(BigInteger.valueOf(targetBatchIndex))))
+                .thenReturn(ListUtil.toList(chunk1, chunk2));
+
+        // Mock distributed locks
+        for (var taskType : BizTaskTypeEnum.values()) {
+            var mockLock = mock(RLock.class);
+            when(mockLock.tryLock(anyLong(), any(TimeUnit.class))).thenReturn(true);
+            when(redissonClient.getLock(eq("relayer:task:" + taskType.name()))).thenReturn(mockLock);
+        }
+
+        // Mock repository delete operations
+        when(rollupRepository.deleteBatchesFrom(any())).thenReturn(5);
+        when(rollupRepository.deleteChunksForRollback(any(), anyLong())).thenReturn(10);
+        when(rollupRepository.deleteBatchProveRequestsFrom(any())).thenReturn(5);
+        when(rollupRepository.deleteRollupReliableTransactionsFrom(any())).thenReturn(3);
+        when(rollupRepository.deleteL1MsgReliableTransactionsAboveNonce(anyLong())).thenReturn(2);
+        when(l2MerkleTreeRepository.deleteMerkleTreesFrom(any())).thenReturn(5);
+        when(mailboxRepository.resetL1MsgsAboveNonce(anyLong())).thenReturn(10);
+        when(mailboxRepository.deleteL2MsgsForRollback(any(), any())).thenReturn(8);
+        when(mailboxRepository.resetL2MsgsForRollback(any(), any())).thenReturn(6);
+        when(oracleRepository.deleteBatchOracleRequestsFrom(any())).thenReturn(4);
+        when(rollupRepository.deleteOracleBatchFeeFeedTransactionsFrom(any())).thenReturn(2);
+
+        // Mock cache operations
+        var mockKeys = mock(org.redisson.api.RKeys.class);
+        when(redissonClient.getKeys()).thenReturn(mockKeys);
+        when(mockKeys.deleteByPattern(anyString())).thenReturn(10L);
+
+        adminGrpcService.rollbackToSubchainHeight(req, responseObserver);
+
+        Assert.assertTrue(responseObserver.awaitCompletion(10, TimeUnit.SECONDS));
+        Assert.assertNull(responseObserver.getError());
+        List<Response> results = responseObserver.getValues();
+        Assert.assertEquals(1, results.size());
+        Assert.assertEquals(0, results.get(0).getCode());
+        Assert.assertTrue(results.get(0).getRollbackToSubchainHeightResp().getSummary().contains("completed successfully"));
+
+        // Verify rollup number records were updated
+        verify(rollupRepository, times(6)).updateRollupNumberRecord(any(), any(), any());
+
+        // Verify delete operations were called
+        verify(rollupRepository).deleteBatchesFrom(eq(BigInteger.valueOf(targetBatchIndex)));
+        verify(rollupRepository).deleteChunksForRollback(eq(BigInteger.valueOf(targetBatchIndex)), eq(1L));
+        verify(l2MerkleTreeRepository).deleteMerkleTreesFrom(eq(BigInteger.valueOf(targetBatchIndex)));
+        verify(mailboxRepository).resetL1MsgsAboveNonce(eq(l1MsgNonceThreshold));
+        verify(oracleRepository).deleteBatchOracleRequestsFrom(eq(BigInteger.valueOf(targetBatchIndex)));
+
+        // Verify cache was cleared
+        verify(mockKeys).deleteByPattern(eq("L2_BLOCK_TRACE@*"));
+        verify(mockKeys).deleteByPattern(eq("L2_CHUNK@*"));
+        verify(mockKeys).deleteByPattern(eq("L2_BATCH@*"));
+        verify(mockKeys).deleteByPattern(eq("L2_MERKLE_TREE-*"));
+        verify(l2BlockTracesCacheForCurrChunk).clear();
+    }
+
+    /**
+     * Test rollback fails when chunks are empty
+     */
+    @Test
+    @SneakyThrows
+    public void testRollbackToSubchainHeight_EmptyChunks() {
+        var req = RollbackToSubchainHeightReq.newBuilder()
+                .setTargetBatchIndex(10L)
+                .setTargetBlockHeight(1000L)
+                .setL1MsgNonceThreshold(50L)
+                .build();
+        StreamRecorder<Response> responseObserver = StreamRecorder.create();
+
+        // Mock node check
+        when(scheduleContext.getNodeId()).thenReturn("node-1");
+        var localNode = new ActiveNode();
+        localNode.setNodeId("node-1");
+        localNode.setStatus(ActiveNodeStatusEnum.ONLINE);
+        when(scheduleRepository.getAllActiveNodes()).thenReturn(ListUtil.toList(localNode));
+
+        // Return empty chunks
+        when(rollupRepository.getChunks(any())).thenReturn(ListUtil.empty());
+
+        adminGrpcService.rollbackToSubchainHeight(req, responseObserver);
+
+        Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
+        List<Response> results = responseObserver.getValues();
+        Assert.assertEquals(1, results.size());
+        Assert.assertEquals(-1, results.get(0).getCode());
+        Assert.assertTrue(results.get(0).getErrorMsg().contains("empty"));
+    }
+
+    /**
+     * Test rollback fails when block height is not inside chunks
+     */
+    @Test
+    @SneakyThrows
+    public void testRollbackToSubchainHeight_BlockNotInChunks() {
+        var req = RollbackToSubchainHeightReq.newBuilder()
+                .setTargetBatchIndex(10L)
+                .setTargetBlockHeight(500L)  // Block height before chunk start
+                .setL1MsgNonceThreshold(50L)
+                .build();
+        StreamRecorder<Response> responseObserver = StreamRecorder.create();
+
+        // Mock node check
+        when(scheduleContext.getNodeId()).thenReturn("node-1");
+        var localNode = new ActiveNode();
+        localNode.setNodeId("node-1");
+        localNode.setStatus(ActiveNodeStatusEnum.ONLINE);
+        when(scheduleRepository.getAllActiveNodes()).thenReturn(ListUtil.toList(localNode));
+
+        // Chunk starts at block 1000, but target is 500
+        var chunk = createMockChunkWrapper(BigInteger.TEN, 0, 
+                BigInteger.valueOf(1000), BigInteger.valueOf(1100), 1000L);
+        when(rollupRepository.getChunks(any())).thenReturn(ListUtil.toList(chunk));
+
+        adminGrpcService.rollbackToSubchainHeight(req, responseObserver);
+
+        Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
+        List<Response> results = responseObserver.getValues();
+        Assert.assertEquals(1, results.size());
+        Assert.assertEquals(-1, results.get(0).getCode());
+        Assert.assertTrue(results.get(0).getErrorMsg().contains("not inside"));
+    }
+
+    /**
+     * Test rollback fails when no chunk found for target block
+     */
+    @Test
+    @SneakyThrows
+    public void testRollbackToSubchainHeight_NoChunkForBlock() {
+        var req = RollbackToSubchainHeightReq.newBuilder()
+                .setTargetBatchIndex(10L)
+                .setTargetBlockHeight(2000L)  // Block height after all chunks
+                .setL1MsgNonceThreshold(50L)
+                .build();
+        StreamRecorder<Response> responseObserver = StreamRecorder.create();
+
+        // Mock node check
+        when(scheduleContext.getNodeId()).thenReturn("node-1");
+        var localNode = new ActiveNode();
+        localNode.setNodeId("node-1");
+        localNode.setStatus(ActiveNodeStatusEnum.ONLINE);
+        when(scheduleRepository.getAllActiveNodes()).thenReturn(ListUtil.toList(localNode));
+
+        // Chunk ends at block 1100, but target is 2000
+        var chunk = createMockChunkWrapper(BigInteger.TEN, 0, 
+                BigInteger.valueOf(1000), BigInteger.valueOf(1100), 1000L);
+        when(rollupRepository.getChunks(any())).thenReturn(ListUtil.toList(chunk));
+
+        adminGrpcService.rollbackToSubchainHeight(req, responseObserver);
+
+        Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
+        List<Response> results = responseObserver.getValues();
+        Assert.assertEquals(1, results.size());
+        Assert.assertEquals(-1, results.get(0).getCode());
+        Assert.assertTrue(results.get(0).getErrorMsg().contains("No chunk found"));
+    }
+
+    /**
+     * Test rollback fails when distributed lock acquisition fails
+     */
+    @Test
+    @SneakyThrows
+    public void testRollbackToSubchainHeight_LockAcquisitionFailed() {
+        var req = RollbackToSubchainHeightReq.newBuilder()
+                .setTargetBatchIndex(10L)
+                .setTargetBlockHeight(1000L)
+                .setL1MsgNonceThreshold(50L)
+                .build();
+        StreamRecorder<Response> responseObserver = StreamRecorder.create();
+
+        // Mock node check
+        when(scheduleContext.getNodeId()).thenReturn("node-1");
+        var localNode = new ActiveNode();
+        localNode.setNodeId("node-1");
+        localNode.setStatus(ActiveNodeStatusEnum.ONLINE);
+        when(scheduleRepository.getAllActiveNodes()).thenReturn(ListUtil.toList(localNode));
+
+        // Mock chunks
+        var chunk = createMockChunkWrapper(BigInteger.TEN, 0, 
+                BigInteger.valueOf(900), BigInteger.valueOf(1050), 1000L);
+        when(rollupRepository.getChunks(any())).thenReturn(ListUtil.toList(chunk));
+
+        // First lock succeeds, second lock fails
+        var taskTypes = BizTaskTypeEnum.values();
+        for (int i = 0; i < taskTypes.length; i++) {
+            var mockLock = mock(RLock.class);
+            if (i == 1) {
+                // Second lock fails
+                when(mockLock.tryLock(anyLong(), any(TimeUnit.class))).thenReturn(false);
+            } else {
+                when(mockLock.tryLock(anyLong(), any(TimeUnit.class))).thenReturn(true);
+            }
+            when(redissonClient.getLock(eq("relayer:task:" + taskTypes[i].name()))).thenReturn(mockLock);
+        }
+
+        adminGrpcService.rollbackToSubchainHeight(req, responseObserver);
+
+        Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
+        List<Response> results = responseObserver.getValues();
+        Assert.assertEquals(1, results.size());
+        Assert.assertEquals(-1, results.get(0).getCode());
+        Assert.assertTrue(results.get(0).getErrorMsg().contains("Failed to acquire lock"));
+    }
+
+    /**
+     * Test rollback fails when local node is offline
+     */
+    @Test
+    @SneakyThrows
+    public void testRollbackToSubchainHeight_LocalNodeOffline() {
+        var req = RollbackToSubchainHeightReq.newBuilder()
+                .setTargetBatchIndex(10L)
+                .setTargetBlockHeight(1000L)
+                .setL1MsgNonceThreshold(50L)
+                .build();
+        StreamRecorder<Response> responseObserver = StreamRecorder.create();
+
+        // Mock local node as offline
+        when(scheduleContext.getNodeId()).thenReturn("node-1");
+        var localNode = new ActiveNode();
+        localNode.setNodeId("node-1");
+        localNode.setStatus(ActiveNodeStatusEnum.OFFLINE);
+        when(scheduleRepository.getAllActiveNodes()).thenReturn(ListUtil.toList(localNode));
+
+        adminGrpcService.rollbackToSubchainHeight(req, responseObserver);
+
+        Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
+        List<Response> results = responseObserver.getValues();
+        Assert.assertEquals(1, results.size());
+        Assert.assertEquals(-1, results.get(0).getCode());
+        Assert.assertTrue(results.get(0).getErrorMsg().contains("not online"));
+    }
+
+    /**
+     * Test rollback fails when other nodes are still online
+     */
+    @Test
+    @SneakyThrows
+    public void testRollbackToSubchainHeight_OtherNodesOnline() {
+        var req = RollbackToSubchainHeightReq.newBuilder()
+                .setTargetBatchIndex(10L)
+                .setTargetBlockHeight(1000L)
+                .setL1MsgNonceThreshold(50L)
+                .build();
+        StreamRecorder<Response> responseObserver = StreamRecorder.create();
+
+        // Mock local node online but another node also online
+        when(scheduleContext.getNodeId()).thenReturn("node-1");
+        var localNode = new ActiveNode();
+        localNode.setNodeId("node-1");
+        localNode.setStatus(ActiveNodeStatusEnum.ONLINE);
+        var otherNode = new ActiveNode();
+        otherNode.setNodeId("node-2");
+        otherNode.setStatus(ActiveNodeStatusEnum.ONLINE);
+        when(scheduleRepository.getAllActiveNodes()).thenReturn(ListUtil.toList(localNode, otherNode));
+
+        adminGrpcService.rollbackToSubchainHeight(req, responseObserver);
+
+        Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
+        List<Response> results = responseObserver.getValues();
+        Assert.assertEquals(1, results.size());
+        Assert.assertEquals(-1, results.get(0).getCode());
+        Assert.assertTrue(results.get(0).getErrorMsg().contains("other relayer nodes to be offline"));
+    }
+
+    /**
+     * Test rollback with multiple chunks and gas sum calculation
+     */
+    @Test
+    @SneakyThrows
+    public void testRollbackToSubchainHeight_MultipleChunksGasSum() {
+        long targetBatchIndex = 10L;
+        long targetBlockHeight = 1500L;
+
+        var req = RollbackToSubchainHeightReq.newBuilder()
+                .setTargetBatchIndex(targetBatchIndex)
+                .setTargetBlockHeight(targetBlockHeight)
+                .setL1MsgNonceThreshold(50L)
+                .build();
+        StreamRecorder<Response> responseObserver = StreamRecorder.create();
+
+        // Mock node check
+        when(scheduleContext.getNodeId()).thenReturn("node-1");
+        var localNode = new ActiveNode();
+        localNode.setNodeId("node-1");
+        localNode.setStatus(ActiveNodeStatusEnum.ONLINE);
+        when(scheduleRepository.getAllActiveNodes()).thenReturn(ListUtil.toList(localNode));
+
+        // Create multiple chunks - target block is in chunk 2
+        var chunk0 = createMockChunkWrapper(BigInteger.valueOf(targetBatchIndex), 0, 
+                BigInteger.valueOf(1000), BigInteger.valueOf(1200), 1000L);
+        var chunk1 = createMockChunkWrapper(BigInteger.valueOf(targetBatchIndex), 1, 
+                BigInteger.valueOf(1201), BigInteger.valueOf(1400), 2000L);
+        var chunk2 = createMockChunkWrapper(BigInteger.valueOf(targetBatchIndex), 2, 
+                BigInteger.valueOf(1401), BigInteger.valueOf(1600), 3000L);
+        when(rollupRepository.getChunks(eq(BigInteger.valueOf(targetBatchIndex))))
+                .thenReturn(ListUtil.toList(chunk0, chunk1, chunk2));
+
+        // Mock distributed locks
+        for (var taskType : BizTaskTypeEnum.values()) {
+            var mockLock = mock(RLock.class);
+            when(mockLock.tryLock(anyLong(), any(TimeUnit.class))).thenReturn(true);
+            when(redissonClient.getLock(eq("relayer:task:" + taskType.name()))).thenReturn(mockLock);
+        }
+
+        // Mock repository operations
+        when(rollupRepository.deleteBatchesFrom(any())).thenReturn(1);
+        when(rollupRepository.deleteChunksForRollback(any(), anyLong())).thenReturn(1);
+        when(rollupRepository.deleteBatchProveRequestsFrom(any())).thenReturn(1);
+        when(rollupRepository.deleteRollupReliableTransactionsFrom(any())).thenReturn(1);
+        when(rollupRepository.deleteL1MsgReliableTransactionsAboveNonce(anyLong())).thenReturn(1);
+        when(l2MerkleTreeRepository.deleteMerkleTreesFrom(any())).thenReturn(1);
+        when(mailboxRepository.resetL1MsgsAboveNonce(anyLong())).thenReturn(1);
+        when(mailboxRepository.deleteL2MsgsForRollback(any(), any())).thenReturn(1);
+        when(mailboxRepository.resetL2MsgsForRollback(any(), any())).thenReturn(1);
+        when(oracleRepository.deleteBatchOracleRequestsFrom(any())).thenReturn(1);
+        when(rollupRepository.deleteOracleBatchFeeFeedTransactionsFrom(any())).thenReturn(1);
+
+        var mockKeys = mock(org.redisson.api.RKeys.class);
+        when(redissonClient.getKeys()).thenReturn(mockKeys);
+        when(mockKeys.deleteByPattern(anyString())).thenReturn(1L);
+
+        adminGrpcService.rollbackToSubchainHeight(req, responseObserver);
+
+        Assert.assertTrue(responseObserver.awaitCompletion(10, TimeUnit.SECONDS));
+        List<Response> results = responseObserver.getValues();
+        Assert.assertEquals(1, results.size());
+        Assert.assertEquals(0, results.get(0).getCode());
+
+        // Verify chunk index 2 was used (target block 1500 is in chunk 2)
+        verify(rollupRepository).deleteChunksForRollback(eq(BigInteger.valueOf(targetBatchIndex)), eq(2L));
+
+        // Verify gas sum was calculated correctly (chunk0 + chunk1 = 1000 + 2000 = 3000)
+        verify(rollupRepository).updateRollupNumberRecord(
+                eq(ChainTypeEnum.LAYER_TWO), 
+                eq(RollupNumberRecordTypeEnum.NEXT_CHUNK_GAS_ACCUMULATOR), 
+                eq(BigInteger.valueOf(3000L)));
+    }
+
+    /**
+     * Test rollback locks are released even on failure
+     */
+    @Test
+    @SneakyThrows
+    public void testRollbackToSubchainHeight_LocksReleasedOnFailure() {
+        var req = RollbackToSubchainHeightReq.newBuilder()
+                .setTargetBatchIndex(10L)
+                .setTargetBlockHeight(1000L)
+                .setL1MsgNonceThreshold(50L)
+                .build();
+        StreamRecorder<Response> responseObserver = StreamRecorder.create();
+
+        // Mock node check
+        when(scheduleContext.getNodeId()).thenReturn("node-1");
+        var localNode = new ActiveNode();
+        localNode.setNodeId("node-1");
+        localNode.setStatus(ActiveNodeStatusEnum.ONLINE);
+        when(scheduleRepository.getAllActiveNodes()).thenReturn(ListUtil.toList(localNode));
+
+        // Mock chunks
+        var chunk = createMockChunkWrapper(BigInteger.TEN, 0, 
+                BigInteger.valueOf(900), BigInteger.valueOf(1050), 1000L);
+        when(rollupRepository.getChunks(any())).thenReturn(ListUtil.toList(chunk));
+
+        // Mock locks
+        var mockLocks = new ArrayList<RLock>();
+        for (var taskType : BizTaskTypeEnum.values()) {
+            var mockLock = mock(RLock.class);
+            when(mockLock.tryLock(anyLong(), any(TimeUnit.class))).thenReturn(true);
+            when(mockLock.getName()).thenReturn("relayer:task:" + taskType.name());
+            when(redissonClient.getLock(eq("relayer:task:" + taskType.name()))).thenReturn(mockLock);
+            mockLocks.add(mockLock);
+        }
+
+        // Make rollback fail during execution
+        when(rollupRepository.deleteBatchesFrom(any())).thenThrow(new RuntimeException("Database error"));
+
+        adminGrpcService.rollbackToSubchainHeight(req, responseObserver);
+
+        Assert.assertTrue(responseObserver.awaitCompletion(5, TimeUnit.SECONDS));
+        List<Response> results = responseObserver.getValues();
+        Assert.assertEquals(1, results.size());
+        Assert.assertEquals(-1, results.get(0).getCode());
+
+        // Verify all locks were released
+        for (var mockLock : mockLocks) {
+            verify(mockLock).forceUnlock();
+        }
+    }
+
+    /**
+     * Test rollback with cache clearing
+     */
+    @Test
+    @SneakyThrows
+    public void testRollbackToSubchainHeight_CacheClearing() {
+        var req = RollbackToSubchainHeightReq.newBuilder()
+                .setTargetBatchIndex(10L)
+                .setTargetBlockHeight(1000L)
+                .setL1MsgNonceThreshold(50L)
+                .build();
+        StreamRecorder<Response> responseObserver = StreamRecorder.create();
+
+        // Mock node check
+        when(scheduleContext.getNodeId()).thenReturn("node-1");
+        var localNode = new ActiveNode();
+        localNode.setNodeId("node-1");
+        localNode.setStatus(ActiveNodeStatusEnum.ONLINE);
+        when(scheduleRepository.getAllActiveNodes()).thenReturn(ListUtil.toList(localNode));
+
+        // Mock chunks
+        var chunk = createMockChunkWrapper(BigInteger.TEN, 0, 
+                BigInteger.valueOf(900), BigInteger.valueOf(1050), 1000L);
+        when(rollupRepository.getChunks(any())).thenReturn(ListUtil.toList(chunk));
+
+        // Mock locks
+        for (var taskType : BizTaskTypeEnum.values()) {
+            var mockLock = mock(RLock.class);
+            when(mockLock.tryLock(anyLong(), any(TimeUnit.class))).thenReturn(true);
+            when(redissonClient.getLock(eq("relayer:task:" + taskType.name()))).thenReturn(mockLock);
+        }
+
+        // Mock repository operations
+        when(rollupRepository.deleteBatchesFrom(any())).thenReturn(1);
+        when(rollupRepository.deleteChunksForRollback(any(), anyLong())).thenReturn(1);
+        when(rollupRepository.deleteBatchProveRequestsFrom(any())).thenReturn(1);
+        when(rollupRepository.deleteRollupReliableTransactionsFrom(any())).thenReturn(1);
+        when(rollupRepository.deleteL1MsgReliableTransactionsAboveNonce(anyLong())).thenReturn(1);
+        when(l2MerkleTreeRepository.deleteMerkleTreesFrom(any())).thenReturn(1);
+        when(mailboxRepository.resetL1MsgsAboveNonce(anyLong())).thenReturn(1);
+        when(mailboxRepository.deleteL2MsgsForRollback(any(), any())).thenReturn(1);
+        when(mailboxRepository.resetL2MsgsForRollback(any(), any())).thenReturn(1);
+        when(oracleRepository.deleteBatchOracleRequestsFrom(any())).thenReturn(1);
+        when(rollupRepository.deleteOracleBatchFeeFeedTransactionsFrom(any())).thenReturn(1);
+
+        // Mock cache operations
+        var mockKeys = mock(org.redisson.api.RKeys.class);
+        when(redissonClient.getKeys()).thenReturn(mockKeys);
+        when(mockKeys.deleteByPattern("L2_BLOCK_TRACE@*")).thenReturn(100L);
+        when(mockKeys.deleteByPattern("L2_CHUNK@*")).thenReturn(50L);
+        when(mockKeys.deleteByPattern("L2_BATCH@*")).thenReturn(10L);
+        when(mockKeys.deleteByPattern("L2_MERKLE_TREE-*")).thenReturn(10L);
+
+        adminGrpcService.rollbackToSubchainHeight(req, responseObserver);
+
+        Assert.assertTrue(responseObserver.awaitCompletion(10, TimeUnit.SECONDS));
+        List<Response> results = responseObserver.getValues();
+        Assert.assertEquals(1, results.size());
+        Assert.assertEquals(0, results.get(0).getCode());
+
+        // Verify all cache patterns were cleared
+        verify(mockKeys).deleteByPattern("L2_BLOCK_TRACE@*");
+        verify(mockKeys).deleteByPattern("L2_CHUNK@*");
+        verify(mockKeys).deleteByPattern("L2_BATCH@*");
+        verify(mockKeys).deleteByPattern("L2_MERKLE_TREE-*");
+
+        // Verify in-memory cache was cleared
+        verify(l2BlockTracesCacheForCurrChunk).clear();
+    }
+
+    /**
+     * Helper method to create a mock ChunkWrapper
+     */
+    private ChunkWrapper createMockChunkWrapper(BigInteger batchIndex, long chunkIndex, 
+            BigInteger startBlock, BigInteger endBlock, long gasSum) {
+        var chunk = mock(ChunkWrapper.class);
+        when(chunk.getBatchIndex()).thenReturn(batchIndex);
+        when(chunk.getChunkIndex()).thenReturn(chunkIndex);
+        when(chunk.getStartBlockNumber()).thenReturn(startBlock);
+        when(chunk.getEndBlockNumber()).thenReturn(endBlock);
+        when(chunk.getGasSum()).thenReturn(gasSum);
+        return chunk;
     }
 }

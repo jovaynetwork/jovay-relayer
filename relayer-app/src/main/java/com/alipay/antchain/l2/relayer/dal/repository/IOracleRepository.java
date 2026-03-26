@@ -141,4 +141,13 @@ public interface IOracleRepository {
      * @param state the new transaction state to set
      */
     void updateRequestState(String requestIndex, OracleTypeEnum oracleType, OracleRequestTypeEnum requestType, OracleTransactionStateEnum state);
+
+    /**
+     * Deletes oracle requests for batch rollback operation.
+     * Deletes L2_BATCH_COMMIT and L2_BATCH_PROVE oracle requests with request_index >= fromBatchIndex.
+     *
+     * @param fromBatchIndex the starting batch index (inclusive)
+     * @return the number of deleted records
+     */
+    int deleteBatchOracleRequestsFrom(BigInteger fromBatchIndex);
 }

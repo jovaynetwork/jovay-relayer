@@ -6,6 +6,19 @@
   },
   {
     "type": "function",
+    "name": "CONTRACT_VERSION",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "addRelayer",
     "inputs": [
       {
@@ -42,6 +55,29 @@
   },
   {
     "type": "function",
+    "name": "commitBatchWithDaProof",
+    "inputs": [
+      {
+        "name": "_batchHeader",
+        "type": "bytes",
+        "internalType": "bytes"
+      },
+      {
+        "name": "_totalL1MessagePopped",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "_daProof",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "committedBatches",
     "inputs": [
       {
@@ -55,6 +91,19 @@
         "name": "batchHash",
         "type": "bytes32",
         "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "daType",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint8",
+        "internalType": "uint8"
       }
     ],
     "stateMutability": "view"
@@ -447,12 +496,12 @@
   },
   {
     "type": "function",
-    "name": "setL1BlobNumberLimit",
+    "name": "setDaType",
     "inputs": [
       {
-        "name": "_l1BlobNumberLimit",
-        "type": "uint32",
-        "internalType": "uint32"
+        "name": "_type",
+        "type": "uint8",
+        "internalType": "uint8"
       }
     ],
     "outputs": [],
@@ -460,12 +509,12 @@
   },
   {
     "type": "function",
-    "name": "setLastZkVerifiedBatch",
+    "name": "setL1BlobNumberLimit",
     "inputs": [
       {
-        "name": "_lastZkVerifiedBatch",
-        "type": "uint256",
-        "internalType": "uint256"
+        "name": "_l1BlobNumberLimit",
+        "type": "uint32",
+        "internalType": "uint32"
       }
     ],
     "outputs": [],
@@ -720,6 +769,25 @@
   },
   {
     "type": "event",
+    "name": "DaTypeAcceptedChanged",
+    "inputs": [
+      {
+        "name": "oldValue",
+        "type": "uint8",
+        "indexed": false,
+        "internalType": "uint8"
+      },
+      {
+        "name": "newValue",
+        "type": "uint8",
+        "indexed": false,
+        "internalType": "uint8"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "Initialized",
     "inputs": [
       {
@@ -810,6 +878,25 @@
   {
     "type": "event",
     "name": "MaxTxsInChunkChanged",
+    "inputs": [
+      {
+        "name": "oldValue",
+        "type": "uint32",
+        "indexed": false,
+        "internalType": "uint32"
+      },
+      {
+        "name": "newValue",
+        "type": "uint32",
+        "indexed": false,
+        "internalType": "uint32"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ModeChanged",
     "inputs": [
       {
         "name": "oldValue",
@@ -1054,6 +1141,25 @@
   },
   {
     "type": "event",
+    "name": "ZkVerificationStartBatchAndZkLastVerifiedBatchChanged",
+    "inputs": [
+      {
+        "name": "zkVsb",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "zkLastvb",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "ZkVerifierChanged",
     "inputs": [
       {
@@ -1070,10 +1176,5 @@
       }
     ],
     "anonymous": false
-  },
-  {
-    "type": "error",
-    "name": "NotSupportZkProof",
-    "inputs": []
   }
 ]

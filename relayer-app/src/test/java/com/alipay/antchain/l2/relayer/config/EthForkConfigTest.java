@@ -25,6 +25,7 @@ import com.alipay.antchain.l2.relayer.core.blockchain.bpo.EthBlobForkConfig;
 import jakarta.annotation.Resource;
 import org.junit.Assert;
 import org.junit.Test;
+import org.springframework.test.context.bean.override.convention.TestBean;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 public class EthForkConfigTest extends TestBase {
@@ -41,7 +42,7 @@ public class EthForkConfigTest extends TestBase {
     @MockitoBean
     private L2Client l2Client;
 
-    @MockitoBean
+    @TestBean
     private RollupConfig rollupConfig;
 
     @Test

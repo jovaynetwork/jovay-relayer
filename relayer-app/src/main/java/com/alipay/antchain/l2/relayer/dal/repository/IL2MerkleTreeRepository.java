@@ -51,4 +51,12 @@ public interface IL2MerkleTreeRepository {
      * @return the append-only Merkle tree associated with the batch, or null if not found
      */
     AppendMerkleTree getMerkleTree(BigInteger batchIndex);
+
+    /**
+     * Deletes all Merkle trees with batch_index >= the specified index.
+     *
+     * @param fromBatchIndex the starting batch index (inclusive)
+     * @return the number of deleted records
+     */
+    int deleteMerkleTreesFrom(BigInteger fromBatchIndex);
 }

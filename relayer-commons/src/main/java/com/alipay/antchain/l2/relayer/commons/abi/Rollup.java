@@ -29,6 +29,7 @@ import org.web3j.abi.datatypes.Bool;
 import org.web3j.abi.datatypes.Event;
 import org.web3j.abi.datatypes.Function;
 import org.web3j.abi.datatypes.Type;
+import org.web3j.abi.datatypes.Utf8String;
 import org.web3j.abi.datatypes.generated.Bytes32;
 import org.web3j.abi.datatypes.generated.Uint256;
 import org.web3j.abi.datatypes.generated.Uint32;
@@ -59,11 +60,17 @@ import org.web3j.tx.gas.ContractGasProvider;
 public class Rollup extends Contract {
     public static final String BINARY = "Bin file was not provided";
 
+    public static final String FUNC_CONTRACT_VERSION = "CONTRACT_VERSION";
+
     public static final String FUNC_ADDRELAYER = "addRelayer";
 
     public static final String FUNC_COMMITBATCH = "commitBatch";
 
+    public static final String FUNC_COMMITBATCHWITHDAPROOF = "commitBatchWithDaProof";
+
     public static final String FUNC_COMMITTEDBATCHES = "committedBatches";
+
+    public static final String FUNC_DATYPE = "daType";
 
     public static final String FUNC_FINALIZEDSTATEROOTS = "finalizedStateRoots";
 
@@ -113,9 +120,9 @@ public class Rollup extends Contract {
 
     public static final String FUNC_ROLLUPTIMELIMIT = "rollupTimeLimit";
 
-    public static final String FUNC_SETL1BLOBNUMBERLIMIT = "setL1BlobNumberLimit";
+    public static final String FUNC_SETDATYPE = "setDaType";
 
-    public static final String FUNC_SETLASTZKVERIFIEDBATCH = "setLastZkVerifiedBatch";
+    public static final String FUNC_SETL1BLOBNUMBERLIMIT = "setL1BlobNumberLimit";
 
     public static final String FUNC_SETMAXBLOCKINCHUNK = "setMaxBlockInChunk";
 
@@ -157,6 +164,10 @@ public class Rollup extends Contract {
             Arrays.<TypeReference<?>>asList(new TypeReference<Uint256>(true) {}, new TypeReference<Bytes32>(true) {}));
     ;
 
+    public static final Event DATYPEACCEPTEDCHANGED_EVENT = new Event("DaTypeAcceptedChanged", 
+            Arrays.<TypeReference<?>>asList(new TypeReference<Uint8>() {}, new TypeReference<Uint8>() {}));
+    ;
+
     public static final Event INITIALIZED_EVENT = new Event("Initialized", 
             Arrays.<TypeReference<?>>asList(new TypeReference<Uint8>() {}));
     ;
@@ -178,6 +189,10 @@ public class Rollup extends Contract {
     ;
 
     public static final Event MAXTXSINCHUNKCHANGED_EVENT = new Event("MaxTxsInChunkChanged", 
+            Arrays.<TypeReference<?>>asList(new TypeReference<Uint32>() {}, new TypeReference<Uint32>() {}));
+    ;
+
+    public static final Event MODECHANGED_EVENT = new Event("ModeChanged", 
             Arrays.<TypeReference<?>>asList(new TypeReference<Uint32>() {}, new TypeReference<Uint32>() {}));
     ;
 
@@ -221,6 +236,10 @@ public class Rollup extends Contract {
             Arrays.<TypeReference<?>>asList(new TypeReference<Uint8>() {}, new TypeReference<Uint256>(true) {}, new TypeReference<Bytes32>(true) {}, new TypeReference<Bytes32>() {}, new TypeReference<Bytes32>() {}));
     ;
 
+    public static final Event ZKVERIFICATIONSTARTBATCHANDZKLASTVERIFIEDBATCHCHANGED_EVENT = new Event("ZkVerificationStartBatchAndZkLastVerifiedBatchChanged", 
+            Arrays.<TypeReference<?>>asList(new TypeReference<Uint256>() {}, new TypeReference<Uint256>() {}));
+    ;
+
     public static final Event ZKVERIFIERCHANGED_EVENT = new Event("ZkVerifierChanged", 
             Arrays.<TypeReference<?>>asList(new TypeReference<Address>() {}, new TypeReference<Address>() {}));
     ;
@@ -247,6 +266,13 @@ public class Rollup extends Contract {
         super(BINARY, contractAddress, web3j, transactionManager, contractGasProvider);
     }
 
+    public RemoteFunctionCall<String> CONTRACT_VERSION() {
+        final Function function = new Function(FUNC_CONTRACT_VERSION, 
+                Arrays.<Type>asList(), 
+                Arrays.<TypeReference<?>>asList(new TypeReference<Utf8String>() {}));
+        return executeRemoteCallSingleValueReturn(function, String.class);
+    }
+
     public RemoteFunctionCall<TransactionReceipt> addRelayer(String _account) {
         final Function function = new Function(
                 FUNC_ADDRELAYER, 
@@ -266,11 +292,29 @@ public class Rollup extends Contract {
         return executeRemoteCallTransaction(function);
     }
 
+    public RemoteFunctionCall<TransactionReceipt> commitBatchWithDaProof(byte[] _batchHeader,
+            BigInteger _totalL1MessagePopped, byte[] _daProof) {
+        final Function function = new Function(
+                FUNC_COMMITBATCHWITHDAPROOF, 
+                Arrays.<Type>asList(new org.web3j.abi.datatypes.DynamicBytes(_batchHeader), 
+                new org.web3j.abi.datatypes.generated.Uint256(_totalL1MessagePopped), 
+                new org.web3j.abi.datatypes.DynamicBytes(_daProof)), 
+                Collections.<TypeReference<?>>emptyList());
+        return executeRemoteCallTransaction(function);
+    }
+
     public RemoteFunctionCall<byte[]> committedBatches(BigInteger batchIndex) {
         final Function function = new Function(FUNC_COMMITTEDBATCHES, 
                 Arrays.<Type>asList(new org.web3j.abi.datatypes.generated.Uint256(batchIndex)), 
                 Arrays.<TypeReference<?>>asList(new TypeReference<Bytes32>() {}));
         return executeRemoteCallSingleValueReturn(function, byte[].class);
+    }
+
+    public RemoteFunctionCall<BigInteger> daType() {
+        final Function function = new Function(FUNC_DATYPE, 
+                Arrays.<Type>asList(), 
+                Arrays.<TypeReference<?>>asList(new TypeReference<Uint8>() {}));
+        return executeRemoteCallSingleValueReturn(function, BigInteger.class);
     }
 
     public RemoteFunctionCall<byte[]> finalizedStateRoots(BigInteger batchIndex) {
@@ -461,20 +505,19 @@ public class Rollup extends Contract {
         return executeRemoteCallSingleValueReturn(function, BigInteger.class);
     }
 
+    public RemoteFunctionCall<TransactionReceipt> setDaType(BigInteger _type) {
+        final Function function = new Function(
+                FUNC_SETDATYPE, 
+                Arrays.<Type>asList(new org.web3j.abi.datatypes.generated.Uint8(_type)), 
+                Collections.<TypeReference<?>>emptyList());
+        return executeRemoteCallTransaction(function);
+    }
+
     public RemoteFunctionCall<TransactionReceipt> setL1BlobNumberLimit(
             BigInteger _l1BlobNumberLimit) {
         final Function function = new Function(
                 FUNC_SETL1BLOBNUMBERLIMIT, 
                 Arrays.<Type>asList(new org.web3j.abi.datatypes.generated.Uint32(_l1BlobNumberLimit)), 
-                Collections.<TypeReference<?>>emptyList());
-        return executeRemoteCallTransaction(function);
-    }
-
-    public RemoteFunctionCall<TransactionReceipt> setLastZkVerifiedBatch(
-            BigInteger _lastZkVerifiedBatch) {
-        final Function function = new Function(
-                FUNC_SETLASTZKVERIFIEDBATCH, 
-                Arrays.<Type>asList(new org.web3j.abi.datatypes.generated.Uint256(_lastZkVerifiedBatch)), 
                 Collections.<TypeReference<?>>emptyList());
         return executeRemoteCallTransaction(function);
     }
@@ -694,6 +737,41 @@ public class Rollup extends Contract {
         return commitBatchEventFlowable(filter);
     }
 
+    public static List<DaTypeAcceptedChangedEventResponse> getDaTypeAcceptedChangedEvents(
+            TransactionReceipt transactionReceipt) {
+        List<Contract.EventValuesWithLog> valueList = staticExtractEventParametersWithLog(DATYPEACCEPTEDCHANGED_EVENT, transactionReceipt);
+        ArrayList<DaTypeAcceptedChangedEventResponse> responses = new ArrayList<DaTypeAcceptedChangedEventResponse>(valueList.size());
+        for (Contract.EventValuesWithLog eventValues : valueList) {
+            DaTypeAcceptedChangedEventResponse typedResponse = new DaTypeAcceptedChangedEventResponse();
+            typedResponse.log = eventValues.getLog();
+            typedResponse.oldValue = (BigInteger) eventValues.getNonIndexedValues().get(0).getValue();
+            typedResponse.newValue = (BigInteger) eventValues.getNonIndexedValues().get(1).getValue();
+            responses.add(typedResponse);
+        }
+        return responses;
+    }
+
+    public static DaTypeAcceptedChangedEventResponse getDaTypeAcceptedChangedEventFromLog(Log log) {
+        Contract.EventValuesWithLog eventValues = staticExtractEventParametersWithLog(DATYPEACCEPTEDCHANGED_EVENT, log);
+        DaTypeAcceptedChangedEventResponse typedResponse = new DaTypeAcceptedChangedEventResponse();
+        typedResponse.log = log;
+        typedResponse.oldValue = (BigInteger) eventValues.getNonIndexedValues().get(0).getValue();
+        typedResponse.newValue = (BigInteger) eventValues.getNonIndexedValues().get(1).getValue();
+        return typedResponse;
+    }
+
+    public Flowable<DaTypeAcceptedChangedEventResponse> daTypeAcceptedChangedEventFlowable(
+            EthFilter filter) {
+        return web3j.ethLogFlowable(filter).map(log -> getDaTypeAcceptedChangedEventFromLog(log));
+    }
+
+    public Flowable<DaTypeAcceptedChangedEventResponse> daTypeAcceptedChangedEventFlowable(
+            DefaultBlockParameter startBlock, DefaultBlockParameter endBlock) {
+        EthFilter filter = new EthFilter(startBlock, endBlock, getContractAddress());
+        filter.addSingleTopic(EventEncoder.encode(DATYPEACCEPTEDCHANGED_EVENT));
+        return daTypeAcceptedChangedEventFlowable(filter);
+    }
+
     public static List<InitializedEventResponse> getInitializedEvents(
             TransactionReceipt transactionReceipt) {
         List<Contract.EventValuesWithLog> valueList = staticExtractEventParametersWithLog(INITIALIZED_EVENT, transactionReceipt);
@@ -901,6 +979,40 @@ public class Rollup extends Contract {
         EthFilter filter = new EthFilter(startBlock, endBlock, getContractAddress());
         filter.addSingleTopic(EventEncoder.encode(MAXTXSINCHUNKCHANGED_EVENT));
         return maxTxsInChunkChangedEventFlowable(filter);
+    }
+
+    public static List<ModeChangedEventResponse> getModeChangedEvents(
+            TransactionReceipt transactionReceipt) {
+        List<Contract.EventValuesWithLog> valueList = staticExtractEventParametersWithLog(MODECHANGED_EVENT, transactionReceipt);
+        ArrayList<ModeChangedEventResponse> responses = new ArrayList<ModeChangedEventResponse>(valueList.size());
+        for (Contract.EventValuesWithLog eventValues : valueList) {
+            ModeChangedEventResponse typedResponse = new ModeChangedEventResponse();
+            typedResponse.log = eventValues.getLog();
+            typedResponse.oldValue = (BigInteger) eventValues.getNonIndexedValues().get(0).getValue();
+            typedResponse.newValue = (BigInteger) eventValues.getNonIndexedValues().get(1).getValue();
+            responses.add(typedResponse);
+        }
+        return responses;
+    }
+
+    public static ModeChangedEventResponse getModeChangedEventFromLog(Log log) {
+        Contract.EventValuesWithLog eventValues = staticExtractEventParametersWithLog(MODECHANGED_EVENT, log);
+        ModeChangedEventResponse typedResponse = new ModeChangedEventResponse();
+        typedResponse.log = log;
+        typedResponse.oldValue = (BigInteger) eventValues.getNonIndexedValues().get(0).getValue();
+        typedResponse.newValue = (BigInteger) eventValues.getNonIndexedValues().get(1).getValue();
+        return typedResponse;
+    }
+
+    public Flowable<ModeChangedEventResponse> modeChangedEventFlowable(EthFilter filter) {
+        return web3j.ethLogFlowable(filter).map(log -> getModeChangedEventFromLog(log));
+    }
+
+    public Flowable<ModeChangedEventResponse> modeChangedEventFlowable(
+            DefaultBlockParameter startBlock, DefaultBlockParameter endBlock) {
+        EthFilter filter = new EthFilter(startBlock, endBlock, getContractAddress());
+        filter.addSingleTopic(EventEncoder.encode(MODECHANGED_EVENT));
+        return modeChangedEventFlowable(filter);
     }
 
     public static List<OwnershipTransferredEventResponse> getOwnershipTransferredEvents(
@@ -1259,6 +1371,42 @@ public class Rollup extends Contract {
         return verifyBatchEventFlowable(filter);
     }
 
+    public static List<ZkVerificationStartBatchAndZkLastVerifiedBatchChangedEventResponse> getZkVerificationStartBatchAndZkLastVerifiedBatchChangedEvents(
+            TransactionReceipt transactionReceipt) {
+        List<Contract.EventValuesWithLog> valueList = staticExtractEventParametersWithLog(ZKVERIFICATIONSTARTBATCHANDZKLASTVERIFIEDBATCHCHANGED_EVENT, transactionReceipt);
+        ArrayList<ZkVerificationStartBatchAndZkLastVerifiedBatchChangedEventResponse> responses = new ArrayList<ZkVerificationStartBatchAndZkLastVerifiedBatchChangedEventResponse>(valueList.size());
+        for (Contract.EventValuesWithLog eventValues : valueList) {
+            ZkVerificationStartBatchAndZkLastVerifiedBatchChangedEventResponse typedResponse = new ZkVerificationStartBatchAndZkLastVerifiedBatchChangedEventResponse();
+            typedResponse.log = eventValues.getLog();
+            typedResponse.zkVsb = (BigInteger) eventValues.getNonIndexedValues().get(0).getValue();
+            typedResponse.zkLastvb = (BigInteger) eventValues.getNonIndexedValues().get(1).getValue();
+            responses.add(typedResponse);
+        }
+        return responses;
+    }
+
+    public static ZkVerificationStartBatchAndZkLastVerifiedBatchChangedEventResponse getZkVerificationStartBatchAndZkLastVerifiedBatchChangedEventFromLog(
+            Log log) {
+        Contract.EventValuesWithLog eventValues = staticExtractEventParametersWithLog(ZKVERIFICATIONSTARTBATCHANDZKLASTVERIFIEDBATCHCHANGED_EVENT, log);
+        ZkVerificationStartBatchAndZkLastVerifiedBatchChangedEventResponse typedResponse = new ZkVerificationStartBatchAndZkLastVerifiedBatchChangedEventResponse();
+        typedResponse.log = log;
+        typedResponse.zkVsb = (BigInteger) eventValues.getNonIndexedValues().get(0).getValue();
+        typedResponse.zkLastvb = (BigInteger) eventValues.getNonIndexedValues().get(1).getValue();
+        return typedResponse;
+    }
+
+    public Flowable<ZkVerificationStartBatchAndZkLastVerifiedBatchChangedEventResponse> zkVerificationStartBatchAndZkLastVerifiedBatchChangedEventFlowable(
+            EthFilter filter) {
+        return web3j.ethLogFlowable(filter).map(log -> getZkVerificationStartBatchAndZkLastVerifiedBatchChangedEventFromLog(log));
+    }
+
+    public Flowable<ZkVerificationStartBatchAndZkLastVerifiedBatchChangedEventResponse> zkVerificationStartBatchAndZkLastVerifiedBatchChangedEventFlowable(
+            DefaultBlockParameter startBlock, DefaultBlockParameter endBlock) {
+        EthFilter filter = new EthFilter(startBlock, endBlock, getContractAddress());
+        filter.addSingleTopic(EventEncoder.encode(ZKVERIFICATIONSTARTBATCHANDZKLASTVERIFIEDBATCHCHANGED_EVENT));
+        return zkVerificationStartBatchAndZkLastVerifiedBatchChangedEventFlowable(filter);
+    }
+
     public static List<ZkVerifierChangedEventResponse> getZkVerifierChangedEvents(
             TransactionReceipt transactionReceipt) {
         List<Contract.EventValuesWithLog> valueList = staticExtractEventParametersWithLog(ZKVERIFIERCHANGED_EVENT, transactionReceipt);
@@ -1330,6 +1478,12 @@ public class Rollup extends Contract {
         public byte[] batchHash;
     }
 
+    public static class DaTypeAcceptedChangedEventResponse extends BaseEventResponse {
+        public BigInteger oldValue;
+
+        public BigInteger newValue;
+    }
+
     public static class InitializedEventResponse extends BaseEventResponse {
         public BigInteger version;
     }
@@ -1359,6 +1513,12 @@ public class Rollup extends Contract {
     }
 
     public static class MaxTxsInChunkChangedEventResponse extends BaseEventResponse {
+        public BigInteger oldValue;
+
+        public BigInteger newValue;
+    }
+
+    public static class ModeChangedEventResponse extends BaseEventResponse {
         public BigInteger oldValue;
 
         public BigInteger newValue;
@@ -1434,6 +1594,12 @@ public class Rollup extends Contract {
         public byte[] stateRoot;
 
         public byte[] l2MsgRoot;
+    }
+
+    public static class ZkVerificationStartBatchAndZkLastVerifiedBatchChangedEventResponse extends BaseEventResponse {
+        public BigInteger zkVsb;
+
+        public BigInteger zkLastvb;
     }
 
     public static class ZkVerifierChangedEventResponse extends BaseEventResponse {

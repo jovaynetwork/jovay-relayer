@@ -41,10 +41,12 @@ import com.alipay.antchain.l2.relayer.engine.DistributedTaskEngine;
 import jakarta.annotation.Resource;
 import org.junit.Before;
 import org.junit.Test;
+import org.springframework.test.context.bean.override.convention.TestBean;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.web3j.protocol.Web3j;
 import org.web3j.utils.Numeric;
 
+import static org.junit.Assert.*;
 import static org.mockito.Mockito.*;
 
 public class MailboxServiceTest extends TestBase {
@@ -79,7 +81,7 @@ public class MailboxServiceTest extends TestBase {
     @MockitoBean
     private L2Client l2Client;
 
-    @MockitoBean
+    @TestBean
     private RollupConfig rollupConfig;
 
     @MockitoBean
@@ -268,6 +270,147 @@ public class MailboxServiceTest extends TestBase {
 
         verify(l2MerkleTreeRepository, times(1)).saveMerkleTree(notNull(), eq(BigInteger.ONE));
         verify(mailboxRepository, times(1)).saveL2MsgProofs(notNull());
+        verify(rollupRepository, times(1)).updateRollupNumberRecord(
+                eq(ChainTypeEnum.LAYER_TWO),
+                eq(RollupNumberRecordTypeEnum.NEXT_MSG_PROVE_BATCH),
+                eq(BigInteger.valueOf(2))
+        );
+    }
+
+    // ==================== Negative Case Tests ====================
+
+    @Test
+    public void testProcessL1MsgBatch_L2ClientException() {
+        when(l2Client.queryFinalizeL1MsgNonce()).thenThrow(new RuntimeException("L2 client connection failed"));
+
+        try {
+            mailboxService.processL1MsgBatch();
+            fail("Should throw exception");
+        } catch (Exception e) {
+            assertNotNull(e);
+            assertTrue(e.getMessage().contains("L2 client connection failed"));
+        }
+    }
+
+    @Test
+    public void testProcessL1MsgBatch_MessageNotFound() {
+        when(l2Client.queryFinalizeL1MsgNonce()).thenReturn(BigInteger.ONE);
+        when(mailboxRepository.peekReadyMessages(notNull(), anyInt())).thenReturn(ListUtil.empty());
+        when(mailboxRepository.getMessage(notNull(), anyLong())).thenReturn(null);
+
+        mailboxService.processL1MsgBatch();
+
+        verify(l2Client, never()).sendL1MsgTx(any());
+    }
+
+    @Test
+    public void testProcessL1MsgBatch_SendTransactionFailed() {
+        L1MsgTransactionInfo tx1 = new L1MsgTransactionInfo(
+                new L1MsgTransaction(BigInteger.valueOf(2), BigInteger.valueOf(1_000), "123"),
+                BigInteger.ONE,
+                HexUtil.encodeHexStr(RandomUtil.randomBytes(32))
+        );
+
+        List<InterBlockchainMessageDO> messageDOS = ListUtil.toList(
+                InterBlockchainMessageDO.fromL1MsgTx(BigInteger.ONE, tx1.getSourceTxHash(), tx1.getL1MsgTransaction())
+        );
+
+        when(l2Client.queryFinalizeL1MsgNonce()).thenReturn(BigInteger.ONE);
+        when(mailboxRepository.peekReadyMessages(notNull(), anyInt())).thenReturn(messageDOS);
+        when(l2Client.sendL1MsgTx(notNull())).thenThrow(new RuntimeException("Transaction send failed"));
+
+        try {
+            mailboxService.processL1MsgBatch();
+            fail("Should throw exception");
+        } catch (Exception e) {
+            assertNotNull(e);
+            assertTrue(e.getMessage().contains("Transaction send failed"));
+        }
+    }
+
+    @Test
+    public void testProveL2Msg_BatchNotFound() {
+        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_MSG_PROVE_BATCH)))
+                .thenReturn(BigInteger.ONE);
+        when(rollupRepository.hasBatch(eq(BigInteger.ONE))).thenReturn(false);
+
+        mailboxService.proveL2Msg();
+
+        verify(l2MerkleTreeRepository, never()).saveMerkleTree(any(), any());
+        verify(mailboxRepository, never()).saveL2MsgProofs(any());
+    }
+
+    @Test
+    public void testProveL2Msg_ProveRequestNotCommitted() {
+        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_MSG_PROVE_BATCH)))
+                .thenReturn(BigInteger.ONE);
+        when(rollupRepository.hasBatch(eq(BigInteger.ONE))).thenReturn(true);
+        when(rollupRepository.getBatchProveRequest(eq(BigInteger.ONE), eq(ProveTypeEnum.TEE_PROOF)))
+                .thenReturn(new BatchProveRequestDO(BigInteger.ONE, ProveTypeEnum.TEE_PROOF, new byte[]{}, BatchProveRequestStateEnum.PENDING, new Date()));
+
+        mailboxService.proveL2Msg();
+
+        verify(l2MerkleTreeRepository, never()).saveMerkleTree(any(), any());
+        verify(mailboxRepository, never()).saveL2MsgProofs(any());
+    }
+
+    @Test
+    public void testProveL2Msg_MerkleTreeException() {
+        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_MSG_PROVE_BATCH)))
+                .thenReturn(BigInteger.ONE);
+        when(rollupRepository.hasBatch(eq(BigInteger.ONE))).thenReturn(true);
+        when(rollupRepository.getBatchProveRequest(eq(BigInteger.ONE), eq(ProveTypeEnum.TEE_PROOF)))
+                .thenReturn(new BatchProveRequestDO(BigInteger.ONE, ProveTypeEnum.TEE_PROOF, new byte[]{}, BatchProveRequestStateEnum.COMMITTED, new Date()));
+        when(l2MerkleTreeRepository.getMerkleTree(eq(BigInteger.ZERO))).thenThrow(new RuntimeException("Merkle tree corruption"));
+
+        try {
+            mailboxService.proveL2Msg();
+            fail("Should throw exception");
+        } catch (Exception e) {
+            assertNotNull(e);
+            assertTrue(e.getMessage().contains("Merkle tree corruption"));
+        }
+    }
+
+    @Test
+    public void testProcessL1MsgBatch_InvalidMessageState() {
+        L1MsgTransactionInfo tx1 = new L1MsgTransactionInfo(
+                new L1MsgTransaction(BigInteger.valueOf(2), BigInteger.valueOf(1_000), "123"),
+                BigInteger.ONE,
+                HexUtil.encodeHexStr(RandomUtil.randomBytes(32))
+        );
+
+        when(l2Client.queryFinalizeL1MsgNonce()).thenReturn(BigInteger.ONE);
+        when(mailboxRepository.peekReadyMessages(notNull(), anyInt())).thenReturn(ListUtil.empty());
+
+        InterBlockchainMessageDO messageDO = InterBlockchainMessageDO.fromL1MsgTx(
+                tx1.getSourceBlockHeight(),
+                tx1.getSourceTxHash(),
+                tx1.getL1MsgTransaction()
+        );
+        messageDO.setState(InterBlockchainMessageStateEnum.MSG_COMMITTED);
+        when(mailboxRepository.getMessage(notNull(), eq(2L))).thenReturn(messageDO);
+
+        mailboxService.processL1MsgBatch();
+
+        verify(l2Client, never()).sendL1MsgTx(any());
+    }
+
+    @Test
+    public void testProveL2Msg_EmptyMessageHashes() {
+        when(rollupRepository.getRollupNumberRecord(eq(ChainTypeEnum.LAYER_TWO), eq(RollupNumberRecordTypeEnum.NEXT_MSG_PROVE_BATCH)))
+                .thenReturn(BigInteger.ONE);
+        when(rollupRepository.hasBatch(eq(BigInteger.ONE))).thenReturn(true);
+        when(rollupRepository.getBatchProveRequest(eq(BigInteger.ONE), eq(ProveTypeEnum.TEE_PROOF)))
+                .thenReturn(new BatchProveRequestDO(BigInteger.ONE, ProveTypeEnum.TEE_PROOF, new byte[]{}, BatchProveRequestStateEnum.COMMITTED, new Date()));
+        when(l2MerkleTreeRepository.getMerkleTree(eq(BigInteger.ZERO))).thenReturn(
+                new AppendMerkleTree(BigInteger.ZERO, new byte[]{})
+        );
+        when(mailboxRepository.getMsgHashes(eq(InterBlockchainMessageTypeEnum.L2_MSG), eq(BigInteger.ONE))).thenReturn(ListUtil.empty());
+
+        mailboxService.proveL2Msg();
+
+        verify(l2MerkleTreeRepository, times(1)).saveMerkleTree(notNull(), eq(BigInteger.ONE));
         verify(rollupRepository, times(1)).updateRollupNumberRecord(
                 eq(ChainTypeEnum.LAYER_TWO),
                 eq(RollupNumberRecordTypeEnum.NEXT_MSG_PROVE_BATCH),

@@ -26,6 +26,7 @@ message Response {
         CommitBatchManuallyResp commitBatchManuallyResp = 15;
         CommitProofManuallyResp commitProofManuallyResp = 16;
         QueryCurrNonceResp queryCurrNonceResp = 17;
+        RollbackToSubchainHeightResp rollbackToSubchainHeightResp = 18;
     }
 }
 
@@ -243,6 +244,7 @@ message WasteEthAccountNonceResp {
 
 message CommitBatchManuallyReq {
     uint64 batchIndex = 1;
+    bytes rawDaProof = 2;
 }
 
 message CommitBatchManuallyResp {
@@ -287,6 +289,22 @@ message RefetchProofReq {
     string proofType = 1;
     string fromBatchIndex = 2;
     string toBatchIndex = 3;
+}
+
+// Subchain height rollback related messages
+message RollbackToSubchainHeightReq {
+    // The target batch index to rollback to (batches >= this index will be deleted)
+    uint64 targetBatchIndex = 1;
+    // The target block height to rollback to (BLOCK_PROCESSED will be set to this value - 1)
+    // The system will automatically find the corresponding chunk using findChunkByBlockHeight
+    uint64 targetBlockHeight = 2;
+    // The L1 message nonce threshold (L1 messages with nonce > this value will be reset)
+    uint64 l1MsgNonceThreshold = 3;
+}
+
+message RollbackToSubchainHeightResp {
+    // Summary of rollback operation
+    string summary = 1;
 }
 
 service AdminService {
@@ -336,4 +354,6 @@ service AdminService {
     rpc queryCurrNonce(QueryCurrNonceReq) returns (Response) {}
 
     rpc refetchProof(RefetchProofReq) returns (Response) {}
+
+    rpc rollbackToSubchainHeight(RollbackToSubchainHeightReq) returns (Response) {}
 }
