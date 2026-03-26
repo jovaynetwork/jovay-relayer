@@ -1,0 +1,62 @@
+/*
+ * Copyright 2026 Ant Group
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.alipay.antchain.l2.relayer.config;
+
+import com.alipay.antchain.l2.relayer.commons.enums.ParentChainType;
+import com.alipay.antchain.l2.relayer.core.blockchain.helper.INonceResetChecker;
+import com.alipay.antchain.l2.relayer.core.blockchain.helper.NonceResetChecker;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.JUnit4;
+
+import static org.junit.Assert.*;
+
+/**
+ * Unit tests for ParentChainConfig.
+ * <p>
+ * Tests the creation of nonce reset checker beans for different parent chain types.
+ * </p>
+ */
+@RunWith(JUnit4.class)
+public class ParentChainConfigTest {
+
+    /**
+     * Tests that l1NonceResetChecker() returns ETHEREUM_GETH for ETHEREUM parent chain.
+     */
+    @Test
+    public void testL1NonceResetCheckerWhenEthereum() {
+        ParentChainConfig config = new ParentChainConfig();
+
+        INonceResetChecker result = config.l1NonceResetChecker(ParentChainType.ETHEREUM);
+
+        assertNotNull("l1NonceResetChecker should not be null", result);
+        assertEquals("Should return ETHEREUM_GETH checker", NonceResetChecker.ETHEREUM_GETH, result);
+    }
+
+    /**
+     * Tests that l1NonceResetChecker() returns JOVAY for JOVAY parent chain.
+     */
+    @Test
+    public void testL1NonceResetCheckerWhenJovay() {
+        ParentChainConfig config = new ParentChainConfig();
+
+        INonceResetChecker result = config.l1NonceResetChecker(ParentChainType.JOVAY);
+
+        assertNotNull("l1NonceResetChecker should not be null", result);
+        assertEquals("Should return JOVAY checker", NonceResetChecker.JOVAY, result);
+    }
+}
