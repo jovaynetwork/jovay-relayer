@@ -26,6 +26,43 @@ package com.alipay.antchain.l2.relayer.commons.l2basic;
 public interface IChunkCodec {
 
     /**
+     * Batch V0 chunk codec implementation.
+     * <p>
+     * This codec uses the V0 serialization format for chunk data,
+     * which does not include additional metadata in the serialized output.
+     * </p>
+     */
+    IChunkCodec BATCH_V0_CHUNK_CODEC = new IChunkCodec() {
+        @Override
+        public byte[] serialize(Chunk chunk) {
+            return chunk.serialize(false);
+        }
+        @Override
+        public Chunk deserialize(byte[] raw) {
+            return Chunk.deserializeFrom(raw, false);
+        }
+    };
+
+    /**
+     * Batch V2 chunk codec implementation.
+     * <p>
+     * This codec uses the V2 serialization format for chunk data,
+     * which includes additional metadata in the serialized output
+     * for enhanced compatibility and extensibility.
+     * </p>
+     */
+    IChunkCodec BATCH_V2_CHUNK_CODEC = new IChunkCodec() {
+        @Override
+        public byte[] serialize(Chunk chunk) {
+            return chunk.serialize(true);
+        }
+        @Override
+        public Chunk deserialize(byte[] raw) {
+            return Chunk.deserializeFrom(raw, true);
+        }
+    };
+
+    /**
      * Serialize a chunk to bytes.
      * <p>
      * This converts a chunk object into a byte array representation

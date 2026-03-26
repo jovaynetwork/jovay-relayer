@@ -17,6 +17,7 @@
 package com.alipay.antchain.l2.relayer.engine;
 
 import java.math.BigInteger;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -26,6 +27,7 @@ import com.alipay.antchain.l2.relayer.commons.enums.ActiveNodeStatusEnum;
 import com.alipay.antchain.l2.relayer.commons.enums.BizTaskTypeEnum;
 import com.alipay.antchain.l2.relayer.commons.models.ActiveNode;
 import com.alipay.antchain.l2.relayer.commons.models.BizDistributedTask;
+import com.alipay.antchain.l2.relayer.commons.models.IDistributedTask;
 import com.alipay.antchain.l2.relayer.config.RollupConfig;
 import com.alipay.antchain.l2.relayer.core.blockchain.L1Client;
 import com.alipay.antchain.l2.relayer.core.blockchain.L2Client;
@@ -35,10 +37,13 @@ import com.alipay.antchain.l2.relayer.engine.core.Activator;
 import com.alipay.antchain.l2.relayer.engine.core.Dispatcher;
 import com.alipay.antchain.l2.relayer.engine.core.Duty;
 import com.alipay.antchain.l2.relayer.engine.executor.BaseScheduleTaskExecutor;
+import com.alipay.antchain.l2.relayer.service.AdminGrpcService;
+import io.grpc.Server;
 import jakarta.annotation.Resource;
 import org.junit.Before;
 import org.junit.Test;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.test.context.bean.override.convention.TestBean;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.web3j.protocol.Web3j;
 
@@ -61,7 +66,7 @@ public class CoreStructsTest extends TestBase {
     @MockitoBean
     private IOracleRepository oracleRepository;
 
-    @MockitoBean
+    @TestBean
     private RollupConfig rollupConfig;
 
     @MockitoBean
@@ -76,11 +81,20 @@ public class CoreStructsTest extends TestBase {
     @MockitoBean
     private Map<BizTaskTypeEnum, BaseScheduleTaskExecutor> scheduleTaskExecutorMap;
 
+    @TestBean
+    private List<IDistributedTask> runningTaskList;
+
     @MockitoBean(name = "l1Web3j")
     private Web3j l1Web3j;
 
     @MockitoBean(name = "l1ChainId")
     private BigInteger l1ChainId;
+
+    @MockitoBean
+    private AdminGrpcService adminGrpcService;
+
+    @MockitoBean
+    private Server adminGrpcServer;
 
     @Value("#{duty.timeSliceLength}")
     private long timeSliceLength;
@@ -157,6 +171,7 @@ public class CoreStructsTest extends TestBase {
         );
         BaseScheduleTaskExecutor executor = mock(BaseScheduleTaskExecutor.class);
         when(scheduleTaskExecutorMap.get(notNull())).thenReturn(executor);
+        when(scheduleTaskExecutorMap.containsKey(notNull())).thenReturn(true);
         doNothing().when(executor).execute(notNull());
 
         duty.duty();

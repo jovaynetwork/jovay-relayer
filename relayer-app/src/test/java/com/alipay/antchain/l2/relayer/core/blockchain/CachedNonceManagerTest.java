@@ -22,6 +22,7 @@ import com.alipay.antchain.l2.relayer.TestBase;
 import com.alipay.antchain.l2.relayer.commons.enums.ChainTypeEnum;
 import com.alipay.antchain.l2.relayer.config.RollupConfig;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.CachedNonceManager;
+import com.alipay.antchain.l2.relayer.core.blockchain.helper.INonceResetChecker;
 import com.alipay.antchain.l2.relayer.dal.repository.IRollupRepository;
 import com.alipay.antchain.l2.relayer.engine.DistributedTaskEngine;
 import jakarta.annotation.Resource;
@@ -29,6 +30,7 @@ import lombok.SneakyThrows;
 import org.junit.Assert;
 import org.junit.Test;
 import org.redisson.api.RedissonClient;
+import org.springframework.test.context.bean.override.convention.TestBean;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.DefaultBlockParameterName;
@@ -57,7 +59,7 @@ public class CachedNonceManagerTest extends TestBase {
     @MockitoBean
     private DistributedTaskEngine distributedTaskEngine;
 
-    @MockitoBean
+    @TestBean
     private RollupConfig rollupConfig;
 
     @MockitoBean
@@ -65,6 +67,9 @@ public class CachedNonceManagerTest extends TestBase {
 
     @Resource
     private RedissonClient redisson;
+
+    @Resource
+    private INonceResetChecker l1NonceResetChecker;
 
     @Test
     @SneakyThrows
@@ -75,7 +80,7 @@ public class CachedNonceManagerTest extends TestBase {
         when(ethGetTransactionCountReq.send()).thenReturn(ethGetTransactionCount);
         when(l1Web3j.ethGetTransactionCount(anyString(), eq(DefaultBlockParameterName.PENDING))).thenReturn(ethGetTransactionCountReq);
 
-        var cachedNonceManager = new CachedNonceManager(redisson, l1Web3j, 1, "0x1234", ChainTypeEnum.LAYER_ONE, rollupRepository);
+        var cachedNonceManager = new CachedNonceManager(redisson, l1Web3j, 1, "0x1234", ChainTypeEnum.LAYER_ONE, rollupRepository, l1NonceResetChecker);
         var nonce = cachedNonceManager.getNextNonce();
 
         assertEquals(1L, nonce.longValue());
@@ -90,7 +95,7 @@ public class CachedNonceManagerTest extends TestBase {
         when(ethGetTransactionCountReq.send()).thenReturn(ethGetTransactionCount);
         when(l1Web3j.ethGetTransactionCount(anyString(), eq(DefaultBlockParameterName.PENDING))).thenReturn(ethGetTransactionCountReq);
 
-        var cachedNonceManager = new CachedNonceManager(redisson, l1Web3j, 1, "0x1234567890abcdef", ChainTypeEnum.LAYER_ONE, rollupRepository);
+        var cachedNonceManager = new CachedNonceManager(redisson, l1Web3j, 1, "0x1234567890abcdef", ChainTypeEnum.LAYER_ONE, rollupRepository, l1NonceResetChecker);
         
         // First call should fetch from chain and return 10
         var nonce1 = cachedNonceManager.getNextNonce();
@@ -119,7 +124,7 @@ public class CachedNonceManagerTest extends TestBase {
         when(ethGetTransactionCountReq.send()).thenReturn(ethGetTransactionCount);
         when(l1Web3j.ethGetTransactionCount(anyString(), eq(DefaultBlockParameterName.PENDING))).thenReturn(ethGetTransactionCountReq);
 
-        var cachedNonceManager = new CachedNonceManager(redisson, l1Web3j, 1, "0xabcdef1234567890", ChainTypeEnum.LAYER_ONE, rollupRepository);
+        var cachedNonceManager = new CachedNonceManager(redisson, l1Web3j, 1, "0xabcdef1234567890", ChainTypeEnum.LAYER_ONE, rollupRepository, l1NonceResetChecker);
         
         // Query before any getNextNonce call, should fetch from chain
         var currNonce = cachedNonceManager.getNextNonce();
@@ -135,7 +140,7 @@ public class CachedNonceManagerTest extends TestBase {
         when(ethGetTransactionCountReq.send()).thenReturn(ethGetTransactionCount);
         when(l1Web3j.ethGetTransactionCount(anyString(), eq(DefaultBlockParameterName.PENDING))).thenReturn(ethGetTransactionCountReq);
 
-        var cachedNonceManager = new CachedNonceManager(redisson, l1Web3j, 2, "0x1111111111111111", ChainTypeEnum.LAYER_ONE, rollupRepository);
+        var cachedNonceManager = new CachedNonceManager(redisson, l1Web3j, 2, "0x1111111111111111", ChainTypeEnum.LAYER_ONE, rollupRepository, l1NonceResetChecker);
         
         // First call to getNextNonce initializes cache
         var nonce1 = cachedNonceManager.getNextNonce();
@@ -171,7 +176,7 @@ public class CachedNonceManagerTest extends TestBase {
         when(ethGetTransactionCountReq.send()).thenReturn(ethGetTransactionCount);
         when(l1Web3j.ethGetTransactionCount(anyString(), eq(DefaultBlockParameterName.PENDING))).thenReturn(ethGetTransactionCountReq);
 
-        var cachedNonceManager = new CachedNonceManager(redisson, l1Web3j, 1, "0xtest", ChainTypeEnum.LAYER_ONE, rollupRepository);
+        var cachedNonceManager = new CachedNonceManager(redisson, l1Web3j, 1, "0xtest", ChainTypeEnum.LAYER_ONE, rollupRepository, l1NonceResetChecker);
         assertTrue(cachedNonceManager.ifResetNonce(result));
     }
 
@@ -191,7 +196,7 @@ public class CachedNonceManagerTest extends TestBase {
         when(l1Web3j.ethGetTransactionCount(anyString(), eq(DefaultBlockParameterName.PENDING))).thenReturn(ethGetTransactionCountReq);
 
         when(rollupRepository.queryLatestNonce(notNull(), notNull())).thenReturn(BigInteger.valueOf(8804), BigInteger.valueOf(8805));
-        var cachedNonceManager = new CachedNonceManager(redisson, l1Web3j, 1, "0xtest", ChainTypeEnum.LAYER_ONE, rollupRepository);
+        var cachedNonceManager = new CachedNonceManager(redisson, l1Web3j, 1, "0xtest", ChainTypeEnum.LAYER_ONE, rollupRepository, l1NonceResetChecker);
         assertTrue(cachedNonceManager.ifResetNonce(result));
         assertFalse(cachedNonceManager.ifResetNonce(result));
     }
@@ -211,7 +216,7 @@ public class CachedNonceManagerTest extends TestBase {
         when(ethGetTransactionCountReq.send()).thenReturn(ethGetTransactionCount);
         when(l1Web3j.ethGetTransactionCount(anyString(), eq(DefaultBlockParameterName.PENDING))).thenReturn(ethGetTransactionCountReq);
 
-        var cachedNonceManager = new CachedNonceManager(redisson, l1Web3j, 1, "0xtest", ChainTypeEnum.LAYER_ONE, rollupRepository);
+        var cachedNonceManager = new CachedNonceManager(redisson, l1Web3j, 1, "0xtest", ChainTypeEnum.LAYER_ONE, rollupRepository, l1NonceResetChecker);
         assertFalse(cachedNonceManager.ifResetNonce(result));
     }
 
@@ -230,7 +235,7 @@ public class CachedNonceManagerTest extends TestBase {
         when(ethGetTransactionCountReq.send()).thenReturn(ethGetTransactionCount);
         when(l1Web3j.ethGetTransactionCount(anyString(), eq(DefaultBlockParameterName.PENDING))).thenReturn(ethGetTransactionCountReq);
 
-        var cachedNonceManager = new CachedNonceManager(redisson, l1Web3j, 1, "0xtest", ChainTypeEnum.LAYER_ONE, rollupRepository);
+        var cachedNonceManager = new CachedNonceManager(redisson, l1Web3j, 1, "0xtest", ChainTypeEnum.LAYER_ONE, rollupRepository, l1NonceResetChecker);
         assertFalse(cachedNonceManager.ifResetNonce(result));
     }
 
@@ -243,7 +248,7 @@ public class CachedNonceManagerTest extends TestBase {
         when(ethGetTransactionCountReq.send()).thenReturn(ethGetTransactionCount);
         when(l1Web3j.ethGetTransactionCount(anyString(), eq(DefaultBlockParameterName.PENDING))).thenReturn(ethGetTransactionCountReq);
 
-        var cachedNonceManager = new CachedNonceManager(redisson, l1Web3j, 1, "0x2333333333333333", ChainTypeEnum.LAYER_ONE, rollupRepository);
+        var cachedNonceManager = new CachedNonceManager(redisson, l1Web3j, 1, "0x2333333333333333", ChainTypeEnum.LAYER_ONE, rollupRepository, l1NonceResetChecker);
         
         // Initialize cache
         var nonce1 = cachedNonceManager.getNextNonce();
@@ -272,7 +277,7 @@ public class CachedNonceManagerTest extends TestBase {
         when(ethGetTransactionCountReq.send()).thenReturn(ethGetTransactionCount);
         when(l1Web3j.ethGetTransactionCount(anyString(), eq(DefaultBlockParameterName.PENDING))).thenReturn(ethGetTransactionCountReq);
 
-        var cachedNonceManager = new CachedNonceManager(redisson, l1Web3j, 1, "0x2222222222222222", ChainTypeEnum.LAYER_ONE, rollupRepository);
+        var cachedNonceManager = new CachedNonceManager(redisson, l1Web3j, 1, "0x2222222222222222", ChainTypeEnum.LAYER_ONE, rollupRepository, l1NonceResetChecker);
 
         // Initialize cache
         cachedNonceManager.getNextNonce();
@@ -290,7 +295,7 @@ public class CachedNonceManagerTest extends TestBase {
         when(ethGetTransactionCountReq.send()).thenReturn(ethGetTransactionCount);
         when(l1Web3j.ethGetTransactionCount(anyString(), eq(DefaultBlockParameterName.PENDING))).thenReturn(ethGetTransactionCountReq);
 
-        var cachedNonceManager = new CachedNonceManager(redisson, l1Web3j, 1, "0x5555555555555555", ChainTypeEnum.LAYER_ONE, rollupRepository);
+        var cachedNonceManager = new CachedNonceManager(redisson, l1Web3j, 1, "0x5555555555555555", ChainTypeEnum.LAYER_ONE, rollupRepository, l1NonceResetChecker);
         
         // Set nonce into cache directly
         cachedNonceManager.setNonceIntoCache(BigInteger.valueOf(1000));
@@ -309,8 +314,8 @@ public class CachedNonceManagerTest extends TestBase {
         when(ethGetTransactionCountReq.send()).thenReturn(ethGetTransactionCount);
         when(l1Web3j.ethGetTransactionCount(anyString(), eq(DefaultBlockParameterName.PENDING))).thenReturn(ethGetTransactionCountReq);
 
-        var manager1 = new CachedNonceManager(redisson, l1Web3j, 1, "0xaddr1", ChainTypeEnum.LAYER_ONE, rollupRepository);
-        var manager2 = new CachedNonceManager(redisson, l1Web3j, 2, "0xaddr1", ChainTypeEnum.LAYER_ONE, rollupRepository);
+        var manager1 = new CachedNonceManager(redisson, l1Web3j, 1, "0xaddr1", ChainTypeEnum.LAYER_ONE, rollupRepository, l1NonceResetChecker);
+        var manager2 = new CachedNonceManager(redisson, l1Web3j, 2, "0xaddr1", ChainTypeEnum.LAYER_ONE, rollupRepository, l1NonceResetChecker);
 
         // Both should initialize independently
         var nonce1 = manager1.getNextNonce();
@@ -339,8 +344,8 @@ public class CachedNonceManagerTest extends TestBase {
         when(ethGetTransactionCountReq.send()).thenReturn(ethGetTransactionCount);
         when(l1Web3j.ethGetTransactionCount(anyString(), eq(DefaultBlockParameterName.PENDING))).thenReturn(ethGetTransactionCountReq);
 
-        var manager1 = new CachedNonceManager(redisson, l1Web3j, 1, "0xaddress1111", ChainTypeEnum.LAYER_ONE, rollupRepository);
-        var manager2 = new CachedNonceManager(redisson, l1Web3j, 1, "0xaddress2222", ChainTypeEnum.LAYER_ONE, rollupRepository);
+        var manager1 = new CachedNonceManager(redisson, l1Web3j, 1, "0xaddress1111", ChainTypeEnum.LAYER_ONE, rollupRepository, l1NonceResetChecker);
+        var manager2 = new CachedNonceManager(redisson, l1Web3j, 1, "0xaddress2222", ChainTypeEnum.LAYER_ONE, rollupRepository, l1NonceResetChecker);
 
         // Both should initialize independently
         var nonce1 = manager1.getNextNonce();
@@ -368,7 +373,7 @@ public class CachedNonceManagerTest extends TestBase {
         when(ethGetTransactionCountReq.send()).thenReturn(ethGetTransactionCount);
         when(l1Web3j.ethGetTransactionCount(anyString(), eq(DefaultBlockParameterName.PENDING))).thenReturn(ethGetTransactionCountReq);
 
-        var cachedNonceManager = new CachedNonceManager(redisson, l1Web3j, 1, "0x6666666666666666", ChainTypeEnum.LAYER_ONE, rollupRepository);
+        var cachedNonceManager = new CachedNonceManager(redisson, l1Web3j, 1, "0x6666666666666666", ChainTypeEnum.LAYER_ONE, rollupRepository, l1NonceResetChecker);
         
         // Should throw exception when querying transaction count fails
         assertThrows(RuntimeException.class, cachedNonceManager::getNextNonce);

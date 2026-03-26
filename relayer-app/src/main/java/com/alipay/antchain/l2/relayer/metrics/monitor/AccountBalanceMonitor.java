@@ -44,8 +44,10 @@ public class AccountBalanceMonitor {
     @Scheduled(fixedRateString = "${l2-relayer.metrics.blockchain.acc-balance-monitor.l1-interval:10000}")
     public void monitorL1Acc() {
         try {
-            ListUtil.toList(l1Client.getLegacyPoolTxManager().getAddress(), l1Client.getBlobPoolTxManager().getAddress())
-                    .forEach(this::checkAccount);
+            checkAccount(l1Client.getLegacyPoolTxManager().getAddress());
+            if (ObjectUtil.isNotNull(l1Client.getBlobPoolTxManager())) {
+                checkAccount(l1Client.getBlobPoolTxManager().getAddress());
+            }
         } catch (Throwable t) {
             log.error("failed to monitor l1 account balance", t);
         }

@@ -25,6 +25,7 @@ import com.alipay.antchain.l2.relayer.commons.enums.OracleRequestTypeEnum;
 import com.alipay.antchain.l2.relayer.commons.enums.RollupNumberRecordTypeEnum;
 import com.alipay.antchain.l2.relayer.commons.models.L1BlockFeeInfo;
 import com.alipay.antchain.l2.relayer.commons.models.L1MsgTransactionBatch;
+import com.alipay.antchain.l2.relayer.config.RollupConfig;
 import com.alipay.antchain.l2.relayer.core.blockchain.L1Client;
 import com.alipay.antchain.l2.relayer.dal.repository.IMailboxRepository;
 import com.alipay.antchain.l2.relayer.dal.repository.IOracleRepository;
@@ -53,6 +54,9 @@ public class L1ListenServiceImpl implements IL1ListenService {
 
     @Resource
     private TransactionTemplate transactionTemplate;
+
+    @Resource
+    private RollupConfig rollupConfig;
 
     @Resource
     private L1Client l1Client;
@@ -108,7 +112,7 @@ public class L1ListenServiceImpl implements IL1ListenService {
                     protected void doInTransactionWithoutResult(TransactionStatus status) {
                         receiveL1Msgs(batch);
                         // create oracle request record, waiting for oracleGasFeedTask to deal
-                        if (batch.getHeight().equals(latestL1Block.getBlock().getNumber())) {
+                        if (rollupConfig.getParentChainType().needRollupFeeFeed() && batch.getHeight().equals(latestL1Block.getBlock().getNumber())) {
                             saveL1BlockFeeInfo(latestL1Block);
                             log.info("🎉 successful to create l2 oracle request, oracleRequestType: {}, block number: {}",
                                     OracleRequestTypeEnum.L1_BLOCK_UPDATE, latestL1Block.getBlock().getNumber());

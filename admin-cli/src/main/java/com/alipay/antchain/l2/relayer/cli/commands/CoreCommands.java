@@ -438,6 +438,84 @@ public class CoreCommands extends BaseCommands {
         return "successful to refetch batch proofs";
     }
 
+    @ShellMethod(value = "Rollback to a specific subchain height. This is a dangerous operation that will delete data!")
+    Object rollbackToSubchainHeight(
+            @ShellOption(help = "Target batch index to rollback to (batches >= this index will be deleted)") long targetBatchIndex,
+            @ShellOption(help = "Target block height to rollback to (BLOCK_PROCESSED will be set to this value - 1)") long targetBlockHeight,
+            @ShellOption(help = "L1 message nonce threshold (L1 messages with nonce > this value will be reset)") long l1MsgNonceThreshold
+    ) {
+        System.out.printf("""
+        
+        ==================== IMPORTANT PREREQUISITE ====================
+        Before running this rollback command, you MUST ensure that:
+        
+        *** ALL OTHER RELAYER NODES (except the one this CLI is connected to) ***
+        *** HAVE BEEN COMPLETELY STOPPED!                                     ***
+        
+        This is required to prevent data inconsistency during rollback.
+        The current CLI is connected to: %s
+        ================================================================
+        
+        Have you stopped all other Relayer nodes? (yes/no): \
+        """, adminAddress);
+
+        var scanner = new Scanner(System.in);
+        var prerequisiteConfirm = scanner.nextLine().trim().toLowerCase();
+        if (!"yes".equalsIgnoreCase(prerequisiteConfirm) && !"y".equalsIgnoreCase(prerequisiteConfirm)) {
+            return "Operation cancelled - please stop all other Relayer nodes first";
+        }
+
+        System.out.printf("""
+        
+        ========== DANGER: SUBCHAIN HEIGHT ROLLBACK CONFIRMATION ==========
+        Target Batch Index: %d (batches >= this will be deleted)
+        Target Block Height: %d (BLOCK_PROCESSED will be set to %d)
+        L1 Message Nonce Threshold: %d (L1 messages with nonce > this will be reset)
+        ====================================================================
+        
+        The system will automatically find the chunk containing block %d.
+        
+        WARNING: This operation will:
+        1. Delete all batches with batch_index >= %d
+        2. Delete chunks where batch_index > %d OR (batch_index = %d AND chunk_index >= found_chunk_index)
+        3. Delete batch prove requests
+        4. Delete reliable transactions for rollup
+        5. Delete L2 Merkle trees
+        6. Reset L1 messages to MSG_READY state
+        7. Delete/Reset L2 messages based on block height
+        8. Delete batch oracle requests
+        
+        This operation CANNOT be undone!
+        
+        Do you want to proceed with this operation? (yes/no): \
+        """, targetBatchIndex, targetBlockHeight, targetBlockHeight - 1, l1MsgNonceThreshold,
+                targetBlockHeight, targetBatchIndex, targetBatchIndex, targetBatchIndex);
+
+        var confirm = scanner.nextLine().trim().toLowerCase();
+        if (!"yes".equalsIgnoreCase(confirm) && !"y".equalsIgnoreCase(confirm)) {
+            return "Operation cancelled";
+        }
+
+        System.out.print("Please type 'ROLLBACK' to confirm: ");
+        var secondConfirm = scanner.nextLine().trim();
+        if (!"ROLLBACK".equals(secondConfirm)) {
+            return "Operation cancelled - confirmation text did not match";
+        }
+
+        var response = adminServiceBlockingStub.rollbackToSubchainHeight(
+                RollbackToSubchainHeightReq.newBuilder()
+                        .setTargetBatchIndex(targetBatchIndex)
+                        .setTargetBlockHeight(targetBlockHeight)
+                        .setL1MsgNonceThreshold(l1MsgNonceThreshold)
+                        .build()
+        );
+        if (response.getCode() != 0) {
+            return "Rollback failed: " + response.getErrorMsg();
+        }
+        var rollbackResp = response.getRollbackToSubchainHeightResp();
+        return "Subchain height rollback completed: " + rollbackResp.getSummary();
+    }
+
     private Object saveToFileAndReturn(@ShellOption(help = "File to save the batch json", valueProvider = FileValueProvider.class, defaultValue = "") String filePath, JSONObject res) {
         if (StrUtil.isNotEmpty(filePath)) {
             try {

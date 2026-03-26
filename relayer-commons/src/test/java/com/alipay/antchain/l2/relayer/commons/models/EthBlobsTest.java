@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package com.alipay.antchain.l2.relayer.commoms;
+package com.alipay.antchain.l2.relayer.commons.models;
 
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
@@ -30,7 +30,6 @@ import com.alipay.antchain.l2.relayer.commons.l2basic.BatchVersionEnum;
 import com.alipay.antchain.l2.relayer.commons.l2basic.BlobsDaData;
 import com.alipay.antchain.l2.relayer.commons.l2basic.Chunk;
 import com.alipay.antchain.l2.relayer.commons.l2basic.ChunksPayload;
-import com.alipay.antchain.l2.relayer.commons.models.EthBlobs;
 import com.alipay.antchain.l2.relayer.commons.utils.RollupUtils;
 import ethereum.ckzg4844.CKZG4844JNI;
 import org.apache.tuweni.units.bigints.UInt256;

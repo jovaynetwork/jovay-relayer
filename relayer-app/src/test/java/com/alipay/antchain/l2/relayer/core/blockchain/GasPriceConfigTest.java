@@ -23,8 +23,9 @@ import cn.hutool.core.util.ReflectUtil;
 import cn.hutool.core.util.StrUtil;
 import com.alibaba.fastjson.JSON;
 import com.alipay.antchain.l2.relayer.TestBase;
-import com.alipay.antchain.l2.relayer.config.BlockchainConfig;
+import com.alipay.antchain.l2.relayer.config.ParentChainConfig;
 import com.alipay.antchain.l2.relayer.config.RollupConfig;
+import com.alipay.antchain.l2.relayer.config.SubChainConfig;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.gasprice.DynamicGasPriceProviderConfig;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.gasprice.GasPriceProviderConfig;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.model.GasPriceProviderSupplierEnum;
@@ -40,6 +41,7 @@ import lombok.SneakyThrows;
 import org.junit.Assert;
 import org.junit.Test;
 import org.redisson.api.RedissonClient;
+import org.springframework.test.context.bean.override.convention.TestBean;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 public class GasPriceConfigTest extends TestBase {
@@ -54,7 +56,10 @@ public class GasPriceConfigTest extends TestBase {
     private RedissonClient redisson;
 
     @MockitoBean
-    private BlockchainConfig blockchainConfig;
+    private ParentChainConfig parentChainConfig;
+
+    @MockitoBean
+    private SubChainConfig subChainConfig;
 
     @MockitoBean
     private L1Client l1Client;
@@ -62,7 +67,7 @@ public class GasPriceConfigTest extends TestBase {
     @MockitoBean
     private L2Client l2Client;
 
-    @MockitoBean
+    @TestBean
     private RollupConfig rollupConfig;
 
     @MockitoBean

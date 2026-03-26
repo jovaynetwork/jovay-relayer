@@ -35,6 +35,7 @@ import jakarta.annotation.Resource;
 import org.junit.Assert;
 import org.junit.Test;
 
+import org.springframework.test.context.bean.override.convention.TestBean;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.web3j.protocol.Web3j;
 
@@ -66,7 +67,7 @@ public class CostCheckerTest extends TestBase {
         proofOneDayAgo.setGmtModified(new Date(System.currentTimeMillis() - 12 * 60 * 60 * 1000 - 1));
     }
 
-    @MockitoBean
+    @TestBean
     private RollupConfig rollupConfig;
 
     @MockitoBean

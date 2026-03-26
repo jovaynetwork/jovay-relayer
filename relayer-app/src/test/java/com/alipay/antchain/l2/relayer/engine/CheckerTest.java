@@ -31,6 +31,7 @@ import lombok.SneakyThrows;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
+import org.springframework.test.context.bean.override.convention.TestBean;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.web3j.protocol.Web3j;
 
@@ -47,7 +48,7 @@ public class CheckerTest extends TestBase {
     @MockitoBean
     private DistributedTaskEngine distributedTaskEngine;
 
-    @MockitoBean
+    @TestBean
     private RollupConfig rollupConfig;
 
     @MockitoBean

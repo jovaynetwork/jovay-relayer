@@ -307,6 +307,16 @@ public interface IRollupRepository {
     List<ReliableTransactionDO> getNotFinalizedReliableTransactions(ChainTypeEnum chainType, int batchSize);
 
     /**
+     * Retrieves reliable transactions by specific state for a given chain type.
+     *
+     * @param chainType the chain type (LAYER_ONE or LAYER_TWO)
+     * @param state the transaction state to filter by
+     * @param batchSize the maximum number of transactions to retrieve
+     * @return list of reliable transactions matching the specified state
+     */
+    List<ReliableTransactionDO> getReliableTransactionsByState(ChainTypeEnum chainType, ReliableTransactionStateEnum state, int batchSize);
+
+    /**
      * Retrieves failed reliable transactions up to the specified batch size and retry limit.
      *
      * @param batchSize the maximum number of transactions to retrieve
@@ -341,4 +351,69 @@ public interface IRollupRepository {
      * @return the latest nonce value
      */
     BigInteger queryLatestNonce(ChainTypeEnum chainType, String sender);
+
+    // ==================== Rollback related methods ====================
+
+    /**
+     * Deletes all batches with batch_index >= the specified index.
+     *
+     * @param fromBatchIndex the starting batch index (inclusive)
+     * @return the number of deleted records
+     */
+    int deleteBatchesFrom(BigInteger fromBatchIndex);
+
+    /**
+     * Deletes chunks for rollback operation.
+     * Deletes all chunks where batch_index > targetBatchIndex,
+     * or (batch_index = targetBatchIndex AND chunk_index >= targetChunkIndex).
+     *
+     * @param targetBatchIndex the target batch index
+     * @param targetChunkIndex the target chunk index within the target batch
+     * @return the number of deleted records
+     */
+    int deleteChunksForRollback(BigInteger targetBatchIndex, long targetChunkIndex);
+
+    /**
+     * Deletes all batch prove requests with batch_index >= the specified index.
+     *
+     * @param fromBatchIndex the starting batch index (inclusive)
+     * @return the number of deleted records
+     */
+    int deleteBatchProveRequestsFrom(BigInteger fromBatchIndex);
+
+    /**
+     * Deletes reliable transactions for rollback operation.
+     * Deletes rollup transactions (BATCH_COMMIT_TX, BATCH_TEE_PROOF_COMMIT_TX, BATCH_ZK_PROOF_COMMIT_TX)
+     * with batch_index >= fromBatchIndex.
+     *
+     * @param fromBatchIndex the starting batch index (inclusive)
+     * @return the number of deleted records
+     */
+    int deleteRollupReliableTransactionsFrom(BigInteger fromBatchIndex);
+
+    /**
+     * Deletes L1 message reliable transactions with nonce > the specified threshold.
+     *
+     * @param nonceThreshold the nonce threshold
+     * @return the number of deleted records
+     */
+    int deleteL1MsgReliableTransactionsAboveNonce(long nonceThreshold);
+
+    /**
+     * Deletes L2 oracle batch fee feed transactions with batch_index >= the specified index.
+     *
+     * @param fromBatchIndex the starting batch index (inclusive)
+     * @return the number of deleted records
+     */
+    int deleteOracleBatchFeeFeedTransactionsFrom(BigInteger fromBatchIndex);
+
+    /**
+     * Finds the chunk that contains the specified block height within a batch.
+     * A chunk contains a block if startNumber <= blockHeight <= endNumber.
+     *
+     * @param batchIndex the batch index to search within
+     * @param blockHeight the block height to search for
+     * @return the chunk wrapper containing the block, or null if not found
+     */
+    ChunkWrapper findChunkByBlockHeight(BigInteger batchIndex, BigInteger blockHeight);
 }

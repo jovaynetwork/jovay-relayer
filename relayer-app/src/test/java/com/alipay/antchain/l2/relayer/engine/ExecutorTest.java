@@ -35,6 +35,7 @@ import com.alipay.antchain.l2.relayer.engine.executor.*;
 import com.alipay.antchain.l2.relayer.service.IRollupService;
 import org.junit.Before;
 import org.junit.Test;
+import org.springframework.test.context.bean.override.convention.TestBean;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.web3j.protocol.Web3j;
 
@@ -52,7 +53,7 @@ public class ExecutorTest extends TestBase {
     @MockitoBean
     private DistributedTaskEngine distributedTaskEngine;
 
-    @MockitoBean
+    @TestBean
     private RollupConfig rollupConfig;
 
     @MockitoBean

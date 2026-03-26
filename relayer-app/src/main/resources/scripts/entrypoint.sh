@@ -37,10 +37,6 @@ if [ -z "${REDIS_USER_PASSWORD}" ]; then
    log_error "no env REDIS_USER_PASSWORD set"
    exit 1
 fi
-if [ -z "${L1_BLOB_POOL_TX_SIGN_SERVICE_TYPE}" ]; then
-   log_error "no env L1_BLOB_POOL_TX_SIGN_SERVICE_TYPE set"
-   exit 1
-fi
 if [ -z "${L1_LEGACY_POOL_TX_SIGN_SERVICE_TYPE}" ]; then
    log_error "no env L1_LEGACY_POOL_TX_SIGN_SERVICE_TYPE set"
    exit 1

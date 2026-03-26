@@ -16,6 +16,10 @@
 
 package com.alipay.antchain.l2.relayer.core.blockchain.helper;
 
+import java.io.IOException;
+import java.math.BigInteger;
+import java.util.List;
+
 import cn.hutool.core.lang.Assert;
 import com.alipay.antchain.l2.relayer.commons.l2basic.L1MsgTransaction;
 import com.alipay.antchain.l2.relayer.core.blockchain.bpo.EthBlobForkConfig;
@@ -31,18 +35,15 @@ import org.web3j.protocol.core.methods.response.EthGetTransactionCount;
 import org.web3j.protocol.core.methods.response.EthSendTransaction;
 import org.web3j.service.TxSignService;
 
-import java.io.IOException;
-import java.math.BigInteger;
-import java.util.List;
-
 public class AcbRawTransactionManager extends BaseRawTransactionManager implements ITransactionManager {
 
     @Getter
     private final RemoteNonceManager nonceManager;
 
-    public AcbRawTransactionManager(Web3j web3j, TxSignService txSignService, long chainId, RedissonClient redisson, EthBlobForkConfig ethBlobForkConfig) {
+    public AcbRawTransactionManager(Web3j web3j, TxSignService txSignService, long chainId, RedissonClient redisson, EthBlobForkConfig ethBlobForkConfig, INonceManager nonceManager) {
         super(web3j, txSignService, chainId, redisson, ethBlobForkConfig);
-        this.nonceManager = new RemoteNonceManager(txSignService.getAddress(), web3j);
+        Assert.isInstanceOf(RemoteNonceManager.class, nonceManager);
+        this.nonceManager = (RemoteNonceManager) nonceManager;
     }
 
     @Override

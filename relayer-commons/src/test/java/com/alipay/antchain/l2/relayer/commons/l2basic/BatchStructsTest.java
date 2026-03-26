@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package com.alipay.antchain.l2.relayer.commoms;
+package com.alipay.antchain.l2.relayer.commons.l2basic;
 
 import java.math.BigInteger;
 import java.util.List;
@@ -24,10 +24,6 @@ import cn.hutool.core.util.HexUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.crypto.digest.DigestUtil;
 import com.alibaba.fastjson.JSON;
-import com.alipay.antchain.l2.relayer.commons.l2basic.BatchHeader;
-import com.alipay.antchain.l2.relayer.commons.l2basic.BatchVersionEnum;
-import com.alipay.antchain.l2.relayer.commons.l2basic.BlockContext;
-import com.alipay.antchain.l2.relayer.commons.l2basic.Chunk;
 import org.junit.Test;
 
 import static org.junit.Assert.*;

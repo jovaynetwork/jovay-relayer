@@ -19,8 +19,9 @@ package com.alipay.antchain.l2.relayer.core.layer2.economic;
 import java.math.BigInteger;
 
 import com.alipay.antchain.l2.relayer.TestBase;
-import com.alipay.antchain.l2.relayer.config.BlockchainConfig;
+import com.alipay.antchain.l2.relayer.config.ParentChainConfig;
 import com.alipay.antchain.l2.relayer.config.RollupConfig;
+import com.alipay.antchain.l2.relayer.config.SubChainConfig;
 import com.alipay.antchain.l2.relayer.core.blockchain.L1Client;
 import com.alipay.antchain.l2.relayer.core.blockchain.L2Client;
 import com.alipay.antchain.l2.relayer.dal.repository.IOracleRepository;
@@ -33,6 +34,7 @@ import org.junit.FixMethodOrder;
 import org.junit.Test;
 import org.junit.runners.MethodSorters;
 import org.redisson.api.RedissonClient;
+import org.springframework.test.context.bean.override.convention.TestBean;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.web3j.protocol.Web3j;
 
@@ -45,7 +47,10 @@ public class RollupEconomicStrategyConfigTest extends TestBase {
     private RollupEconomicStrategyConfig strategyConfig;
 
     @MockitoBean
-    private BlockchainConfig blockchainConfig;
+    private ParentChainConfig parentChainConfig;
+
+    @MockitoBean
+    private SubChainConfig subChainConfig;
 
     @MockitoBean
     private L1Client l1Client;
@@ -53,7 +58,7 @@ public class RollupEconomicStrategyConfigTest extends TestBase {
     @MockitoBean
     private L2Client l2Client;
 
-    @MockitoBean
+    @TestBean
     private RollupConfig rollupConfig;
 
     @MockitoBean

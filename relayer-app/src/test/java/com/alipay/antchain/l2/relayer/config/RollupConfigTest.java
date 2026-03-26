@@ -34,13 +34,17 @@ import org.mockito.ArgumentMatchers;
 import org.mockito.Mockito;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.ResourcePatternResolver;
+import org.springframework.test.context.bean.override.convention.TestBean;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.web3j.protocol.Web3j;
 
 public class RollupConfigTest extends TestBase {
 
     @MockitoBean
-    private BlockchainConfig blockchainConfig;
+    private ParentChainConfig parentChainConfig;
+
+    @MockitoBean
+    private SubChainConfig subChainConfig;
 
     @MockitoBean
     private L1Client l1Client;
@@ -54,7 +58,7 @@ public class RollupConfigTest extends TestBase {
     @MockitoBean(name = "l1ChainId")
     private BigInteger l1ChainId;
 
-    @MockitoBean
+    @TestBean
     private RollupConfig rollupConfig;
 
     @MockitoBean
@@ -186,12 +190,7 @@ public class RollupConfigTest extends TestBase {
         resourcePatternResolverField.set(contractConfig, resourcePatternResolver);
         var contractErrorParser = contractConfig.contractErrorParser();
 
-        var res = contractErrorParser.parse("0xff04ba37");
-        Assert.assertNotNull(res);
-        Assert.assertEquals("Rollup", res.contractName());
-        Assert.assertEquals("NotSupportZkProof:[]", res.getReason());
-
-        res = contractErrorParser.parse("0xff04ba38");
+        var res = contractErrorParser.parse("0xff04ba38");
         Assert.assertNull(res);
 
         res = contractErrorParser.parse("0x6dfcc65000000000000000000000000000000000000000000000000000000000000000f8000000000000000000000000000000000000000000000000000000000000007b");

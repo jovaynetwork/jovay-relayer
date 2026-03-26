@@ -56,6 +56,7 @@ import lombok.SneakyThrows;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
+import org.springframework.test.context.bean.override.convention.TestBean;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.web3j.protocol.Web3j;
 import org.web3j.utils.Numeric;
@@ -92,7 +93,7 @@ public class RollupAggregatorTest extends TestBase {
     @MockitoBean
     private L1Client l1Client;
 
-    @MockitoBean
+    @TestBean
     private RollupConfig rollupConfig;
 
     @MockitoBean

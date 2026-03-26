@@ -20,7 +20,6 @@ import cn.hutool.core.util.ObjectUtil;
 import com.alibaba.fastjson.annotation.JSONCreator;
 import com.alibaba.fastjson.annotation.JSONField;
 import com.alipay.antchain.l2.relayer.commons.utils.BytesUtils;
-import com.github.luben.zstd.Zstd;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 
@@ -52,17 +51,7 @@ public enum BatchVersionEnum {
      * Chunks are serialized in the basic format with a maximum of 255 blocks per chunk.
      * </p>
      */
-    BATCH_V0((byte) 0, null, new IChunkCodec() {
-        @Override
-        public byte[] serialize(Chunk chunk) {
-            return chunk.serialize(false);
-        }
-
-        @Override
-        public Chunk deserialize(byte[] raw) {
-            return Chunk.deserializeFrom(raw, false);
-        }
-    }, (1 << 8) - 1),
+    BATCH_V0((byte) 0, null, IChunkCodec.BATCH_V0_CHUNK_CODEC, (1 << 8) - 1),
 
     /**
      * Batch version 1 - adds compression support.
@@ -80,32 +69,7 @@ public enum BatchVersionEnum {
      * </ul>
      * </p>
      */
-    BATCH_V1(
-            (byte) 1,
-            new IDaCompressor() {
-                @Override
-                public byte[] compress(byte[] payload) {
-                    return Zstd.compress(payload);
-                }
-
-                @Override
-                public byte[] decompress(byte[] payload) {
-                    return Zstd.decompress(payload);
-                }
-            },
-            new IChunkCodec() {
-                @Override
-                public byte[] serialize(Chunk chunk) {
-                    return chunk.serialize(false);
-                }
-
-                @Override
-                public Chunk deserialize(byte[] raw) {
-                    return Chunk.deserializeFrom(raw, false);
-                }
-            },
-            (1 << 8) - 1
-    ),
+    BATCH_V1((byte) 1, IDaCompressor.ZSTD_DEFAULT_COMPRESSOR, IChunkCodec.BATCH_V0_CHUNK_CODEC, (1 << 8) - 1),
 
     /**
      * Batch version 2 - extends block capacity.
@@ -124,32 +88,7 @@ public enum BatchVersionEnum {
      *
      * @see Chunk#getNumBlocks()
      */
-    BATCH_V2(
-            (byte) 2,
-            new IDaCompressor() {
-                @Override
-                public byte[] compress(byte[] payload) {
-                    return Zstd.compress(payload);
-                }
-
-                @Override
-                public byte[] decompress(byte[] payload) {
-                    return Zstd.decompress(payload);
-                }
-            },
-            new IChunkCodec() {
-                @Override
-                public byte[] serialize(Chunk chunk) {
-                    return chunk.serialize(true);
-                }
-
-                @Override
-                public Chunk deserialize(byte[] raw) {
-                    return Chunk.deserializeFrom(raw, true);
-                }
-            },
-            (1L << 32) - 1
-    );
+    BATCH_V2((byte) 2, IDaCompressor.ZSTD_DEFAULT_COMPRESSOR, IChunkCodec.BATCH_V2_CHUNK_CODEC, (1L << 32) - 1);
 
     /**
      * The byte value identifier for this batch version.

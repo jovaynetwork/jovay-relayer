@@ -36,6 +36,7 @@ import com.alipay.antchain.l2.relayer.engine.DistributedTaskEngine;
 import com.alipay.antchain.l2.relayer.metrics.alarm.RollupAlarm;
 import jakarta.annotation.Resource;
 import org.junit.Test;
+import org.springframework.test.context.bean.override.convention.TestBean;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.web3j.protocol.Web3j;
 
@@ -44,7 +45,7 @@ import static org.mockito.Mockito.when;
 
 public class RollupAlarmTest extends TestBase {
 
-    @MockitoBean
+    @TestBean
     private RollupConfig rollupConfig;
 
     @MockitoBean

@@ -179,4 +179,41 @@ public class MailboxRepository implements IMailboxRepository {
                 .map(x -> HexUtil.decodeHex(x.getMsgHash()))
                 .collect(Collectors.toList());
     }
+
+    // ==================== Rollback related methods ====================
+
+    @Override
+    public int resetL1MsgsAboveNonce(long nonceThreshold) {
+        return interBlockchainMessageMapper.update(
+                null,
+                new LambdaUpdateWrapper<InterBlockchainMessageEntity>()
+                        .set(InterBlockchainMessageEntity::getState, InterBlockchainMessageStateEnum.MSG_READY)
+                        .eq(InterBlockchainMessageEntity::getType, InterBlockchainMessageTypeEnum.L1_MSG)
+                        .gt(InterBlockchainMessageEntity::getNonce, nonceThreshold)
+        );
+    }
+
+    @Override
+    public int deleteL2MsgsForRollback(BigInteger targetBatchIndex, BigInteger targetBlockHeight) {
+        // Use CAST(... AS DECIMAL(65,0)) which is compatible with both MySQL and H2
+        return interBlockchainMessageMapper.delete(
+                new LambdaQueryWrapper<InterBlockchainMessageEntity>()
+                        .eq(InterBlockchainMessageEntity::getType, InterBlockchainMessageTypeEnum.L2_MSG)
+                        .ge(InterBlockchainMessageEntity::getBatchIndex, targetBatchIndex)
+                        .apply("CAST(source_block_height AS DECIMAL(65,0)) >= {0}", targetBlockHeight)
+        );
+    }
+
+    @Override
+    public int resetL2MsgsForRollback(BigInteger targetBatchIndex, BigInteger targetBlockHeight) {
+        // Use CAST(... AS DECIMAL(65,0)) which is compatible with both MySQL and H2
+        return interBlockchainMessageMapper.update(
+                null,
+                new LambdaUpdateWrapper<InterBlockchainMessageEntity>()
+                        .set(InterBlockchainMessageEntity::getState, InterBlockchainMessageStateEnum.MSG_READY)
+                        .eq(InterBlockchainMessageEntity::getType, InterBlockchainMessageTypeEnum.L2_MSG)
+                        .eq(InterBlockchainMessageEntity::getBatchIndex, targetBatchIndex)
+                        .apply("CAST(source_block_height AS DECIMAL(65,0)) < {0}", targetBlockHeight)
+        );
+    }
 }

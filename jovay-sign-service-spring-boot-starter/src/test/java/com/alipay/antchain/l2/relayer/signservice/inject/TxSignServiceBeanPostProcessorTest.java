@@ -12,6 +12,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
+import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.junit4.SpringRunner;
@@ -31,7 +32,15 @@ import static org.mockito.Mockito.when;
                 "jovay.sign-service.test1.type=web3j_native",
                 "jovay.sign-service.test1.web3j-native.private-key=0x1234",
                 "jovay.sign-service.test2.type=web3j_native",
-                "jovay.sign-service.test2.web3j-native.private-key=0x1234"
+                "jovay.sign-service.test2.web3j-native.private-key=0x1234",
+                "jovay.sign-service.test3.type=web3j_native",
+                "jovay.sign-service.test3.web3j-native.private-key=0x1234",
+                "jovay.sign-service.test4.type=aliyun_kms",
+                "jovay.sign-service.test4.kms.endpoint=localhost",
+                "jovay.sign-service.test5.type=web3j_native",
+                "jovay.sign-service.test5.web3j-native.private-key=0x1234",
+                "test.feature.enabled=true",
+                "test.da.type=BLOBS"
         },
         classes = {TxSignServiceBeanPostProcessorTest.TestConfig.class, TxSignServiceBeanPostProcessorTest.TestConfig2.class}
 )
@@ -55,6 +64,46 @@ public class TxSignServiceBeanPostProcessorTest {
         public void setTest2(TxSignService txSignService) {
             test2 = txSignService;
         }
+
+        // Test conditional injection with property matching
+        @JovayTxSignService(
+                value = "test3",
+                conditionalProperty = "test.feature.enabled",
+                conditionalPropertyHavingValue = "true"
+        )
+        private TxSignService conditionalEnabledService;
+
+        // Test conditional injection with property not matching
+        @JovayTxSignService(
+                value = "test4",
+                conditionalProperty = "test.feature.enabled",
+                conditionalPropertyHavingValue = "false"
+        )
+        private TxSignService conditionalDisabledService;
+
+        // Test conditional injection with property matching BLOBS
+        @JovayTxSignService(
+                value = "test5",
+                conditionalProperty = "test.da.type",
+                conditionalPropertyHavingValue = "BLOBS"
+        )
+        private TxSignService conditionalBlobsService;
+
+        // Test conditional injection with missing property and matchIfMissing=true
+        @JovayTxSignService(
+                value = "test1",
+                conditionalProperty = "test.missing.property",
+                conditionalPropertyMatchIfMissing = true
+        )
+        private TxSignService conditionalMissingMatchService;
+
+        // Test conditional injection with missing property and matchIfMissing=false
+        @JovayTxSignService(
+                value = "test4",
+                conditionalProperty = "test.missing.property",
+                conditionalPropertyMatchIfMissing = false
+        )
+        private TxSignService conditionalMissingNoMatchService;
     }
 
     @Configuration
@@ -64,9 +113,10 @@ public class TxSignServiceBeanPostProcessorTest {
         @Bean
         @Primary
         public static TxSignServiceBeanPostProcessor txSignServiceBeanPostProcessor(
-                TxSignServicesProperties txSignServicesProperties
+                TxSignServicesProperties txSignServicesProperties,
+                Environment environment
         ) {
-            return new TxSignServiceBeanPostProcessor(txSignServicesProperties, txSignServiceFactory);
+            return new TxSignServiceBeanPostProcessor(txSignServicesProperties, txSignServiceFactory, environment);
         }
     }
 
@@ -112,9 +162,39 @@ public class TxSignServiceBeanPostProcessorTest {
     private TestConfig testConfig;
 
     @Test
-    public void test() {
+    public void testBasicInjection() {
         assertInstanceOf(KmsMockService.class, testConfig.getKmsTxSignService());
         assertInstanceOf(NativeMockService.class, testConfig.getWeb3jTxSignService());
         assertInstanceOf(NativeMockService.class, testConfig.getTest2());
+    }
+
+    @Test
+    public void testConditionalInjectionWithPropertyMatching() {
+        // Should be injected because test.feature.enabled=true
+        assertInstanceOf(NativeMockService.class, testConfig.getConditionalEnabledService());
+    }
+
+    @Test
+    public void testConditionalInjectionWithPropertyNotMatching() {
+        // Should NOT be injected because test.feature.enabled=true but expecting false
+        assert testConfig.getConditionalDisabledService() == null;
+    }
+
+    @Test
+    public void testConditionalInjectionWithBlobsProperty() {
+        // Should be injected because test.da.type=BLOBS
+        assertInstanceOf(NativeMockService.class, testConfig.getConditionalBlobsService());
+    }
+
+    @Test
+    public void testConditionalInjectionWithMissingPropertyMatchIfMissing() {
+        // Should be injected because matchIfMissing=true
+        assertInstanceOf(NativeMockService.class, testConfig.getConditionalMissingMatchService());
+    }
+
+    @Test
+    public void testConditionalInjectionWithMissingPropertyNoMatch() {
+        // Should NOT be injected because property is missing and matchIfMissing=false
+        assert testConfig.getConditionalMissingNoMatchService() == null;
     }
 }

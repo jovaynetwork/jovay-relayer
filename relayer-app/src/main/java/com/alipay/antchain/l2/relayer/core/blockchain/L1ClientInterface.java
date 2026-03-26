@@ -19,6 +19,7 @@ package com.alipay.antchain.l2.relayer.core.blockchain;
 import java.math.BigInteger;
 
 import com.alipay.antchain.l2.relayer.commons.exceptions.L2RelayerException;
+import com.alipay.antchain.l2.relayer.commons.l2basic.da.DaProof;
 import com.alipay.antchain.l2.relayer.commons.models.*;
 import io.reactivex.Flowable;
 import org.web3j.crypto.transaction.type.Transaction4844;
@@ -51,6 +52,8 @@ public interface L1ClientInterface {
      */
     TransactionInfo commitBatch(BatchWrapper batchWrapper) throws L2RelayerException;
 
+    TransactionInfo commitBatch(BatchWrapper batchWrapper, DaProof daProof);
+
     /**
      * Commit a batch to the L1 Rollup contract with eth_call simulation first.
      * <p>
@@ -63,6 +66,8 @@ public interface L1ClientInterface {
      * @throws L2RelayerException if the commit operation fails
      */
     TransactionInfo commitBatchWithEthCall(BatchWrapper batchWrapper) throws L2RelayerException;
+
+    TransactionInfo commitBatchWithEthCall(BatchWrapper batchWrapper, DaProof daProof) throws L2RelayerException;
 
     /**
      * Verify a batch with proof (TEE or ZK) on the L1 Rollup contract.

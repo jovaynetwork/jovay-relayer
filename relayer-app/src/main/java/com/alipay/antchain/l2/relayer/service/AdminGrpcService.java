@@ -17,9 +17,12 @@
 package com.alipay.antchain.l2.relayer.service;
 
 import java.math.BigInteger;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
+import cn.hutool.cache.Cache;
 import cn.hutool.core.date.DateUtil;
 import cn.hutool.core.lang.Assert;
 import cn.hutool.core.util.HexUtil;
@@ -33,10 +36,9 @@ import com.alipay.antchain.l2.relayer.commons.l2basic.BatchHeader;
 import com.alipay.antchain.l2.relayer.commons.l2basic.BatchVersionEnum;
 import com.alipay.antchain.l2.relayer.commons.l2basic.ChunksPayload;
 import com.alipay.antchain.l2.relayer.commons.l2basic.L2MsgProofData;
+import com.alipay.antchain.l2.relayer.commons.l2basic.da.DaProof;
 import com.alipay.antchain.l2.relayer.commons.merkle.AppendMerkleTree;
-import com.alipay.antchain.l2.relayer.commons.models.BatchWrapper;
-import com.alipay.antchain.l2.relayer.commons.models.ReliableTransactionDO;
-import com.alipay.antchain.l2.relayer.commons.models.TransactionInfo;
+import com.alipay.antchain.l2.relayer.commons.models.*;
 import com.alipay.antchain.l2.relayer.core.blockchain.L1Client;
 import com.alipay.antchain.l2.relayer.core.blockchain.L2Client;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.CachedNonceManager;
@@ -44,14 +46,18 @@ import com.alipay.antchain.l2.relayer.core.blockchain.helper.gasprice.DynamicGas
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.gasprice.GasPriceProviderConfig;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.gasprice.IGasPriceProviderConfig;
 import com.alipay.antchain.l2.relayer.core.layer2.economic.RollupEconomicStrategyConfig;
-import com.alipay.antchain.l2.relayer.dal.repository.IMailboxRepository;
-import com.alipay.antchain.l2.relayer.dal.repository.IRollupRepository;
+import com.alipay.antchain.l2.relayer.dal.repository.*;
+import com.alipay.antchain.l2.relayer.engine.core.ScheduleContext;
 import com.alipay.antchain.l2.relayer.server.grpc.*;
+import com.alipay.antchain.l2.trace.BasicBlockTrace;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import com.google.protobuf.ByteString;
 import io.grpc.stub.StreamObserver;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.TransactionCallbackWithoutResult;
@@ -71,6 +77,7 @@ public class AdminGrpcService extends AdminServiceGrpc.AdminServiceImplBase {
     private IMailboxService mailboxService;
 
     @Resource
+    @Lazy
     private IOracleService oracleService;
 
     @Resource
@@ -78,6 +85,15 @@ public class AdminGrpcService extends AdminServiceGrpc.AdminServiceImplBase {
 
     @Resource
     private IMailboxRepository mailboxRepository;
+
+    @Resource
+    private IL2MerkleTreeRepository l2MerkleTreeRepository;
+
+    @Resource
+    private IOracleRepository oracleRepository;
+
+    @Resource
+    private RedissonClient redissonClient;
 
     @Resource
     private L1Client l1Client;
@@ -93,6 +109,21 @@ public class AdminGrpcService extends AdminServiceGrpc.AdminServiceImplBase {
 
     @Resource
     private TransactionTemplate transactionTemplate;
+
+    @Resource
+    private Cache<BigInteger, BasicBlockTrace> l2BlockTracesCacheForCurrChunk;
+
+    @Resource
+    private ScheduleContext scheduleContext;
+    
+    @Resource
+    private ScheduleRepository scheduleRepository;
+
+    @Value("#{rollupConfig.daType}")
+    private DaType daType;
+
+    @Value("#{rollupConfig.parentChainType}")
+    private ParentChainType parentChainType;
 
     @Value("${l2-relayer.tasks.reliable-tx.retry-limit:0}")
     private int retryCountLimit;
@@ -365,6 +396,10 @@ public class AdminGrpcService extends AdminServiceGrpc.AdminServiceImplBase {
     @Override
     public void withdrawFromVault(WithdrawFromVaultReq request, StreamObserver<Response> responseObserver) {
         try {
+            if (!parentChainType.needRollupFeeFeed()) {
+                throw new RuntimeException(StrUtil.format("parent chain is {}, no need to withdraw vault", parentChainType));
+            }
+
             TransactionInfo transactionInfo = oracleService.withdrawVault(
                     request.getTo(),
                     BigInteger.valueOf(request.getAmount())
@@ -386,6 +421,10 @@ public class AdminGrpcService extends AdminServiceGrpc.AdminServiceImplBase {
     @Override
     public void updateFixedProfit(UpdateFixedProfitReq request, StreamObserver<Response> responseObserver) {
         try {
+            if (!parentChainType.needRollupFeeFeed()) {
+                throw new RuntimeException(StrUtil.format("parent chain is {}, no need to update fixed profit", parentChainType));
+            }
+
             TransactionInfo transactionInfo = oracleService.updateFixedProfit(new BigInteger(request.getProfit()));
 
             responseObserver.onNext(Response.newBuilder().setCode(0)
@@ -405,6 +444,10 @@ public class AdminGrpcService extends AdminServiceGrpc.AdminServiceImplBase {
     @Override
     public void updateTotalScala(UpdateTotalScalaReq request, StreamObserver<Response> responseObserver) {
         try {
+            if (!parentChainType.needRollupFeeFeed()) {
+                throw new RuntimeException(StrUtil.format("parent chain is {}, no need to update total scala", parentChainType));
+            }
+
             TransactionInfo transactionInfo = oracleService.updateTotalScala(new BigInteger(request.getTotalScala()));
 
             responseObserver.onNext(Response.newBuilder().setCode(0)
@@ -465,7 +508,7 @@ public class AdminGrpcService extends AdminServiceGrpc.AdminServiceImplBase {
             log.info("query relayer addresses now");
             responseObserver.onNext(Response.newBuilder().setQueryRelayerAddressResp(
                     QueryRelayerAddressResp.newBuilder()
-                            .setL1BlobAddress(l1Client.getBlobPoolTxManager().getAddress())
+                            .setL1BlobAddress(ObjectUtil.isNotNull(l1Client.getBlobPoolTxManager()) ? l1Client.getBlobPoolTxManager().getAddress() : "none")
                             .setL1LegacyAddress(l1Client.getLegacyPoolTxManager().getAddress())
                             .setL2Address(l2Client.getLegacyPoolTxManager().getAddress())
             ).build());
@@ -610,7 +653,10 @@ public class AdminGrpcService extends AdminServiceGrpc.AdminServiceImplBase {
 
                     TransactionInfo transactionInfo;
                     try {
-                        transactionInfo = l1Client.commitBatchWithEthCall(batch);
+                        transactionInfo = switch (daType) {
+                            case BLOBS -> l1Client.commitBatchWithEthCall(batch);
+                            case DAS -> l1Client.commitBatchWithEthCall(batch, new DaProof(request.getRawDaProof().toByteArray()));
+                        };
                     } catch (L1ContractWarnException e) {
                         throw new RuntimeException(StrUtil.format("rollup contract shows that batch {} has been committed", batchIndex));
                     }
@@ -925,5 +971,202 @@ public class AdminGrpcService extends AdminServiceGrpc.AdminServiceImplBase {
             default:
                 throw new RuntimeException("unknown economic strategy config key: " + key);
         }
+    }
+
+    @Override
+    public void rollbackToSubchainHeight(RollbackToSubchainHeightReq request, StreamObserver<Response> responseObserver) {
+        var targetBatchIndex = BigInteger.valueOf(request.getTargetBatchIndex());
+        var targetBlockHeight = BigInteger.valueOf(request.getTargetBlockHeight());
+        var l1MsgNonceThreshold = request.getL1MsgNonceThreshold();
+
+        log.info("try to rollback to subchain height: (targetBatchIndex: {}, targetBlockHeight: {}, l1MsgNonceThreshold: {})",
+                targetBatchIndex, targetBlockHeight, l1MsgNonceThreshold);
+
+        var acquiredLocks = new ArrayList<RLock>();
+        try {
+            checkRelayerNodes();
+
+            // Step 0: Find the chunk that contains the target block height
+            var chunks = rollupRepository.getChunks(targetBatchIndex);
+            if (ObjectUtil.isEmpty(chunks)) {
+                throw new RuntimeException(StrUtil.format("Chunks for batch {} is empty", targetBatchIndex));
+            }
+            if (chunks.get(0).getStartBlockNumber().compareTo(targetBlockHeight) > 0) {
+                throw new RuntimeException(StrUtil.format("Block {} not inside the chunks for batch {}", targetBlockHeight, targetBatchIndex));
+            }
+            ChunkWrapper targetChunk = null;
+            var gasSum = BigInteger.ZERO;
+            for (var chunk : chunks) {
+                if (chunk.getEndBlockNumber().compareTo(targetBlockHeight) >= 0) {
+                    targetChunk = chunk;
+                    break;
+                }
+                gasSum = gasSum.add(BigInteger.valueOf(chunk.getGasSum()));
+            }
+            if (ObjectUtil.isNull(targetChunk)) {
+                throw new RuntimeException(StrUtil.format("No chunk found for block {} from batch {}", targetBlockHeight, targetBatchIndex));
+            }
+            var targetChunkIndex = targetChunk.getChunkIndex();
+            log.info("Found target chunk index: {} for block height: {} in batch: {}", targetChunkIndex, targetBlockHeight, targetBatchIndex);
+
+            // Step 1: Acquire all distributed locks to prevent Duty from executing tasks
+            for (var taskType : BizTaskTypeEnum.values()) {
+                var lock = redissonClient.getLock(getTaskLockKey(taskType));
+                if (!lock.tryLock(60, TimeUnit.SECONDS)) {
+                    throw new RuntimeException(StrUtil.format(
+                            "Failed to acquire lock for task {}, there might be running tasks. Please retry later.", taskType));
+                }
+                acquiredLocks.add(lock);
+                log.info("Acquired lock for task: {}", taskType);
+            }
+
+            // Step 2: Execute rollback within a database transaction
+            var finalGasSum = gasSum;
+            transactionTemplate.execute(new TransactionCallbackWithoutResult() {
+                @Override
+                protected void doInTransactionWithoutResult(TransactionStatus status) {
+                    executeRollback(targetBatchIndex, targetChunkIndex, targetBlockHeight, l1MsgNonceThreshold, finalGasSum);
+                }
+            });
+            clearCacheToRollback();
+
+            var summary = StrUtil.format(
+                    "Subchain height rollback completed successfully. Target: batchIndex={}, chunkIndex={}, blockHeight={}",
+                    targetBatchIndex, targetChunkIndex, targetBlockHeight);
+            log.info(summary);
+            responseObserver.onNext(Response.newBuilder()
+                    .setCode(0)
+                    .setRollbackToSubchainHeightResp(RollbackToSubchainHeightResp.newBuilder()
+                            .setSummary(summary)
+                            .build())
+                    .build());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.error("Rollback interrupted while acquiring locks", e);
+            responseObserver.onNext(Response.newBuilder()
+                    .setCode(-1)
+                    .setErrorMsg("Rollback interrupted: " + e.getMessage())
+                    .build());
+        } catch (Throwable t) {
+            log.error("Failed to rollback L2", t);
+            responseObserver.onNext(Response.newBuilder()
+                    .setCode(-1)
+                    .setErrorMsg("Rollback failed: " + t.getMessage())
+                    .build());
+        } finally {
+            // Release all acquired locks
+            for (var lock : acquiredLocks) {
+                try {
+                    lock.forceUnlock();
+                    log.info("Released lock for task: {}", lock.getName());
+                } catch (Exception e) {
+                    log.error("Failed to release lock {}", lock.getName(), e);
+                }
+            }
+            responseObserver.onCompleted();
+        }
+    }
+
+    /**
+     * Checks the status of all Relayer nodes before executing rollback.
+     * <p>
+     * This method ensures that:
+     * 1. The local Relayer node (the one this CLI is connected to) is ONLINE
+     * 2. All other Relayer nodes are OFFLINE
+     * <p>
+     * This is a critical safety check to prevent data inconsistency during rollback.
+     * If multiple nodes are running during rollback, they might write conflicting data
+     * to the database or cache, causing the rollback to fail or produce incorrect results.
+     * 
+     * @throws RuntimeException if the local node is offline or any other node is still online
+     */
+    private void checkRelayerNodes() {
+        var activeNodes = scheduleRepository.getAllActiveNodes();
+        for (var activeNode : activeNodes) {
+            // Check if this is the local node (the one we're connected to)
+            if (activeNode.getNodeId().equals(scheduleContext.getNodeId())) {
+                // The local node must be online to execute rollback
+                if (activeNode.getStatus() == ActiveNodeStatusEnum.OFFLINE) {
+                    throw new RuntimeException("Local relayer node is not online");
+                }
+                continue;
+            }
+            // All other nodes must be offline before rollback
+            if (activeNode.getStatus() == ActiveNodeStatusEnum.ONLINE) {
+                throw new RuntimeException("Please wait all other relayer nodes to be offline before rollback");
+            }
+        }
+    }
+
+    private void executeRollback(BigInteger targetBatchIndex, long targetChunkIndex, BigInteger targetBlockHeight, long l1MsgNonceThreshold, BigInteger gasSum) {
+        log.info("Starting rollback execution...");
+
+        // 1. Update rollup_number_record
+        log.info("Updating rollup number records...");
+        rollupRepository.updateRollupNumberRecord(ChainTypeEnum.LAYER_TWO, RollupNumberRecordTypeEnum.NEXT_BATCH, targetBatchIndex);
+        rollupRepository.updateRollupNumberRecord(ChainTypeEnum.LAYER_TWO, RollupNumberRecordTypeEnum.NEXT_MSG_PROVE_BATCH, targetBatchIndex);
+        rollupRepository.updateRollupNumberRecord(ChainTypeEnum.LAYER_TWO, RollupNumberRecordTypeEnum.BATCH_COMMITTED, targetBatchIndex.subtract(BigInteger.ONE));
+        rollupRepository.updateRollupNumberRecord(ChainTypeEnum.LAYER_TWO, RollupNumberRecordTypeEnum.BLOCK_PROCESSED, targetBlockHeight.subtract(BigInteger.ONE));
+        rollupRepository.updateRollupNumberRecord(ChainTypeEnum.LAYER_TWO, RollupNumberRecordTypeEnum.NEXT_CHUNK_GAS_ACCUMULATOR, gasSum);
+        rollupRepository.updateRollupNumberRecord(ChainTypeEnum.LAYER_TWO, RollupNumberRecordTypeEnum.NEXT_CHUNK, BigInteger.valueOf(targetChunkIndex));
+        log.info("Rollup number records updated");
+
+        // 2. Delete batches where batch_index >= targetBatchIndex
+        var deletedBatches = rollupRepository.deleteBatchesFrom(targetBatchIndex);
+        log.info("Deleted {} batches", deletedBatches);
+
+        // 3. Delete chunks for rollback
+        var deletedChunks = rollupRepository.deleteChunksForRollback(targetBatchIndex, targetChunkIndex);
+        log.info("Deleted {} chunks", deletedChunks);
+
+        // 4. Delete batch prove requests where batch_index >= targetBatchIndex
+        var deletedProveRequests = rollupRepository.deleteBatchProveRequestsFrom(targetBatchIndex);
+        log.info("Deleted {} batch prove requests", deletedProveRequests);
+
+        // 5. Delete rollup reliable transactions (BATCH_COMMIT_TX, BATCH_TEE_PROOF_COMMIT_TX, BATCH_ZK_PROOF_COMMIT_TX)
+        var deletedRollupTxs = rollupRepository.deleteRollupReliableTransactionsFrom(targetBatchIndex);
+        log.info("Deleted {} rollup reliable transactions", deletedRollupTxs);
+
+        // 6. Delete L1 message reliable transactions where nonce > threshold
+        var deletedL1MsgTxs = rollupRepository.deleteL1MsgReliableTransactionsAboveNonce(l1MsgNonceThreshold);
+        log.info("Deleted {} L1 message reliable transactions", deletedL1MsgTxs);
+
+        // 7. Delete L2 Merkle trees where batch_index >= targetBatchIndex
+        var deletedMerkleTrees = l2MerkleTreeRepository.deleteMerkleTreesFrom(targetBatchIndex);
+        log.info("Deleted {} L2 Merkle trees", deletedMerkleTrees);
+
+        // 8. Reset L1 messages with nonce > threshold to MSG_READY state
+        var resetL1Msgs = mailboxRepository.resetL1MsgsAboveNonce(l1MsgNonceThreshold);
+        log.info("Reset {} L1 messages to MSG_READY state", resetL1Msgs);
+
+        // 9. Delete L2 messages for rollback
+        var deletedL2Msgs = mailboxRepository.deleteL2MsgsForRollback(targetBatchIndex, targetBlockHeight);
+        log.info("Deleted {} L2 messages", deletedL2Msgs);
+
+        // 10. Reset L2 messages to MSG_READY state for rollback
+        var resetL2Msgs = mailboxRepository.resetL2MsgsForRollback(targetBatchIndex, targetBlockHeight);
+        log.info("Reset {} L2 messages to MSG_READY state", resetL2Msgs);
+
+        // 11. Delete batch oracle requests (L2_BATCH_COMMIT, L2_BATCH_PROVE)
+        var deletedOracleRequests = oracleRepository.deleteBatchOracleRequestsFrom(targetBatchIndex);
+        log.info("Deleted {} batch oracle requests", deletedOracleRequests);
+
+        // 12. Delete L2 oracle batch fee feed transactions
+        var deletedOracleBatchFeeFeedTxs = rollupRepository.deleteOracleBatchFeeFeedTransactionsFrom(targetBatchIndex);
+        log.info("Deleted {} L2 oracle batch fee feed transactions", deletedOracleBatchFeeFeedTxs);
+
+        log.info("Rollback execution completed");
+    }
+
+    private String getTaskLockKey(BizTaskTypeEnum taskType) {
+        return String.format("relayer:task:%s", taskType.name());
+    }
+
+    private void clearCacheToRollback() {
+        log.info("Delete all keys for block traces: {}", redissonClient.getKeys().deleteByPattern("L2_BLOCK_TRACE@*"));
+        log.info("Delete all keys for chunks: {}", redissonClient.getKeys().deleteByPattern("L2_CHUNK@*"));
+        log.info("Delete all keys for batches: {}", redissonClient.getKeys().deleteByPattern("L2_BATCH@*"));
+        log.info("Delete all keys for merkle trees: {}", redissonClient.getKeys().deleteByPattern("L2_MERKLE_TREE-*"));
+        l2BlockTracesCacheForCurrChunk.clear();
     }
 }

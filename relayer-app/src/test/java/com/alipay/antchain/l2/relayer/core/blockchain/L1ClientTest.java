@@ -19,6 +19,8 @@ package com.alipay.antchain.l2.relayer.core.blockchain;
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.math.BigInteger;
+import java.net.SocketException;
+import java.net.SocketTimeoutException;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.Date;
@@ -32,22 +34,20 @@ import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.*;
 import com.alibaba.fastjson.JSON;
 import com.alipay.antchain.l2.relayer.TestBase;
-import com.alipay.antchain.l2.relayer.commons.enums.ChainTypeEnum;
-import com.alipay.antchain.l2.relayer.commons.enums.ProveTypeEnum;
-import com.alipay.antchain.l2.relayer.commons.enums.ReliableTransactionStateEnum;
-import com.alipay.antchain.l2.relayer.commons.enums.TransactionTypeEnum;
+import com.alipay.antchain.l2.relayer.commons.enums.*;
 import com.alipay.antchain.l2.relayer.commons.exceptions.*;
 import com.alipay.antchain.l2.relayer.commons.l2basic.BatchVersionEnum;
 import com.alipay.antchain.l2.relayer.commons.models.*;
 import com.alipay.antchain.l2.relayer.commons.utils.EthTxDecoder;
-import com.alipay.antchain.l2.relayer.config.BlockchainConfig;
 import com.alipay.antchain.l2.relayer.config.ContractConfig;
+import com.alipay.antchain.l2.relayer.config.ParentChainConfig;
 import com.alipay.antchain.l2.relayer.config.RollupConfig;
 import com.alipay.antchain.l2.relayer.core.blockchain.bpo.EthBlobForkConfig;
 import com.alipay.antchain.l2.relayer.core.blockchain.bpo.EthBpoBlobConfig;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.AcbFastRawTransactionManager;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.AcbRawTransactionManager;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.IGasPriceProvider;
+import com.alipay.antchain.l2.relayer.core.blockchain.helper.INonceManager;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.model.EthNoncePolicyEnum;
 import com.alipay.antchain.l2.relayer.core.blockchain.helper.model.GasLimitPolicyEnum;
 import com.alipay.antchain.l2.relayer.core.layer2.economic.NopeChecker;
@@ -66,6 +66,7 @@ import org.junit.Test;
 import org.redisson.api.RedissonClient;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.support.ResourcePatternResolver;
+import org.springframework.test.context.bean.override.convention.TestBean;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.web3j.abi.FunctionEncoder;
 import org.web3j.abi.datatypes.Function;
@@ -76,6 +77,7 @@ import org.web3j.protocol.core.DefaultBlockParameterName;
 import org.web3j.protocol.core.Request;
 import org.web3j.protocol.core.Response;
 import org.web3j.protocol.core.methods.response.*;
+import org.web3j.protocol.exceptions.ClientConnectionException;
 import org.web3j.tx.RawTransactionManager;
 import org.web3j.utils.Convert;
 import org.web3j.utils.Numeric;
@@ -115,7 +117,7 @@ public class L1ClientTest extends TestBase {
     @MockitoBean(name = "l1ChainId")
     private BigInteger l1ChainId;
 
-    @MockitoBean
+    @TestBean
     private RollupConfig rollupConfig;
 
     @MockitoBean
@@ -164,7 +166,13 @@ public class L1ClientTest extends TestBase {
     private RedissonClient redisson;
 
     @Resource
-    private BlockchainConfig blockchainConfig;
+    private ParentChainConfig parentChainConfig;
+
+    @Resource
+    private INonceManager l1BlobNonceManager;
+
+    @Resource
+    private INonceManager l1LegacyNonceManager;
 
     @Resource
     private ResourcePatternResolver resourcePatternResolver;
@@ -184,6 +192,8 @@ public class L1ClientTest extends TestBase {
     public void init() {
         when(rollupConfig.getGasPerChunk()).thenReturn(3000_0000);
         when(rollupConfig.getBatchCommitBlobSizeLimit()).thenReturn(4);
+        when(rollupConfig.getDaType()).thenReturn(DaType.BLOBS);
+        when(rollupConfig.getParentChainType()).thenReturn(ParentChainType.ETHEREUM);
 
         Request getCodeRequest = mock(Request.class);
         EthGetCode ethGetCode = new EthGetCode();
@@ -215,12 +225,12 @@ public class L1ClientTest extends TestBase {
         when(ethForkBlobConfig.getCurrConfig()).thenReturn(bpoConfig);
 
         var l1BlobPoolTxManager = l1NoncePolicy == EthNoncePolicyEnum.FAST ?
-                new AcbFastRawTransactionManager(l1Web3j, blockchainConfig.getL1BlobPoolTxSignService(), 123, redisson, ethForkBlobConfig, ChainTypeEnum.LAYER_ONE, rollupRepository)
-                : new AcbRawTransactionManager(l1Web3j, blockchainConfig.getL1BlobPoolTxSignService(), 123, redisson, ethForkBlobConfig);
+                new AcbFastRawTransactionManager(l1Web3j, parentChainConfig.getL1BlobPoolTxSignService(), 123, redisson, ethForkBlobConfig, l1BlobNonceManager)
+                : new AcbRawTransactionManager(l1Web3j, parentChainConfig.getL1BlobPoolTxSignService(), 123, redisson, ethForkBlobConfig, l1BlobNonceManager);
 
         var l1LegacyPoolTxManager = l1NoncePolicy == EthNoncePolicyEnum.FAST ?
-                new AcbFastRawTransactionManager(l1Web3j, blockchainConfig.getL1LegacyPoolTxSignService(), 123, redisson, ethForkBlobConfig, ChainTypeEnum.LAYER_ONE, rollupRepository)
-                : new AcbRawTransactionManager(l1Web3j, blockchainConfig.getL1LegacyPoolTxSignService(), 123, redisson, ethForkBlobConfig);
+                new AcbFastRawTransactionManager(l1Web3j, parentChainConfig.getL1LegacyPoolTxSignService(), 123, redisson, ethForkBlobConfig, l1LegacyNonceManager)
+                : new AcbRawTransactionManager(l1Web3j, parentChainConfig.getL1LegacyPoolTxSignService(), 123, redisson, ethForkBlobConfig, l1LegacyNonceManager);
 
         testClient = new L1Client(
                 l1Web3j, l1BlobPoolTxManager, l1LegacyPoolTxManager,
@@ -237,6 +247,9 @@ public class L1ClientTest extends TestBase {
         field = ReflectUtil.getField(L1Client.class, "redisson");
         field.setAccessible(true);
         field.set(testClient, redisson);
+        field = ReflectUtil.getField(L1Client.class, "daType");
+        field.setAccessible(true);
+        field.set(testClient, DaType.BLOBS);
         testClient.getBlobPoolTxManager().setTxHashVerifier(txHashVerifier);
         testClient.getLegacyPoolTxManager().setTxHashVerifier(txHashVerifier);
 
@@ -293,6 +306,7 @@ public class L1ClientTest extends TestBase {
         when(l1Web3j.ethSendRawTransaction(anyString())).thenReturn(ethSendRawTxReq);
         TransactionInfo result = testClient.commitBatch(batchWrapper1);
         Assert.assertEquals(txhash, result.getTxHash());
+
 
         var prevConfigVal = rollupEconomicStrategyConfig.getMidEip1559PriceLimit();
         rollupEconomicStrategyConfig.setMidEip1559PriceLimit(Convert.toWei("1", Convert.Unit.GWEI).toBigInteger());
@@ -1652,5 +1666,194 @@ public class L1ClientTest extends TestBase {
 
         Assert.assertThrows(RuntimeException.class,
                 () -> testClient.sendTransferValueTx(fromAddress, toAddress, nonce, value));
+    }
+
+    // ==================== Negative Test Cases ====================
+
+    /**
+     * Test network timeout during lastCommittedBatch call
+     */
+    @Test(expected = RuntimeException.class)
+    @SneakyThrows
+    public void testLastCommittedBatch_NetworkTimeout() {
+        Request mockRequest = mock(Request.class);
+        when(mockRequest.send()).thenThrow(new SocketTimeoutException("Connection timeout"));
+        when(l1Web3j.ethCall(any(), any())).thenReturn(mockRequest);
+
+        testClient.lastCommittedBatch();
+    }
+
+    /**
+     * Test socket exception during lastTeeVerifiedBatch call
+     */
+    @Test(expected = RuntimeException.class)
+    @SneakyThrows
+    public void testLastTeeVerifiedBatch_SocketException() {
+        Request mockRequest = mock(Request.class);
+        when(mockRequest.send()).thenThrow(new SocketException("Connection reset"));
+        when(l1Web3j.ethCall(any(), any())).thenReturn(mockRequest);
+
+        testClient.lastTeeVerifiedBatch();
+    }
+
+    /**
+     * Test client connection exception during lastZkVerifiedBatch call
+     */
+    @Test(expected = RuntimeException.class)
+    @SneakyThrows
+    public void testLastZkVerifiedBatch_ClientConnectionException() {
+        Request mockRequest = mock(Request.class);
+        when(mockRequest.send()).thenThrow(new ClientConnectionException("Unable to connect to Ethereum client"));
+        when(l1Web3j.ethCall(any(), any())).thenReturn(mockRequest);
+
+        testClient.lastZkVerifiedBatch();
+    }
+
+    /**
+     * Test contract revert with WARNING error
+     */
+    @Test
+    @SneakyThrows
+    public void testProcessFailedEthCall_WarningRevert() {
+        EthCall ethCall = new EthCall();
+        ethCall.setError(new Response.Error(3, "execution reverted: WARNING: batch already committed"));
+
+        try {
+            testClient.processFailedEthCall(ethCall, rollupContractAddress, "commitBatch");
+            Assert.fail("Should throw L1ContractWarnException");
+        } catch (L1ContractWarnException e) {
+            Assert.assertTrue(e.getMessage().contains("WARNING"));
+            log.info("✓ Contract WARNING revert handled correctly");
+        }
+    }
+
+    /**
+     * Test contract revert with INVALID_PERMISSION error
+     */
+    @Test
+    @SneakyThrows
+    public void testProcessFailedEthCall_InvalidPermissionRevert() {
+        EthCall ethCall = new EthCall();
+        ethCall.setError(new Response.Error(3, "execution reverted: INVALID_PERMISSION: caller is not relayer"));
+
+        try {
+            testClient.processFailedEthCall(ethCall, rollupContractAddress, "verifyBatch");
+            Assert.fail("Should throw L1ContractInvalidPermissionException");
+        } catch (L1ContractInvalidPermissionException e) {
+            Assert.assertTrue(e.getMessage().contains("INVALID_PERMISSION"));
+            log.info("✓ Contract INVALID_PERMISSION revert handled correctly");
+        }
+    }
+
+    /**
+     * Test contract revert with INVALID_PARAMETER error
+     */
+    @Test
+    @SneakyThrows
+    public void testProcessFailedEthCall_InvalidParameterRevert() {
+        EthCall ethCall = new EthCall();
+        ethCall.setError(new Response.Error(3, "execution reverted: INVALID_PARAMETER: batch index mismatch"));
+
+        try {
+            testClient.processFailedEthCall(ethCall, rollupContractAddress, "commitBatch");
+            Assert.fail("Should throw L1ContractInvalidParameterException");
+        } catch (L1ContractInvalidParameterException e) {
+            Assert.assertTrue(e.getMessage().contains("INVALID_PARAMETER"));
+            log.info("✓ Contract INVALID_PARAMETER revert handled correctly");
+        }
+    }
+
+    /**
+     * Test contract revert with serious ERROR
+     */
+    @Test
+    @SneakyThrows
+    public void testProcessFailedEthCall_SeriousErrorRevert() {
+        EthCall ethCall = new EthCall();
+        ethCall.setError(new Response.Error(3, "execution reverted: ERROR: critical state corruption"));
+
+        try {
+            testClient.processFailedEthCall(ethCall, rollupContractAddress, "verifyBatch");
+            Assert.fail("Should throw L1ContractSeriousException");
+        } catch (L1ContractSeriousException e) {
+            Assert.assertTrue(e.getMessage().contains("ERROR"));
+            log.info("✓ Contract serious ERROR revert handled correctly");
+        }
+    }
+
+    /**
+     * Test generic contract revert without specific error type
+     */
+    @Test
+    @SneakyThrows
+    public void testProcessFailedEthCall_GenericRevert() {
+        EthCall ethCall = new EthCall();
+        ethCall.setError(new Response.Error(3, "execution reverted: unknown error"));
+
+        try {
+            testClient.processFailedEthCall(ethCall, rollupContractAddress, "commitBatch");
+            Assert.fail("Should throw L2RelayerException");
+        } catch (L2RelayerException e) {
+            Assert.assertTrue(e.getMessage().contains("failed to local call"));
+            log.info("✓ Generic contract revert handled correctly");
+        }
+    }
+
+    /**
+     * Test queryTxReceipt with error response
+     */
+    @Test(expected = RuntimeException.class)
+    @SneakyThrows
+    public void testQueryTxReceipt_ErrorResponse() {
+        Request mockRequest = mock(Request.class);
+        EthGetTransactionReceipt errorResponse = new EthGetTransactionReceipt();
+        errorResponse.setError(new Response.Error(-32000, "Transaction not found"));
+        when(mockRequest.send()).thenReturn(errorResponse);
+        when(l1Web3j.ethGetTransactionReceipt(anyString())).thenReturn(mockRequest);
+
+        testClient.queryTxReceipt("0x1234567890abcdef");
+    }
+
+    /**
+     * Test queryTx with null transaction (not found)
+     */
+    @Test
+    @SneakyThrows
+    public void testQueryTx_TransactionNotFound() {
+        Request mockRequest = mock(Request.class);
+        EthTransaction ethTransaction = new EthTransaction();
+        ethTransaction.setResult(null);
+        when(mockRequest.send()).thenReturn(ethTransaction);
+        when(l1Web3j.ethGetTransactionByHash(anyString())).thenReturn(mockRequest);
+
+        org.web3j.protocol.core.methods.response.Transaction result = testClient.queryTx("0xnonexistent");
+        Assert.assertNull(result);
+        log.info("✓ Transaction not found handled correctly (returns null)");
+    }
+
+    /**
+     * Test queryAccountBalance with network error
+     */
+    @Test(expected = RuntimeException.class)
+    @SneakyThrows
+    public void testQueryAccountBalance_NetworkError() {
+        Request mockRequest = mock(Request.class);
+        when(mockRequest.send()).thenThrow(new ClientConnectionException("Connection refused"));
+        when(l1Web3j.ethGetBalance(anyString(), any())).thenReturn(mockRequest);
+
+        testClient.queryAccountBalance("0x863df6bfa4469f3ead0be8f9f2aae51c91a907b4", DefaultBlockParameterName.LATEST);
+    }
+
+    /**
+     * Test sendRawTx with IOException
+     */
+    @Test(expected = RuntimeException.class)
+    @SneakyThrows
+    public void testSendRawTx_IOException() {
+        Request mockRequest = mock(Request.class);
+        when(mockRequest.send()).thenThrow(new IOException("Network I/O error"));
+        when(l1Web3j.ethSendRawTransaction(anyString())).thenReturn(mockRequest);
+
+        testClient.sendRawTx(new byte[]{0x01, 0x02, 0x03});
     }
 }
