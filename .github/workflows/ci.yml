@@ -120,7 +120,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build & push Relayer image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: docker
           file: docker/Dockerfile-Relayer-Open
@@ -129,7 +129,7 @@ jobs:
           tags: ${{ steps.meta.outputs.relayer_tags }}
 
       - name: Build & push Query Service image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: docker
           file: docker/Dockerfile-QS-Open
