@@ -46,7 +46,7 @@
         <lombok.version>1.18.30</lombok.version>
         <redisson-spring.version>3.48.0</redisson-spring.version>
         <mysql-connector.version>8.0.33</mysql-connector.version>
-        <hutool.version>5.8.25</hutool.version>
+        <hutool.version>5.8.44</hutool.version>
         <junit.version>4.13.2</junit.version>
         <h2.version>2.2.224</h2.version>
         <embeded-redis.version>0.7.3</embeded-redis.version>
