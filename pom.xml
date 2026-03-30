@@ -58,7 +58,7 @@
         <spring-shell.version>3.4.1</spring-shell.version>
         <jasypt-starter.version>3.0.5</jasypt-starter.version>
         <fastjson.version>1.2.83_noneautotype</fastjson.version>
-        <web3j.version>4.13.0</web3j.version>
+        <web3j.version>5.0.2</web3j.version>
         <beacon-api.version>1.0.0</beacon-api.version>
         <jc-kzg-4844.version>1.0.0</jc-kzg-4844.version>
         <grpc-starter.version>3.1.0.RELEASE</grpc-starter.version>
